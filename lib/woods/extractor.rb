@@ -28,6 +28,7 @@ require_relative 'git_provenance'
 require_relative 'git_history'
 require_relative 'git_commit_table'
 require_relative 'git_enrichment_summary'
+require_relative 'schema_readability'
 require_relative 'temporal/snapshot_unit_facts'
 require_relative 'extractors/model_extractor'
 require_relative 'extractors/controller_extractor'
@@ -470,6 +471,12 @@ module Woods
     # @return [Array<Symbol>] extractor keys
     TABLE_CONSUMER_EXTRACTORS = %i[migrations database_views external_consumers].freeze
 
+    # Extractors whose units are read from the live database schema. A partial
+    # run that rewrites one while that schema cannot be read refuses.
+    #
+    # @return [Array<Symbol>] extractor keys
+    SCHEMA_READING_TYPES = %i[models database_tables database_views].freeze
+
     # Payload artifacts that live at the top of a payload directory rather
     # than inside a per-type directory. Used when seeding a payload from a
     # flat index — the output root also holds `generation.json`, `dumps/`,
@@ -599,6 +606,7 @@ module Woods
       # Eager load once — all extractors need loaded classes for introspection.
       profile_phase('eager load') { safe_eager_load! }
       profile_phase('component load') { load_runtime_discovery_files }
+      @schema_readability = profile_phase('schema readability') { read_schema_readability }
 
       # Phase 1: Extract all units
       profile_phase('extraction') do
@@ -832,6 +840,9 @@ module Woods
         touched.merge(extract_unitless_poro_files(affected_types))
       end
 
+      # Ahead of the extraction-failure refusal: an unreadable database is
+      # the cause of the model failures it would report.
+      raise_on_unreadable_schema!(affected_types)
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
       touched.merge(profile_phase('doc references') { enrich_doc_references_incremental(affected_types) })
@@ -894,6 +905,7 @@ module Woods
       known.uniq!
 
       prepare_incremental_run(operation: 'refresh')
+      raise_on_unreadable_schema!(known)
       affected_types = Set.new
       touched = known.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
@@ -1077,6 +1089,7 @@ module Woods
       reset_git_capture
       baseline_manifest = ensure_supported_incremental_writer!
       @baseline_extraction_config = baseline_extraction_config(baseline_manifest)
+      @baseline_schema_readability = baseline_manifest&.fetch(SchemaReadability::MANIFEST_KEY, nil)
       profile_phase('source capture') { begin_source_inputs(operation) }
       profile_phase('payload seed') { begin_payload!(strict: true) }
       graph_path = payload_dir.join('dependency_graph.json')
@@ -1407,6 +1420,28 @@ module Woods
             'the previous generation remains active. Fix the logged source errors and retry the complete batch.'
     end
 
+    # A partial run that rewrites models, table or view units reads them from
+    # the live database. When it cannot read that database now, publishing
+    # would empty those units under a manifest that carries the baseline's
+    # readable record; the run refuses instead. Runs that touch none of them
+    # keep going. A refresh names its types up front and asks before any
+    # extractor runs; an incremental run asks once it knows what it rewrote.
+    #
+    # @param types [Enumerable<Symbol>] extractor keys the run rewrites
+    # @return [void]
+    # @raise [Woods::ExtractionError] when the live schema is unreadable
+    def raise_on_unreadable_schema!(types)
+      return if (types.to_a & SCHEMA_READING_TYPES).empty?
+
+      summary = SchemaReadability.build(Extractors::TableCatalog.schema_readability)
+      return unless summary['state'] == SchemaReadability::UNREADABLE
+
+      raise Woods::ExtractionError,
+            "The database schema cannot be read now (#{SchemaReadability.causes(summary)}); publishing would " \
+            'leave the models and table units this run re-extracted without columns. The previous generation ' \
+            'remains active. Prepare the database (bin/rails db:prepare) and retry.'
+    end
+
     def write_source_inputs
       return unless @source_inputs
 
@@ -1502,7 +1537,7 @@ module Woods
     rescue Generation::InvalidMarker => e
       raise Woods::ExtractionError,
             "#{e.message} (#{File.join(@output_dir.to_s, Generation::FILENAME)}); refusing to publish a new " \
-            'generation over it. Restore it to name the newest retained payloads/gen-<n>, then retry'
+            "generation over it. #{Generation::RESTORE_ADVICE}"
     end
 
     # @return [Boolean] whether a full extraction may publish flat when no payload directory opens
@@ -3342,6 +3377,23 @@ module Woods
       )
     end
 
+    # Whether every database a concrete model reads could be read, for the
+    # manifest. An unreadable one is warned about here, once per run, with
+    # the connection errors the manifest leaves out.
+    #
+    # @return [Hash] {SchemaReadability.build} for this run
+    def read_schema_readability
+      databases = Extractors::TableCatalog.schema_readability
+      summary = SchemaReadability.build(databases)
+      warning = SchemaReadability.warning(summary)
+      return summary unless warning
+
+      errors = databases.select { |database| database[:error] }
+                        .map { |database| "#{database[:name] || 'default'}: #{database[:error]}" }
+      Rails.logger.warn("[Woods] #{warning}#{" Connection errors: #{errors.join('; ')}." unless errors.empty?}")
+      summary
+    end
+
     def write_manifest(incremental: false)
       # Preserve the run capture and the existing fallback acquisition order.
       provenance = git_capture.provenance || GitProvenance.new(root: Rails.root).to_h
@@ -3363,6 +3415,7 @@ module Woods
       lock_digest = gemfile_lock_sha
       schema_digest = schema_sha
       extraction_config = incremental ? @baseline_extraction_config : Woods.configuration.extraction_fingerprint
+      schema_readability = incremental ? @baseline_schema_readability : @schema_readability
       enrichment = git_capture.enrichment_summary(graph: @dependency_graph, full: !incremental)
       filter_available = GitSourceFilter.new(root: Rails.root).available?
 
@@ -3372,7 +3425,7 @@ module Woods
         extracted_at: extracted_at, woods_version: woods_version, rails_version: rails_version,
         ruby_version: ruby_version, gemfile_lock_sha: lock_digest, schema_sha: schema_digest,
         extractor_timings: extractor_timings, woods_build: BuildIdentity.current.manifest_fields,
-        root: File.expand_path(Rails.root.to_s)
+        root: File.expand_path(Rails.root.to_s), schema_readability: schema_readability
       )
 
       AtomicFile.write(

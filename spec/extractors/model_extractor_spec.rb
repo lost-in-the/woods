@@ -603,6 +603,69 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(scopes.size).to eq(1)
       expect(scopes[0][:name]).to eq('active')
     end
+
+    # The live class is the evidence a scope is the model's; without one, or
+    # from source alone, every declaration stays a static candidate.
+    describe 'given the model' do
+      let(:source) do
+        <<~RUBY
+          module Shop
+            class Order < ApplicationRecord
+              scope :placed, -> { where(placed: true) }
+
+              class Line < ApplicationRecord
+                scope :priced, -> { where.not(price: nil) }
+              end
+
+              if false
+                scope :dormant, -> { none }
+              end
+
+              def install
+                self.class.scope(:late, -> { all })
+              end
+            end
+          end
+        RUBY
+      end
+
+      def scopes_of(name, text = source)
+        scopes = extractor.send(:extract_scopes, double('Model', name: name), text)
+        scopes.to_h { |scope| [scope[:name], scope[:confidence]] }
+      end
+
+      it 'lists the scopes declared in the model’s own body, not a nested model’s' do
+        expect(scopes_of('Shop::Order').keys).to contain_exactly('placed', 'dormant', 'late')
+      end
+
+      it 'lists a nested model’s own scopes on that model' do
+        expect(scopes_of('Shop::Order::Line').keys).to eq(['priced'])
+      end
+
+      it 'marks a scope the live class does not answer as static' do
+        expect(scopes_of('Shop::Order').values).to all(eq('static'))
+      end
+
+      # `class Ledger::Order` inside `module Shop` names Ledger from another
+      # file, so no declaration here is known to be the model, and no scope
+      # can be ruled another class's either.
+      it 'keeps every scope, static, when no declaration in the file spells the model’s name' do
+        qualified = "module Shop\n  class Ledger::Order < ApplicationRecord\n    scope :placed, -> { all }\n\n    " \
+                    "class Line < ApplicationRecord\n      scope :priced, -> { all }\n    end\n  end\nend\n"
+
+        expect(scopes_of('Ledger::Order', qualified)).to eq('placed' => 'static', 'priced' => 'static')
+      end
+
+      it 'marks every scope the regex fallback finds static, since it cannot see an owner' do
+        broken = "class Order < ApplicationRecord\n  scope :placed, -> { where(placed: true) }\n  def broken(\nend\n"
+
+        expect(scopes_of('Order', broken)).to eq('placed' => 'static')
+      end
+
+      it 'marks scopes read without a model static' do
+        expect(extractor.send(:extract_scopes, nil, source).map { |scope| scope[:confidence] }.uniq).to eq(['static'])
+      end
+    end
   end
 
   # ── source_file_for ────────────────────────────────────────────────

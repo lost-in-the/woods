@@ -742,12 +742,23 @@ module Woods
       end
 
       # Extract scopes with their source if available.
-      # Parses the full source with the AST layer to get accurate scope
-      # boundaries, falling back to regex line-scanning on parse failure.
+      # Parses the full source to find each +scope+ call and the class body
+      # it is written in, falling back to regex line-scanning on parse
+      # failure.
       #
-      # @param model [Class]
+      # A scope written in another class's body (a model nested in this
+      # file) is that class's and is left out, when the file declares the
+      # model under its own name. Each entry's +confidence+
+      # uses the source-reference vocabulary: +verified+ when the scope is
+      # declared in the model's own class body and the live class answers
+      # its name as an Active Record scope ({#live_scope?}); +static+ for
+      # every other declaration: dead code, a method body that never ran,
+      # an unknown owner, the regex fallback, or no model to ask. The live
+      # check cannot tell which call defined the name.
+      #
+      # @param model [Class, nil]
       # @param source [String, nil]
-      # @return [Array<Hash>]
+      # @return [Array<Hash>] `{ name:, source:, confidence: }`
       def extract_scopes(model, source = nil)
         if source.nil?
           source_path = source_file_for(model)
@@ -759,48 +770,142 @@ module Woods
         lines = source.lines
 
         begin
-          parser = Ast::Parser.new
-          root = parser.parse(source)
-          extract_scopes_from_ast(root, lines)
+          parsed = Woods::ParseCache.parse(source)
+          parsed.success? ? extract_scopes_from_ast(parsed.value, source, lines, model) : extract_scopes_by_regex(lines)
         rescue StandardError
           extract_scopes_by_regex(lines)
         end
       end
 
-      # Extract scopes using AST node line spans for accurate boundaries.
+      # Extract scopes using Prism node spans for accurate boundaries and
+      # the lexical owner of each call (the innermost class or module whose
+      # body holds it).
       #
-      # @param root [Ast::Node] Parsed AST root
+      # @param root [Prism::Node] Parsed program
+      # @param source [String] the source +root+ was parsed from
       # @param lines [Array<String>] Source lines
+      # @param model [Class, nil]
       # @return [Array<Hash>]
-      def extract_scopes_from_ast(root, lines)
-        scope_nodes = root.find_all(:send).select { |n| n.method_name == 'scope' }
-
-        scope_nodes.filter_map do |node|
-          name = node.arguments&.first&.to_s&.delete_prefix(':')&.strip
+      def extract_scopes_from_ast(root, source, lines, model)
+        owners = SourceNesting.lexical_scopes(source) || []
+        # A declaration spelled differently from Ruby's name (`class Shop::Order`
+        # inside `module Shop`) cannot be told apart from another class.
+        declared = model && owners.any? { |_, _, owner| owner == model.name }
+        scope_calls(root).filter_map do |call|
+          name = call.arguments&.arguments&.first&.slice&.delete_prefix(':')&.strip
           next if name.nil? || name.empty?
 
-          if node.line && node.end_line
-            start_idx = node.line - 1
-            end_idx = node.end_line - 1
-            scope_source = lines[start_idx..end_idx].join
-          elsif node.line
-            scope_source = lines[node.line - 1]
-          else
-            next
-          end
+          offset = call.location.start_offset
+          owner = owners.select { |start, finish, _| start <= offset && offset < finish }.last&.last
+          next if declared && owner && owner != model.name
 
-          { name: name, source: scope_source }
+          last_line = call.block.is_a?(Prism::BlockNode) ? call.location.start_line : call.location.end_line
+          verified = model && owner == model.name && live_scope?(model, name)
+          { name: name, source: lines[(call.location.start_line - 1)..(last_line - 1)].join,
+            confidence: verified ? 'verified' : 'static' }
         end
       end
 
-      # Fallback: extract scopes by regex when AST parsing fails.
+      # Every call named +scope+, in source order.
+      #
+      # @param root [Prism::Node]
+      # @return [Array<Prism::CallNode>]
+      def scope_calls(root)
+        calls = []
+        pending = [root]
+        while (node = pending.pop)
+          calls << node if node.is_a?(Prism::CallNode) && node.name == :scope
+          pending.concat(node.compact_child_nodes.reverse)
+        end
+        calls
+      end
+
+      # Where Active Record defines a scope's class method; an enum's value
+      # scopes share it.
+      SCOPE_DEFINITION_SITE = %r{/active_record/scoping/named\.rb\z}
+      private_constant :SCOPE_DEFINITION_SITE
+
+      # Whether the live class answers +name+ as a scope of its own: a class
+      # method defined on the model's singleton class at Active Record's
+      # scope definition site, and not one an enum generated. Nothing is
+      # called. A class method of the same name, or a scope inherited from a
+      # parent, is not the declaration's.
+      #
+      # @param model [Class]
+      # @param name [String]
+      # @return [Boolean]
+      def live_scope?(model, name)
+        scope_site?(model, name) && !enum_scope?(model, name)
+      end
+
+      # @param model [Class]
+      # @param name [String]
+      # @return [Boolean] true when +name+ is a scope Active Record defined on +model+ itself
+      def scope_site?(model, name)
+        method = model.method(name)
+        method.owner == model.singleton_class && SCOPE_DEFINITION_SITE.match?(method.source_location&.first.to_s)
+      rescue NameError
+        false
+      end
+
+      # Whether an enum generated the scope +name+. An enum defines the
+      # scopes +V+ and +not_V+ for every value, +V+ carrying its prefix and
+      # suffix, or none of them (+scopes: false+). So +name+ is the enum's
+      # only when the whole family it belongs to answers as scopes; an
+      # explicit scope beside a scopeless enum leaves the family incomplete.
+      # From Rails 6.1 a value that is not a Ruby name also defines its
+      # method-friendly alias (+in-progress+ defines +in_progress+), so the
+      # aliases form a family too.
+      #
+      # @param model [Class]
+      # @param name [String]
+      # @return [Boolean]
+      def enum_scope?(model, name)
+        return false unless model.respond_to?(:defined_enums)
+
+        values = [name, name.delete_prefix('not_')].uniq
+        model.defined_enums.each_value.any? do |mapping|
+          labels = mapping.keys.map(&:to_s)
+          [labels, labels.map { |label| label.gsub(ENUM_ALIAS_CHARACTERS, '_') }.uniq].uniq.any? do |spellings|
+            enum_families(values, spellings).any? do |family|
+              family.all? { |value| scope_site?(model, value) && scope_site?(model, "not_#{value}") }
+            end
+          end
+        end
+      end
+
+      # The characters Active Record replaces with +_+ in an enum value's
+      # method-friendly alias.
+      ENUM_ALIAS_CHARACTERS = /[\W&&[:ascii:]]+/
+      private_constant :ENUM_ALIAS_CHARACTERS
+
+      # The value names an enum with +labels+ would give its scopes, for
+      # each prefix and suffix under which one of +values+ is such a name.
+      #
+      # @param values [Array<String>]
+      # @param labels [Array<String>]
+      # @return [Array<Array<String>>]
+      def enum_families(values, labels)
+        values.product(labels).flat_map do |value, label|
+          (0..(value.length - label.length)).select { |at| value[at, label.length] == label }.map do |at|
+            prefix = value[0, at]
+            suffix = value[(at + label.length)..]
+            labels.map { |other| "#{prefix}#{other}#{suffix}" }
+          end
+        end.uniq
+      end
+
+      # Fallback: extract scopes by regex when AST parsing fails. A line scan
+      # cannot see which class a scope belongs to, so none is verified.
       #
       # @param lines [Array<String>] Source lines
       # @return [Array<Hash>]
       def extract_scopes_by_regex(lines)
         scopes = []
         lines.each do |line|
-          scopes << { name: ::Regexp.last_match(1), source: line } if line =~ /\A\s*scope\s+:(\w+)/
+          if line =~ /\A\s*scope\s+:(\w+)/
+            scopes << { name: ::Regexp.last_match(1), source: line, confidence: 'static' }
+          end
         end
         scopes
       end

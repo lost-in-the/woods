@@ -235,7 +235,8 @@ The server reads the client root through the mount and compares that checkout wi
 
 **Recommended mount: the directory that holds every worktree.**
 Mount the worktrees' parent (here `/Users/you/src/shop-worktrees` at `/worktrees`),
-and run the container in its checkout under that mount (`working_dir: /worktrees/shop`).
+and run the container in its checkout under that mount (`working_dir: /worktrees/shop`; for an application below
+the checkout root, its directory there).
 The map is a fact about the mount, so it is the same for every session:
 
 | Session directory | Read in the container as | Result |
