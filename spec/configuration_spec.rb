@@ -60,51 +60,8 @@ RSpec.describe Woods::Configuration do
       expect(config.session_tracer_allow_production).to eq(false)
     end
 
-    it 'keeps HTTP available by default when the Console master switch is enabled' do
-      expect(config.console_mcp_http_enabled).to be(true)
-      config.console_mcp_http_enabled = false
-      expect(config.console_mcp_http_enabled).to be(false)
-    end
-
-    it 'sets console_mcp_enabled to false' do
-      expect(config.console_mcp_enabled).to eq(false)
-    end
-
     it 'sets notion_export_column_defaults to false' do
       expect(config.notion_export_column_defaults).to eq(false)
-    end
-
-    it 'sets console_embedded_read_tools to false' do
-      expect(config.console_embedded_read_tools).to eq(false)
-    end
-
-    it 'seeds console_redacted_columns with the secure default list' do
-      expect(config.console_redacted_columns).to eq(Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS)
-    end
-
-    it 'returns a mutable copy of DEFAULT_CONSOLE_REDACTED_COLUMNS (so host app edits do not leak globally)' do
-      config.console_redacted_columns << 'custom_secret'
-      expect(Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS).not_to include('custom_secret')
-    end
-
-    it 'covers widely-used credential column names by default' do
-      expect(config.console_redacted_columns).to include(
-        'password', 'password_digest', 'encrypted_password',
-        'otp_secret', 'reset_password_token', 'access_token',
-        'refresh_token', 'api_key', 'client_secret', 'private_key'
-      )
-    end
-
-    it 'sets console_redacted_key_values to empty array' do
-      expect(config.console_redacted_key_values).to eq([])
-    end
-
-    it 'sets console_blocked_tables to DEFAULT_CONSOLE_BLOCKED_TABLES' do
-      expect(config.console_blocked_tables).to eq(Woods::DEFAULT_CONSOLE_BLOCKED_TABLES)
-    end
-
-    it 'sets console_disabled_scanner_patterns to empty array' do
-      expect(config.console_disabled_scanner_patterns).to eq([])
     end
   end
 
@@ -122,30 +79,49 @@ RSpec.describe Woods::Configuration do
     end
   end
 
-  describe 'console MCP configuration' do
-    it 'allows setting console_embedded_read_tools' do
-      config.console_embedded_read_tools = true
-      expect(config.console_embedded_read_tools).to eq(true)
+  describe 'settings of the Console removed in 2.2.0' do
+    switches = %i[console_mcp_enabled console_embedded_read_tools]
+
+    switches.each do |name|
+      it "raises the removal message when #{name} is set to turn the Console on" do
+        [true, 'true', 1].each do |value|
+          expect { config.public_send(:"#{name}=", value) }
+            .to raise_error(Woods::ConfigurationError, Woods::Console::REMOVED_MESSAGE)
+        end
+      end
+
+      it "accepts #{name} set to false or nil, silently, and reads it as nil" do
+        expect do
+          config.public_send(:"#{name}=", false)
+          config.public_send(:"#{name}=", nil)
+        end.not_to output.to_stderr
+        expect(config.public_send(name)).to be_nil
+      end
     end
 
-    it 'allows setting console_mcp_enabled' do
-      config.console_mcp_enabled = true
-      expect(config.console_mcp_enabled).to eq(true)
+    %i[console_mcp_http_enabled console_mcp_path console_mcp_token console_mcp_allowed_origins
+       console_redacted_columns console_redacted_key_values console_sql_default_limit console_sql_max_limit
+       console_blocked_tables console_disabled_scanner_patterns console_credential_defense_enabled
+       console_credential_rotation_warning console_unsafe_eval_enabled console_unsafe_eval_confirmation
+       console_unsafe_eval_audit_log_path].each do |name|
+      it "accepts and ignores #{name}, silently, whatever its value" do
+        expect do
+          [true, false, nil, 'value', %w[value], 1].each { |value| config.public_send(:"#{name}=", value) }
+        end.not_to output.to_stderr
+        expect(config.public_send(name)).to be_nil
+      end
     end
 
-    it 'allows setting console_blocked_tables' do
-      config.console_blocked_tables = %w[authorizations credentials]
-      expect(config.console_blocked_tables).to eq(%w[authorizations credentials])
-    end
-
-    it 'allows setting console_disabled_scanner_patterns' do
-      config.console_disabled_scanner_patterns = %i[stripe_publishable_key]
-      expect(config.console_disabled_scanner_patterns).to eq(%i[stripe_publishable_key])
-    end
-
-    it 'accepts the :all sentinel in console_disabled_scanner_patterns' do
-      config.console_disabled_scanner_patterns = %i[all]
-      expect(config.console_disabled_scanner_patterns).to eq(%i[all])
+    it 'keeps an initializer that turns the Console off, or extends its old defaults, booting' do
+      expect do
+        Woods::Configuration.new.tap do |off|
+          off.console_mcp_enabled = false
+          off.console_mcp_http_enabled = false
+          off.console_mcp_token = 'a' * 64
+          off.console_blocked_tables = Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[payments]
+          off.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[ssn]
+        end
+      end.not_to output.to_stderr
     end
   end
 

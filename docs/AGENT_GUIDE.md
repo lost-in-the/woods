@@ -293,28 +293,6 @@ The normal packaged server registers 16 tools:
 
 Source inventory contains conditional tools for sessions, pipeline operation, feedback, snapshots, and Notion. Do not call or promise them unless they appear in the connected server's tool list and their backing collaborator is configured.
 
-## Console Server boundaries
-
-Console MCP is live-data access, not another code-search mode. Use it only when the user has authorized that environment and question.
-
-The default executable registers:
-
-- health/schema: `console_status`, `console_schema`;
-- bounded records: `console_find`, `console_recent`, `console_sample`;
-- projections/counts: `console_pluck`, `console_count`, `console_aggregate`, `console_association_count`.
-
-`console_sql` and `console_query` appear only when embedded read tools are explicitly enabled. Tier 2 and Tier 3 inventory schemas and `console_eval` are not callable in supported packaged modes.
-
-Before every Console call:
-
-1. confirm the authorized environment;
-2. use the narrowest model, fields, filters, and limit;
-3. avoid retrieving sensitive columns when aggregates or counts answer the question;
-4. treat redaction and scanners as defense in depth, not permission;
-5. do not work around a block or validation error.
-
-See [Console MCP setup](CONSOLE_MCP_SETUP.md) for the safety model.
-
 ## Report evidence clearly
 
 When answering from Woods:
@@ -346,7 +324,6 @@ Verification: <source/test/history checked or still needed>
 | Treating no result as proof of absence | Check status, generation, extractor coverage, and source |
 | Traversing deeply from the start | Begin at depth 1 or 2 and filter |
 | Calling inventory-only tools | Use the connected server's registered list |
-| Using Console for code structure | Use Index tools |
 | Asking for `limit` on retrieval | Use `budget` |
 | Trusting graph edges as execution order | Verify conditions and order in source/tests |
 | Changing MCP or credentials while answering | Report the missing capability and ask the owner |

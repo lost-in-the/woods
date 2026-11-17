@@ -79,9 +79,9 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'json', '>= 2.19.9', '< 3'
   spec.add_dependency 'msgpack', '>= 1.8.2', '< 2'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
-  # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
-  # Prism vs the parser gem — this dep guarantees the Prism path on the lower
-  # Ruby range so the guard's behavior stays consistent across the support matrix.
+  # Woods::Ast::Parser auto-detects Prism vs the parser gem — this dep
+  # guarantees the Prism path on the lower Ruby range so parsing stays
+  # consistent across the support matrix.
   spec.add_dependency 'prism', '~> 1.4'
   # Floor is Rails 6.0: Woods runs cleanly on the 6.0 series (extraction + index
   # MCP serving). The only 6.1-introduced APIs touched (connection_db_config,

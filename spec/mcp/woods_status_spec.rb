@@ -129,10 +129,6 @@ RSpec.describe 'woods_status tool' do
       )
     end
 
-    it 'omits console_mcp_enabled (always wrong — index MCP cannot see Rails-side config)' do
-      expect(status[:features]).not_to have_key(:console_mcp_enabled)
-    end
-
     it 'reports bootstrap=nil when no BootstrapState is passed (backwards compat)' do
       expect(status[:bootstrap]).to be_nil
     end

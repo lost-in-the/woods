@@ -123,7 +123,12 @@ For example:
 
 > Use Woods to find `Order`, inspect its resolved callbacks and associations, and list the first two levels of code that depend on it. Cite the Woods identifiers you used.
 
-The Index schema inventory totals 31 schemas. Fifteen register as tools in a normal packaged launch; `codebase_retrieve` is among them but needs embeddings in the default semantic mode, or explicit [lexical retrieval](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) over extraction output. The other structural tools work immediately. See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
+The Index schema inventory totals 32 schemas.
+Sixteen register as tools in a normal packaged launch; `codebase_retrieve` is among them but needs embeddings in the
+default semantic mode, or explicit [lexical retrieval](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) over
+extraction output.
+The other structural tools work immediately.
+See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
 
 ## Optional next steps
 
@@ -172,20 +177,9 @@ The watcher maintains the structural index. If semantic retrieval is enabled, al
 
 On Rails 8.1, `config/ci.rb` can refresh the index before any gate that reads it: `step "Woods: refresh", "bin/rails woods:incremental"`. With the Claude Code plugin installed, an opt-in `PostToolUse` hook refreshes the index after graph-changing edits and an opt-in `SessionStart` hook warns about source-content drift or unknown evidence; set `WOODS_HOOKS_ENABLED=1` to turn them on. See [Watch daemon](WATCH_DAEMON.md#hooks-for-agent-sessions).
 
-### The Console Server (deprecated)
+### Live data
 
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-For a runtime observation in development, use `bin/rails runner` or a focused spec.
-For live data, use an agent owned by the application, with its own limited permissions.
-See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
-
-The rest of this section is for an existing Console setup.
-The Console Server is separate from the Index Server.
-It boots Rails and can read live model data.
-Review its allowlists, blocked tables, credential scanning, redaction, SQL validation, and environment boundary
-in [Console MCP setup](CONSOLE_MCP_SETUP.md).
-The default surface is nine tools; `console_sql` and `console_query` require an explicit read-tools opt-in.
+Woods no longer offers live data access; see [Console removed](CONSOLE_REMOVED.md).
 
 ## First-run problems
 

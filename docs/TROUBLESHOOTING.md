@@ -14,12 +14,11 @@ This guide covers the most common problems encountered when installing, extracti
 | `Connection refused (localhost:11434)` | Ollama not running | `ollama serve` |
 | `Connection refused (localhost:6333)` | Qdrant not running | Start Qdrant container |
 | Qdrant private/loopback URL rejected | SSRF guard is working | Add `allow_private_hosts: true` only for a deliberately trusted endpoint |
-| Missing `console_sql` / `console_query` | Read tools disabled | Enable `console_embedded_read_tools` |
 | `database is locked` | SQLite concurrent access | Run one extraction at a time |
 | `Dimension mismatch` | Embedding model changed | Full re-index: extract + embed |
 | `401 Unauthorized` (Notion) | Invalid API token | Check `NOTION_API_TOKEN` env var |
 | `404 Not Found` (Notion) | Wrong database ID | Verify ID + integration access |
-| `broken pipe` (Docker console) | Missing `-i` flag | Add `-i` to docker exec args |
+| `broken pipe` (Docker) | Missing `-i` flag | Add `-i` to docker exec args |
 | `No such container` | Wrong container name | Check with `docker ps --format '{{.Names}}'` |
 | `JSON parse errors` (MCP) | Rails boot noise on stdout | Remove `puts` calls from initializers |
 | Query timeout | Large table, no scope | Add scope conditions to narrow results |
@@ -717,43 +716,19 @@ bundle install
 which woods-mcp-start
 ```
 
-3. For the Console Server, run the rake task directly to see error output:
-
-```bash
-bundle exec rake woods:console
-# Should hang waiting for MCP protocol input: if it exits, check the error
-```
-
----
-
-### A console inventory tool is not listed
-
-**Symptom:** A tool from the 31-schema inventory is absent from `tools/list`.
-
-**Cause:** Supported servers advertise only executable tools: 9 Tier 1 tools by
-default, plus SQL/query when explicitly enabled.
-
-**Fix:** Enable `console_embedded_read_tools` for `console_sql` and
-`console_query`. Tier 2, Tier 3, and eval remain inventory only.
-
 ---
 
 ### MCP client shows JSON parse errors
 
 **Symptom:** The MCP client reports protocol errors, malformed JSON, or unexpected tokens.
 
-**Cause:** Rails boot emits output to stdout (OpenTelemetry notices, gem warnings, initializer `puts` calls). The `woods:console` rake task redirects stdout to stderr before Rails boots, but custom initializers that print output before this capture can break the MCP protocol.
+**Cause:** Rails boot emits output to stdout (OpenTelemetry notices, gem warnings, initializer `puts` calls).
+Output that reaches stdout before the server takes over can break the MCP protocol.
 
 **Fix:**
 
 1. Check for `puts` or `print` calls in your `config/initializers/` files that run at boot.
 2. Use `Rails.logger` instead of `puts` in initializers.
-3. Test by running the rake task and isolating streams:
-
-```bash
-bundle exec rake woods:console 2>/dev/null
-# MCP protocol output (stdout) should be valid JSON-RPC
-```
 
 ---
 
@@ -782,23 +757,6 @@ bundle exec rake woods:console 2>/dev/null
 1. Check server stderr for crash output.
 2. Run the configured command manually from the same `cwd` and inspect stderr. `woods-mcp-start` validates the index before launch but does not restart a crashed server.
 3. For Docker setups, ensure the container stays running: `docker compose exec -d app tail -f /dev/null` keeps it alive.
-
----
-
-### Console queries time out on large tables
-
-**Symptom:** `console_count` or `console_sample` times out with an error mentioning statement timeout.
-
-**Cause:** Where the adapter supports it, Woods attempts a 5000ms (5 seconds) statement timeout. Large tables without a scope condition can exceed it. SQLite has no supported per-statement timeout; see the [adapter table](CONSOLE_MCP_SETUP.md#statement-timeout).
-
-**Fix:** Add scope conditions to narrow the result set:
-
-```
-console_count(model: "Order", scope: { status: "pending" })
-console_sample(model: "Order", scope: { created_at_gteq: "2025-01-01" })
-```
-
-Scope keys are flat, Ransack-style predicates (`_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`) suffixed onto a column name, `scope: { created_at: { gte: "..." } }` (a nested hash) is rejected. A plain key with no suffix (`status: "pending"`) is an equality match.
 
 ---
 
@@ -1035,7 +993,7 @@ Then re-run extraction. Prefer `docker compose exec app bundle exec rake woods:v
 
 ---
 
-### Console server exits immediately with "broken pipe"
+### MCP server exits immediately with "broken pipe"
 
 **Symptom:** The MCP client reports a broken pipe or immediate disconnection when using Docker.
 
@@ -1046,10 +1004,10 @@ Then re-run extraction. Prefer `docker compose exec app bundle exec rake woods:v
 ```json
 {
   "mcpServers": {
-    "codebase-console": {
+    "codebase": {
       "command": "docker",
       "args": ["compose", "exec", "-T", "app",
-               "bundle", "exec", "rake", "woods:console"],
+               "bundle", "exec", "woods-mcp", "/app/tmp/woods"],
       "cwd": "/absolute/host/path/to/app"
     }
   }
@@ -1062,7 +1020,8 @@ Then re-run extraction. Prefer `docker compose exec app bundle exec rake woods:v
 
 **Symptom:** `docker exec` fails with `Error response from daemon: No such container: my_app_web_1`.
 
-**Cause:** The container name in your `.mcp.json` or `console.yml` doesn't match the actual running container name. Docker Compose generates names following the pattern `<project>-<service>-<index>`.
+**Cause:** The container name in your `.mcp.json` doesn't match the actual running container name.
+Docker Compose generates names following the pattern `<project>-<service>-<index>`.
 
 **Fix:** Find the exact name:
 

@@ -815,18 +815,12 @@ namespace :woods do
     end
   end
 
-  desc 'Deprecated, removed in Woods 3.0. Start the embedded console MCP server (stdio transport)'
+  desc 'Removed in Woods 2.2.0: the Console MCP server no longer exists (see docs/CONSOLE_REMOVED.md)'
   task :console do
-    # Capture stdout before Rails boot to keep MCP protocol clean.
-    # Rails boot emits OpenTelemetry, gem warnings, etc. to stdout —
-    # MCP client cannot parse these as JSON-RPC.
-    # Global variable passes the fd to exe/woods-console via load.
-    $woods_protocol_out = $stdout.dup # rubocop:disable Style/GlobalVars
-    $stdout.reopen($stderr)
+    require 'woods/console'
 
-    Rake::Task[:environment].invoke
-
-    load File.expand_path('../../exe/woods-console', __dir__)
+    warn Woods::Console::REMOVED_MESSAGE
+    exit 1
   end
 
   desc 'Deprecated: use woods:markdown. Sync extraction data to Notion databases (Data Models + Columns)'

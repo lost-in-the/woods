@@ -119,12 +119,9 @@ exactly which HTTP verbs and paths map to which actions. URL → code is always 
 **Dependency graph.** 42 extractors build a bidirectional graph: what each unit depends on,
 and what depends on it. Change `Auditable` and you can trace every model affected.
 
-**Two MCP servers.** The Index Server defines 31 schemas and registers 15 in the normal
-packaged launch; it reads pre-extracted JSON without booting Rails. The Console Server
-has a 31-schema inventory but registers 9 tools by default, or 11 with explicit embedded
-read tools, and bridges to a live Rails process for bounded database queries.
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
+**One MCP server.** The Index Server defines 32 schemas and registers 16 in the normal
+packaged launch; it reads pre-extracted JSON without booting Rails.
+The Console MCP server was removed in Woods 2.2.0. See [CONSOLE_REMOVED.md](CONSOLE_REMOVED.md).
 
 ```bash
 # What you get after extraction
@@ -163,7 +160,7 @@ Woods is not a universal fit. Skip it when:
 
 - **You're not building in Rails.** Woods leans hard on `ActiveRecord::Base.descendants`, `Rails.application.routes`, and reflection APIs, the value dries up outside Rails. For Django, Phoenix, or non-framework Ruby, other tools are a better fit.
 - **You need static analysis without booting.** Extraction requires a booted Rails environment because runtime introspection is the whole point. If your constraint is "can't boot the app" (locked-down CI, untrusted code review), static parsers are what you want.
-- **Production-only environments.** Extraction should run in development or CI. The Console Server is explicitly unsafe for production even with all five defense layers, it is a dev/staging tool.
+- **Production-only environments.** Extraction should run in development or CI.
 - **Row-level data is the goal.** Woods extracts schema and structure, not data. If you need to index row content for retrieval (customer records, documents, audit events), a different pipeline is appropriate.
 - **Tiny apps that already fit in context.** A 20-model app may not benefit, the LLM can probably read every file. Woods' win scales with monolith size and concern depth.
 - **You want a hosted service.** Woods is a gem, not a SaaS. Extraction output lives on your machines and the MCP servers run on your hardware. There is no cloud component.

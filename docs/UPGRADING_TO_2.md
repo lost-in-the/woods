@@ -22,44 +22,15 @@ After this runbook you will have:
 ### HTTP configuration checks
 
 Supporting revisions after 2.0.0 validate HTTP origin allowlists at boot.
-Enabled automatic and manual Console mounts use the same
-`Woods::ConfigurationError` diagnostic for malformed origin entries. An invalid
+Malformed origin entries raise `Woods::ConfigurationError`. An invalid
 entry now prevents enabled HTTP startup and the diagnostic names that entry.
 Use `http(s)://host[:port]` entries without paths, credentials, or query strings,
 then restart. With no explicit Index allowlist, the default policy is unchanged.
 An explicit list replaces browser-origin defaults, including loopback. HTTP(S)
-default ports are equivalent to their omitted form. Stdio-only Console users can
-keep `console_mcp_http_enabled = false`.
+default ports are equivalent to their omitted form.
 
 See [HTTP origins](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense)
-and [Console setup](CONSOLE_MCP_SETUP.md) for the configuration contract.
-
-### Console read compatibility
-
-For supporting security-patch revisions, any nonempty column or EAV redaction
-policy makes `console_sql` refuse relation and CTE column alias lists, including
-lists on base tables, derived tables, parenthesized `VALUES` sources and table
-functions, regardless of the selected names. Use explicit, unaliased protected
-columns or structured tools.
-Typed EAV lookup includes all registered models with a case-insensitive matching
-final table name, including across schemas. It can therefore mask extra values;
-qualification does not narrow this conservative type set. Sensitive key values
-still require their exact stored or cast spelling.
-
-The 1.6.x function denylist becomes a read-only function allowlist in 2.x.
-Supply one `console_query` expression per `select` array entry: 2.x refuses
-comma-combined entries that 1.6.4 splits. Raw SQL requires a recognized adapter
-family; structured tools remain available on other adapters. Configure binary
-secret columns explicitly for redaction. See the canonical
-[read policy compatibility](CONSOLE_MCP_SETUP.md#read-policy-compatibility) and
-[statement timeouts](CONSOLE_MCP_SETUP.md#statement-timeout) for limits.
-
-Supporting Console HTTP revisions deliberately permit allowlisted non-loopback
-Hosts through the SDK where 2.0.0 could refuse them. Bearer authentication remains
-required. An explicit origin list replaces browser-origin defaults; wildcards
-are not supported. Ruby-configured 2.x origins reject surrounding whitespace
-that 1.6.4 trims; the HTTP executable trims comma-separated environment entries
-on both lines. Review [HTTP origin configuration](MCP_HTTP_TRANSPORT.md#origin-configuration-compatibility).
+for the configuration contract.
 
 Context-cache namespace rotation retires entries for normal TTL or backend
 eviction; disabling both can retain them indefinitely. See
@@ -75,8 +46,6 @@ eviction; disabling both can retain them indefinitely. See
 | Atomic generations via `generation.json` | Custom scripts that read root `manifest.json` may fail | Follow the payload pointer or use Woods readers/tasks |
 | `mcp >= 1.2, < 2.0` and protocol negotiation | Old lockfiles or manually pinned protocol versions can fail | Bundle update Woods/MCP; normally leave protocol version unset |
 | Index MCP surface aligned to executable wiring | Agents may ask for tools that only exist as conditional schemas | Update agent instructions to the 14-tool default |
-| Console surface tightened to 9 or 11 tools | Agents may ask for Tier 2/3 or eval schemas that do not execute | Use registered default/read tools only |
-| Console HTTP validation uses finalized application configuration | Flags set in a 1.x initializer could miss early boot validation; v2 refuses a missing token in production and a configured short token in any environment | Configure a secret token of at least 32 characters, or explicitly disable HTTP for stdio-only use |
 | Durable-store reconciliation and a 30% purge guard | The first v2 embed may refuse a legitimate rename-heavy deletion | Back up, inspect the deletion, then use the one-run override only if correct |
 | Explicit `config.embedding_model` selects the embedding model | An old assignment that embedding ignored can now change the produced vectors; `embedding_options[:model]` takes precedence | Verify the effective model and rebuild embeddings when it changes, even if the dimension stays the same |
 | Embedding dimension preflight | A previously tolerated model/store mismatch now fails before writing | Rebuild into a store with the configured dimension |
@@ -89,7 +58,6 @@ eviction; disabling both can retain them indefinitely. See
 | The Index MCP `reload` tool needs write access to the index directory | A read-only index mount can serve structural reads but cannot reload in place | Grant write access, or restart the MCP process after publishing |
 | `config.extractors` is deprecated; `config.add_gem` warns as unimplemented | Old config may imply filtering that never occurred. `config.extractors` is removed in Woods 3.0 | Remove or comment the settings; do not rely on them |
 | Legacy `config.log_level=` removed | The old no-op assignment raises `NoMethodError` | Remove it; configure the application logger instead |
-| Legacy unsafe-eval opt-in removed | `WOODS_CONSOLE_UNSAFE_EVAL=true`, an enabled `console_unsafe_eval_enabled`, or legacy confirmation/audit options refuse Console server construction | Remove these settings; use supported read tools or the application’s normal console for deliberate code execution |
 | New watch, refresh, and evaluation tasks | New operational options become available | Optional; no migration action |
 
 ## Updating an existing 2.0 installation to 2.1
@@ -173,7 +141,9 @@ bundle exec rails woods:stats
 bundle exec rails woods:validate
 ```
 
-Record the current Woods version, output directory, storage preset/providers, embedding model and dimension, Console configuration, and enabled exports. For Console, record the transport, token source or presence without recording its value, allowed origins, path, and embedded read-tool setting. Save current MCP client configuration and any custom scripts that read `tmp/woods/` directly.
+Record the current Woods version, output directory, storage preset/providers, embedding model and dimension, and enabled
+exports.
+Save current MCP client configuration and any custom scripts that read `tmp/woods/` directly.
 
 ### 2. Back up durable data
 
@@ -231,13 +201,11 @@ Pay particular attention to:
 - `output_dir` and environment overrides;
 - storage and embedding provider settings;
 - the configured embedding model/dimension;
-- `console_mcp_enabled`, `console_mcp_http_enabled`, the HTTP `console_mcp_token` secret source, allowed origins, path, and embedded read-tool flags;
 - snapshot, session, Notion, Obsidian, and Unblocked settings;
 - old `config.extractors` (deprecated) or `config.add_gem` calls, which are not implemented selectors;
-- removed `config.log_level=` and unsafe-eval settings;
-- early middleware configuration: a custom `console_mcp_path` and session tracer
-  setup belong in `config/application.rb`, before Railtie initializers run. See
-  [Console configuration](CONSOLE_MCP_SETUP.md#configuration-options) and
+- removed `config.log_level=`;
+- early middleware configuration: session tracer setup belongs in `config/application.rb`,
+  before Railtie initializers run. See
   [session tracer options](CONFIGURATION_REFERENCE.md#session-tracer-options).
 
 Review existing Woods migrations and tables before accepting any newly generated migration (`woods:install` writes one only with `--legacy-migration`). Do not create duplicate `woods_units`, `woods_edges`, or `woods_embeddings` tables.
@@ -448,7 +416,9 @@ Use the project bundle so the server and application resolve the same Woods vers
 
 Normally leave `MCP_PROTOCOL_VERSION` unset. The SDK negotiates with legacy clients through `initialize` and supports newer discovery in the same process. Pin only as a temporary workaround for a client known to require one revision; a pin reduces compatibility and is announced on stderr.
 
-Update agent prompts that refer to the old inventory. Standard Index launch provides 14 tools. Standard Console launch provides nine, or eleven with explicitly enabled embedded read tools. See [MCP servers](MCP_SERVERS.md).
+Update agent prompts that refer to the old inventory.
+Standard Index launch provides 14 tools.
+See [MCP servers](MCP_SERVERS.md).
 
 Structural reads still work from a read-only index mount, but the `reload` tool does not: its transactional refresh takes the same on-disk writer lock as extraction and embedding, so the MCP process needs write access to the index directory. Without it, `reload` returns a typed degraded error and keeps serving the previous aligned generation rather than swapping in a partial one. Grant write access, or restart the MCP process after publishing. [MCP servers](MCP_SERVERS.md) owns the detail.
 
@@ -456,26 +426,10 @@ Structural reads still work from a read-only index mount, but the `reload` tool 
 reload atomically in the running server, even with write access. Restart
 `woods-mcp` after `woods:embed` when using that preset.
 
-### Console users: preserve or configure the HTTP token
+### Console users
 
-If HTTP Console is enabled, preserve or configure a secret token of at least
-32 characters. Missing tokens warn outside production and HTTP requests fail
-closed with 401; production boot refuses them. Configured short tokens raise
-while HTTP Console is enabled. Keep token values in the application's normal
-secret store, never in committed configuration.
-
-Stdio does not use a bearer token. On versions supporting
-`console_mcp_http_enabled`, set it to `false` for stdio-only use without HTTP
-boot validation, while keeping the master `console_mcp_enabled` flag on.
-The HTTP flag defaults to `true` to preserve existing deployments; choosing a
-stdio client alone does not turn HTTP off. In some 1.x paths, flags assigned in
-`config/initializers/woods.rb` were read too early to trigger boot validation.
-v2 validates the settled configuration after initializers: the same application
-can now fail boot until its token is corrected or HTTP is explicitly disabled.
-Do not rely on the earlier validation timing as a supported configuration.
-
-Follow [Console MCP setup](CONSOLE_MCP_SETUP.md) for transport-specific setup
-and the [Configuration reference](CONFIGURATION_REFERENCE.md) for defaults.
+The Console MCP server was removed in Woods 2.2.0.
+[Console removed](CONSOLE_REMOVED.md) lists the cleanup steps.
 
 
 ## Verify before rollout
@@ -490,13 +444,8 @@ Complete every applicable check:
 - [ ] `woods_status` reports the new generation.
 - [ ] `search`, `lookup`, and `dependents` work with v2 identifiers.
 - [ ] Semantic retrieval works after re-embedding, if enabled.
-- [ ] Console exposes only the authorized 9/11 tools, if enabled.
-- [ ] Legacy `config.log_level=` and unsafe-eval settings were removed.
-- [ ] Custom Console path and session tracing settings are configured before Railtie initialization.
+- [ ] Legacy `config.log_level=` was removed.
 - [ ] Retained snapshot history is readable, and its untouched backup remains available.
-- [ ] An enabled Console reads a token of at least 32 characters from a secret source; its value was not printed or committed.
-- [ ] Console HTTP rejects a request without the bearer token with 401 and accepts the configured client, if HTTP is used.
-- [ ] Console stdio starts through the application bundle, if stdio is used.
 - [ ] Exports were reconciled and stale-document changes reviewed.
 - [ ] A second `woods:notion_sync` reports the shared-table column pages as skipped, if Notion is enabled.
 - [ ] Unattended pipelines were reviewed against the new exit behavior, and any job that restores the index directory restores a complete baseline.
@@ -520,6 +469,13 @@ A v1 gem cannot translate a v2 index or durable vector store back to v1 identifi
 
 ## Agent-operated upgrade prompt
 
-> Upgrade this Rails application from Woods 1.x to 2.0 using `docs/UPGRADING_TO_2.md`. Start with read-only inventory and preserve unrelated changes. Before cleaning or reconciling anything, identify the output directory, providers, exports, direct index consumers, and restorable backups. Report only whether a Console token exists and where it comes from, never its value. Do not use purge overrides, enable Console/read tools, create or rotate tokens, change credentials, or modify shared infrastructure without asking me. Perform a clean v2 extraction, validate it, update MCP instructions to the packaged 14-tool Index and 9/11 Console surfaces, and return the completed verification checklist plus rollback location.
+> Upgrade this Rails application from Woods 1.x to 2.0 using `docs/UPGRADING_TO_2.md`.
+> Start with read-only inventory and preserve unrelated changes.
+> Before cleaning or reconciling anything, identify the output directory, providers, exports, direct index consumers,
+> and restorable backups.
+> Do not use purge overrides, create or rotate tokens, change credentials, or modify shared infrastructure without
+> asking me.
+> Perform a clean v2 extraction, validate it, update MCP instructions to the packaged 14-tool Index surface, and return
+> the completed verification checklist plus rollback location.
 
 For failures, use [Troubleshooting](TROUBLESHOOTING.md). For current setup, use [Getting started](GETTING_STARTED.md).

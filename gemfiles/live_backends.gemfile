@@ -24,6 +24,6 @@ gem 'activerecord'
 gem 'pg', '~> 1.5'
 gem 'solid_cache', '~> 1.0'
 
-# Console SQL contracts exercise the real MySQL parser as well as PostgreSQL.
+# Solid Cache coordination runs against MySQL as well as PostgreSQL.
 gem 'mysql2', '~> 0.5'
 gem 'redis', '~> 5.0'

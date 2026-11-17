@@ -89,9 +89,9 @@ RSpec.describe Woods::MCP::BearerAuth do
       .to raise_error(ArgumentError, /at least 32 characters/)
   end
 
-  # Regression for #183: the railtie used to mount BearerAuth with no path
-  # scoping, so enabling the console 401'd the ENTIRE host app (GET /
-  # included). With `path:` set, only requests under that prefix are guarded.
+  # Regression for #183: a BearerAuth mounted with no path scoping 401'd the
+  # ENTIRE host app (GET / included). With `path:` set, only requests under
+  # that prefix are guarded.
   describe '.static_token_from' do
     it 'returns nil when the variable is unset or blank' do
       expect(described_class.static_token_from({})).to be_nil
@@ -218,9 +218,8 @@ RSpec.describe Woods::MCP::BearerAuth do
     end
   end
 
-  # Request-time enablement — the railtie passes a proc reading
-  # Woods.configuration.console_mcp_enabled so a flag set in
-  # config/initializers takes effect (#183).
+  # Request-time enablement: the predicate is read on every request, so a
+  # flag set after the middleware was built still takes effect (#183).
   describe 'enabled predicate (enabled: kwarg)' do
     it 'passes requests through unguarded while the predicate returns false' do
       middleware = described_class.new(inner_app, token: token, enabled: -> { false })

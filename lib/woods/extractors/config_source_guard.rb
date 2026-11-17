@@ -11,7 +11,7 @@ module Woods
     # source URL with a token, a deploy password, a seeded admin key), so the
     # text is redacted before it reaches the index. Four passes, each linear:
     #
-    # 1. The Console credential scanner: known credential shapes, including
+    # 1. The credential scanner: known credential shapes, including
     #    URL-encoded and base64-wrapped ones.
     # 2. URL userinfo in any scheme, with or without a password separator.
     # 3. Private key blocks, header to footer.
@@ -24,7 +24,7 @@ module Woods
     # shape, held under a name that says nothing, cannot be told from any
     # other string.
     module ConfigSourceGuard
-      # Same marker as Woods::Console::CredentialScanner::REDACTED.
+      # Same marker as Woods::CredentialScanner::REDACTED.
       REDACTED = '[REDACTED]'
 
       # `scheme://userinfo@`, where userinfo runs to the first `@` before any
@@ -86,11 +86,11 @@ module Woods
       # Private key blocks are handled by {.redact_private_keys}, a line pass,
       # in place of the scanner's lazy multi-line pattern.
       #
-      # @return [Console::CredentialScanner]
+      # @return [CredentialScanner]
       def scanner
         @scanner ||= begin
-          require_relative '../console/credential_scanner'
-          Console::CredentialScanner.new(disabled_patterns: [:pem_private_key_block])
+          require_relative '../credential_scanner'
+          CredentialScanner.new(disabled_patterns: [:pem_private_key_block])
         end
       end
 

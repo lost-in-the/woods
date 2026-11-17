@@ -40,7 +40,10 @@ A missing gem or index means setup comes first (woods-setup). Record the index p
 
 ## 1. Project MCP configuration
 
-Add the Index Server to the repository's checked-in MCP configuration (`.mcp.json` for Claude Code; adapt to the team's client) using the Index-only shape from woods-mcp-config, so every clone gets the server without per-user setup. Do not wire Console MCP at the project level: it is live-data access and stays a per-user, explicitly authorized opt-in.
+Add the Index Server to the repository's checked-in MCP configuration
+(`.mcp.json` for Claude Code; adapt to the team's client) using the Index-only shape from woods-mcp-config,
+so every clone gets the server without per-user setup.
+Do not wire a Console entry: the Console MCP server was removed in Woods 2.2.0.
 
 ## 2. Index-first guidance in the agent instructions
 
