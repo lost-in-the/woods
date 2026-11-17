@@ -10,6 +10,9 @@ require 'rails'
 require 'woods'
 require 'woods/mcp/bootstrapper'
 require 'woods/mcp/server'
+# Loaded as exe/woods-mcp-http loads them: nothing on the Rails boot path does.
+require 'woods/mcp/bearer_auth'
+require 'woods/mcp/origin_guard'
 require 'woods/storage/snapshotter/metadata'
 
 module MinimumDependencyProbe # rubocop:disable Metrics/ModuleLength
