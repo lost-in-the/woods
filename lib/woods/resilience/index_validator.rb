@@ -9,6 +9,7 @@ require_relative '../atomic_file'
 
 require_relative '../generation'
 require_relative '../published_index'
+require_relative '../schema_readability'
 require_relative 'graph_invariant_validator'
 require_relative 'incremental_readiness'
 require_relative 'index_validator/graph_checks'
@@ -130,6 +131,8 @@ module Woods
         return unless manifest
 
         validate_writer_version(manifest['woods_version'], warnings)
+        schema_warning = SchemaReadability.warning(SchemaReadability.from_manifest(manifest))
+        warnings << schema_warning if schema_warning
         unresolvable = Hash.new { |hash, key| hash[key] = [] }
 
         manifest.fetch('counts', {}).each do |type, expected_count|
