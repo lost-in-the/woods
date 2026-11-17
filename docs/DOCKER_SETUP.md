@@ -146,7 +146,48 @@ Use the path visible to the process that actually runs the command:
 
 ### Default: run it through the application container
 
-This path needs no Ruby, Bundler, Woods executable, or host-visible index on the host. Compose must be able to resolve the project, so set `cwd` to the host application root. `-T` disables Compose's pseudo-TTY while keeping stdin attached for MCP:
+This path needs no Ruby, Bundler, Woods executable, or host-visible index on the host.
+From Woods `2.2.0`, `docker compose exec app bundle exec rails generate woods:install --mcp-config --mcp-service app`
+writes an entry with no absolute path, so one committed `.mcp.json` works in every checkout and on every machine.
+Add `--skip` in an application installed earlier, so an edited initializer is kept:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+    }
+  }
+}
+```
+
+- `sh -c` turns `$PWD` into the session's directory, handed to the server as the client root.
+  The server refuses an index that belongs to another checkout instead of answering from it.
+- A host path does not exist inside the container, so without a mount map every launch starts with one warning
+  that the client's checkout cannot be determined.
+  Each developer can export their own map, for example `WOODS_MCP_CLIENT_ROOT_MAP=/host/src=/app`;
+  the entry passes it through and stays free of host paths.
+  See [the Docker process and path rule](MCP_SERVERS.md#docker-process-and-path-rule).
+- Compose finds the project from the session's directory and names it after that directory.
+  A session in a linked worktree reaches the running service only when the project name is pinned,
+  with a top-level `name:` in the Compose file or `COMPOSE_PROJECT_NAME`.
+- `--checkout` needs the checkout's `.git` entry inside the container.
+  A service that mounts only the application directory has none, and the launch is refused.
+- The entry passes no `-w`, so the server starts in the service's `working_dir`.
+  That must be the application root inside the container, in a mount of the whole checkout.
+  For an application below its checkout root, it is the application directory (for example `/app/apps/web` with
+  the checkout at `/app`), not the checkout root: Bundler looks for the Gemfile up from there, never down.
+  The generator only prints the entry and does not check the service.
+
+The generated entry was run with a stand-in `docker` that runs the inner command in place, or in a given service
+working directory (`spec/integration/generated_mcp_entry_spec.rb`).
+A real `docker compose exec` with this entry was not run.
+
+Before Woods `2.2.0`, or without the checkout's `.git` in the container, name the host application root.
+Compose must be able to resolve the project, so set `cwd` to the host application root.
+`-T` disables Compose's pseudo-TTY while keeping stdin attached for MCP:
 
 ```json
 {
@@ -179,11 +220,28 @@ Replace `app` and `/app` with the Compose service and container path used by the
 Two persistence gotchas:
 
 1. **tmpfs wipes the index on container restart.** If `/app/tmp` is tmpfs, re-run `rake woods:extract` after each restart, or persist the index by mounting a named volume at the index path (e.g. `- woods-data:/app/tmp/woods`) or writing the index outside the tmpfs mount.
-2. **Use the container path.** The Docker-launched server needs `/app/tmp/woods`, not the host's `./tmp/woods`.
+2. **Use the container path.** With an explicit index path, the Docker-launched server needs `/app/tmp/woods`,
+   not the host's `./tmp/woods`. `--checkout` takes no path.
 
 ### Optional: run the Index Server on the host
 
-Use this only when the application bundle, a supported Ruby, and the Woods executable are installed on the host **and** the index directory is host-visible:
+Use this only when the application bundle, a supported Ruby, and the Woods executable are installed on the host
+**and** the index directory is host-visible.
+From Woods `2.2.0`, `rails generate woods:install --mcp-config` writes the path-free form:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
+    }
+  }
+}
+```
+
+Before Woods `2.2.0`, name the host application root (machine-specific; do not commit it):
 
 ```json
 {
