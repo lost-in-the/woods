@@ -5,6 +5,7 @@ require 'json'
 require 'open3'
 require 'pathname'
 require_relative 'atomic_file'
+require_relative 'coordination/pipeline_lock'
 require_relative 'generation'
 require_relative 'git_command'
 require_relative 'git_provenance'
@@ -13,6 +14,7 @@ require_relative 'rake_helpers'
 require_relative 'source_inputs/private_key'
 require_relative 'source_path_encoding'
 require_relative 'worktree_seed/changes'
+require_relative 'worktree_seed/portable_reason'
 require_relative 'worktree_seed/verification'
 
 module Woods
@@ -51,7 +53,8 @@ module Woods
     # @!attribute [r] mode
     #   @return [Symbol] `:seeded`, `:full` (fell back), or `:skipped`
     # @!attribute [r] reason
-    #   @return [String, nil] why the run did not seed, for `:full` and `:skipped`
+    #   @return [String, nil] why the run did not seed, for `:full` and `:skipped`;
+    #     a `:full` reason names no host path
     # @!attribute [r] changed
     #   @return [Array<String>, nil] paths the incremental run was given
     Result = Struct.new(:mode, :reason, :changed, keyword_init: true)
@@ -72,7 +75,7 @@ module Woods
       return Result.new(mode: :skipped, reason: "#{@output} already has a published index") if published?(@output)
 
       seeded = seed
-      seeded.is_a?(Result) ? seeded : full_extraction(seeded)
+      seeded.is_a?(Result) ? seeded : full_extraction(PortableReason.new(@root).call(seeded))
     end
 
     private
@@ -103,7 +106,10 @@ module Woods
       begin
         build_staging(staging, baseline)
         changed = Changes.new(root: @root, index: staging).since(baseline.fetch('git_sha'))
-        run_incremental(staging, changed)
+        # The staging directory is an index of its own. The target's lock,
+        # which `woods:seed` holds, does not cover it, and the extractor
+        # refuses to publish there under that lock.
+        Coordination::PipelineLock.for_index(staging).with_lock { run_incremental(staging, changed) }
         return left_to_parent if forked_from_seed?
 
         promote(staging)

@@ -1582,6 +1582,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   # at that clone.
   describe 'seeding a worktree index (#854)' do
     require 'woods/worktree_seed'
+    require 'woods/rake_helpers'
+    require 'woods/publication_seam'
 
     def seed_git(dir, *args)
       env = { 'GIT_AUTHOR_NAME' => 'Seed Spec', 'GIT_AUTHOR_EMAIL' => 'seed@example.invalid',
@@ -1624,6 +1626,20 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       target = File.join(scratch_dir('target'), 'woods')
       result = Woods::WorktreeSeed.new(source_dir: seed, output_dir: target, root: @app_root, extractor: extractor).call
       [result, target]
+    end
+
+    # What `woods:seed` runs: the seed inside the target's writer lock.
+    def seed_under_task_lock(seed, target)
+      Woods::RakeHelpers.woods_with_extraction_lock(target) do
+        Woods::WorktreeSeed.new(source_dir: seed, output_dir: target, root: @app_root).call
+      end
+    end
+
+    # A full extraction draws a new source identity key; only a seed carries
+    # the seed's own key into the target.
+    def seed_key?(seed, target)
+      name = Woods::SourceInputs::PrivateKey::FILE_NAME
+      File.binread(File.join(target, name)) == File.binread(File.join(seed, name))
     end
 
     def move_worktree_on
@@ -1694,6 +1710,43 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       payload = Woods::Generation.new(output_dir: target).payload_dir
       expect(JSON.parse(File.read(payload.join('manifest.json')))['git_branch']).to eq('idle-worktree')
       expect(JSON.parse(File.read(payload.join('source_inputs.json')))['root']).to eq(File.realpath(@app_root))
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'seeds under the writer lock woods:seed holds for the target' do
+      seed = seed_baseline
+      move_worktree_on
+      target = File.join(scratch_dir('target'), 'woods')
+
+      result = seed_under_task_lock(seed, target)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(seed_key?(seed, target)).to be(true)
+      expect(Dir.glob("#{target}.seed-*")).to be_empty
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'seeds over what a seed killed after its staging run published left behind' do
+      seed = seed_baseline
+      move_worktree_on
+      target = File.join(scratch_dir('target'), 'woods')
+      child = fork do
+        Woods::PublicationSeam.hook = lambda do |point, dir|
+          Process.kill('KILL', Process.pid) if point == :marker_published && dir.to_s.start_with?("#{target}.seed-")
+        end
+        seed_under_task_lock(seed, target)
+      ensure
+        exit!(0)
+      end
+      _, status = Process.wait2(child)
+      expect(status.termsig).to eq(Signal.list.fetch('KILL'))
+      expect(Dir.glob("#{target}.seed-*")).not_to be_empty
+      expect(File.exist?(File.join(target, Woods::Generation::FILENAME))).to be(false)
+
+      result = seed_under_task_lock(seed, target)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(seed_key?(seed, target)).to be(true)
       expect(differences(target, full_extraction)).to be_empty
     end
 

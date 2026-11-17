@@ -171,7 +171,7 @@ namespace :woods do
     when :skipped
       puts "Nothing to do: #{result.reason}."
     else
-      puts "Seed not usable (#{result.reason}); ran a full extraction instead."
+      puts "Not seeded, ran a full extraction instead: #{result.reason}"
     end
   end
 
