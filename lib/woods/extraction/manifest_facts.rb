@@ -30,12 +30,16 @@ module Woods
       #   extractor family this run timed ({ExtractorTimings#to_h}); left out
       #   of the manifest when nil or empty, so a run that timed nothing
       #   publishes no key rather than `{}`
+      # @param schema_readability [Hash, nil] whether the run could read the
+      #   database schema ({SchemaReadability.build}); nil when the caller has
+      #   none, as an incremental run over a baseline that predates it
       # @return [Hash] new manifest container with the existing field order
       # Explicit value inputs mirror the manifest instead of sharing a run context.
       # rubocop:disable-next Metrics/ParameterLists
       def self.build(counts:, total_chunks:, provenance:, extraction_config:, git_enrichment:,
                      git_filter_available:, extracted_at:, woods_version:, rails_version:, ruby_version:,
-                     gemfile_lock_sha:, schema_sha:, extractor_timings: nil, woods_build: {}, root: nil)
+                     gemfile_lock_sha:, schema_sha:, extractor_timings: nil, woods_build: {}, root: nil,
+                     schema_readability: nil) # rubocop:disable Metrics/MethodLength
         manifest = {
           extracted_at: extracted_at,
           woods_version: woods_version,
@@ -54,6 +58,7 @@ module Woods
 
         manifest[:extraction_config] = extraction_config if extraction_config
         manifest[:git_enrichment] = git_enrichment
+        manifest[:schema_readability] = schema_readability if schema_readability
         manifest[:extractor_timings] = extractor_timings if extractor_timings && !extractor_timings.empty?
         manifest[:metadata] = { git_filter: 'unavailable' } unless git_filter_available
         manifest

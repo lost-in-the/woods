@@ -704,6 +704,87 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
       expect(methods).to include('call')
     end
 
+    # Ruby makes a `super` call after its arguments and before the block it
+    # passes runs, at that point of the body, in whatever holds the call.
+    describe 'super calls' do
+      let(:source) do
+        <<~RUBY
+          def update
+            super(BeforeJob.perform_later); AfterJob.perform_later
+            if Gate.open?
+              super
+            end
+            Report.transaction do
+              super do
+                YieldedJob.perform_later
+              end
+            end
+          end
+        RUBY
+      end
+
+      def shape(operations)
+        operations.map do |op|
+          held = described_class::NESTED_KEYS.filter_map { |key| op[key] }
+          held.empty? ? (op[:target] || op[:type]).to_s : [op[:type].to_s, *held.map { |ops| shape(ops) }]
+        end
+      end
+
+      [true, false].each do |prism|
+        context "with #{prism ? 'Prism' : 'the alternate parser adapter'}" do
+          before { allow(parser).to receive(:prism_available?).and_return(prism) }
+
+          it 'marks each call where Ruby makes it when asked' do
+            method_node = method_extractor.extract_method(source, 'update')
+
+            expect(shape(described_class.new(super_calls: true).extract(method_node))).to eq(
+              ['BeforeJob', 'super_call', 'AfterJob', 'Gate', ['conditional', ['super_call'], []],
+               ['transaction', %w[super_call YieldedJob]]]
+            )
+          end
+
+          it 'records no operation for a super call by default' do
+            expect(shape(extract_method_ops(source, 'update'))).to eq(
+              ['BeforeJob', 'AfterJob', 'Gate', ['transaction', ['YieldedJob']]]
+            )
+          end
+
+          # A call's receiver and arguments run before the call, so a `super`
+          # among them is made first; one in a conditional expression only on
+          # that branch.
+          it 'marks a super call that is a receiver or argument of another call, before that call' do
+            method_node = method_extractor.extract_method(<<~RUBY, 'show')
+              def show
+                Log.write(super)
+                Log.write(value: super)
+                handed = Wrapper.wrap(super)
+                super.merge(1).then { AfterJob.perform_later }
+                Log.write(ready? ? super : nil)
+                Audit.record(super())
+              end
+            RUBY
+
+            expect(shape(described_class.new(super_calls: true).extract(method_node))).to eq(
+              ['super_call', 'Log', 'super_call', 'Log', 'super_call', 'Wrapper', 'super_call', 'AfterJob',
+               ['conditional', ['super_call'], []], 'Log', 'super_call', 'Audit']
+            )
+          end
+
+          it 'marks a super call inside an interpolated argument, and none in a lambda argument' do
+            method_node = method_extractor.extract_method(<<~'RUBY', 'show')
+              def show
+                Log.write("value: #{super}")
+                Log.write(-> { super })
+              end
+            RUBY
+
+            expect(shape(described_class.new(super_calls: true).extract(method_node)))
+              .to eq(%w[super_call Log Log])
+          end
+        end
+      end
+    end
+
     it 'returns empty array for nil input' do
       expect(extractor.extract(nil)).to eq([])
     end

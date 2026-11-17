@@ -69,4 +69,18 @@ RSpec.describe Woods::AgentConfiguration::Preflight do
     expect { Woods::AgentConfiguration::Launcher.new(root: directory, index: '../elsewhere') }
       .to raise_error(Woods::AgentConfiguration::Conflict)
   end
+
+  it 'probes the relative Compose entry with the invocation it writes, in the service working directory' do
+    FileUtils.mkdir_p(File.join(directory, '.git'))
+    File.write(File.join(directory, 'Gemfile'), '')
+    relative = Woods::AgentConfiguration::Launcher.new(root: directory, form: 'relative', mode: 'compose',
+                                                       service: 'web', container_root: '/app')
+
+    expect(relative.probe_command('probe'))
+      .to eq(%w[docker compose exec -T -e BUNDLE_FROZEN=true web bundle exec ruby -e probe /app/tmp/woods /app
+                relative])
+    expect(relative.entry.dig('args', 1)).to include('exec docker compose exec -T ')
+    expect(relative.entry.dig('args', 1)).not_to include('-w', '--project-directory')
+    expect(relative.working_directory_command).to eq(%w[docker compose exec -T web pwd])
+  end
 end

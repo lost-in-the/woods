@@ -72,6 +72,14 @@ RSpec.describe Woods::WorktreeSeed::Verification do
     expect { verify }.to raise_error(Woods::WorktreeSeed::Unverifiable, /written by Woods 1\.0\.0/)
   end
 
+  it 'refuses a seed whose full extraction could not read the database schema' do
+    rewrite_manifest('schema_readability' => { 'version' => 1, 'state' => 'unreadable',
+                                               'databases' => [{ 'name' => 'primary', 'state' => 'empty' }] })
+
+    expect { verify }.to raise_error(Woods::WorktreeSeed::Unverifiable,
+                                     /not incremental-ready \(an index extracted without a readable database schema/)
+  end
+
   it 'refuses a seed that records no commit' do
     rewrite_manifest('git_sha' => 'unknown')
 
