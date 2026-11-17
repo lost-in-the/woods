@@ -372,16 +372,19 @@ RSpec.describe Woods::Extractor, 'commit table' do
         end
       end
 
-      # Git names the original from the part of the ref below the base, so the
-      # same ref can replace an object under one base and nothing under another.
+      # Git before 2.56 names the original from the part of the ref below a
+      # base without a trailing slash, so the same ref can replace another
+      # object under another base; Git 2.56 aborts on such a base. The base
+      # stays in the digest for the older reading, and bases that end in a
+      # slash keep this example the same on every Git.
       it 'walks again when only GIT_REPLACE_REF_BASE changes, though it selects the same refs' do
-        git('update-ref', "refs/custom/a#{original_root}", stand_in('Custom stand-in'))
+        git('update-ref', "refs/custom/a/#{original_root}", stand_in('Custom stand-in'))
         with_ref_base('refs/custom/') do
           expect(refresh_noting_walk).to eq([true, :written])
-          expect(messages).to eq(['Edit post', 'Add post'])
+          expect(messages).to eq(['Edit post', 'Custom stand-in'])
         end
 
-        with_ref_base('refs/custom/a') do
+        with_ref_base('refs/custom/a/') do
           expect(refresh_noting_walk).to eq([true, :written])
           expect(messages).to eq(['Edit post', 'Custom stand-in'])
         end

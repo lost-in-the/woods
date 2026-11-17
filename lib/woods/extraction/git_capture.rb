@@ -180,6 +180,8 @@ module Woods
       # * a replace ref is any ref below `GIT_REPLACE_REF_BASE` taken as a raw
       #   string prefix (`refs/replace/` only when the variable is absent; set
       #   but empty selects every ref) whose last path component is an object id;
+      #   Git 2.56 and later abort object reads when a set base has no trailing
+      #   slash, so HEAD does not resolve and the table is withdrawn;
       # * the grafts file is the one `git rev-parse --git-path info/grafts`
       #   names, which honours `GIT_GRAFT_FILE`, and counts either way.
       #
