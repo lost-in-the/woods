@@ -241,18 +241,23 @@ jobs:
           spec/integration/booted_extraction_spec.rb
           spec/integration/lazy_routes_equivalence_spec.rb
           spec/integration/mailer_determinism_spec.rb
+          spec/integration/callback_dispatch_forms_spec.rb
           spec/integration/validation_options_spec.rb
+          spec/integration/scope_owner_forms_spec.rb
           spec/integration/concurrent_extraction_pool_spec.rb
           spec/integration/writer_fencing_booted_spec.rb
           spec/integration/declaration_identity_spec.rb
           spec/integration/console_credential_rotation_spec.rb
           spec/integration/session_controller_identity_spec.rb
+          spec/integration/flow_action_owner_spec.rb
           spec/integration/multi_database_extraction_spec.rb
+          spec/integration/schema_readability_spec.rb
           spec/integration/multi_database_schema_comment_spec.rb
           spec/integration/hook_refresh_spec.rb
           spec/integration/source_input_drift_spec.rb
           spec/integration/source_output_spec.rb
           spec/integration/source_manifest_capacity_spec.rb
+          spec/integration/worktree_seed_task_spec.rb
           spec/console/transport_boot_spec.rb
           spec/console/stdio_e2e_spec.rb
           spec/console/collection_redaction_spec.rb
@@ -317,7 +322,9 @@ jobs:
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
         env:
           BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
-        run: bundle exec rspec spec/integration/state_machine_forms_spec.rb
+        run: >-
+          bundle exec rspec spec/integration/state_machine_forms_spec.rb
+          spec/integration/transition_callback_forms_spec.rb
 
       - name: Install optional component fixture bundle
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}

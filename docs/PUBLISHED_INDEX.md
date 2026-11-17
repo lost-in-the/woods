@@ -121,6 +121,54 @@ extraction tasks print the same hash as one sorted line
 (`Extractor timings (top 8 of N, total 65.3s): view_templates 12.4s, ...`)
 so a slow field run can name the family to profile.
 
+## Manifest schema readability
+
+A full extraction reads model columns, schema headers and table units from the live database.
+It records in `schema_readability` whether it could read each database it lists tables from.
+That is every writable connection pool, whether or not a model reads it.
+A database that only connection classes use, such as one holding SQL-only reporting tables,
+is asked only whether it answers.
+Models Rails itself defines (the migration bookkeeping classes before Rails 7.1, Active Storage and the other engines)
+do not make a database count as modeled.
+
+```json
+"schema_readability": {
+  "version": 1,
+  "state": "unreadable",
+  "databases": [
+    { "name": "primary", "state": "empty" },
+    { "name": "billing", "state": "readable" }
+  ]
+}
+```
+
+| `state` | Meaning |
+|---|---|
+| `readable` | Every database was listed. Each one a concrete model reads holds at least one table or view. |
+| `unreadable` | At least one database is `unreachable` or `empty`. |
+| `not_applicable` | There is no database to ask, as in an app without Active Record or without a configured connection. |
+
+A database is `unreachable` when listing its tables raises.
+It does not exist, refuses the connection, or the model has no connection pool.
+Models on it are left out of the index, and so are its table units.
+A database a concrete model reads is `empty` when it holds only `schema_migrations` and `ar_internal_metadata`.
+That is a database that was created but never migrated.
+Its models are published with `table_exists: false` and no columns, and it has no table units.
+One missing table beside others is not unreadable: that model alone carries `table_exists: false`.
+
+Only database configuration names and states are published.
+Connection errors can name hosts, users and paths, so they go to the extraction log instead.
+An older manifest has no key, and readers treat that as unknown, not as a problem.
+
+An unreadable schema is reported in three places:
+`woods:extract` prints a warning naming each database and the fix,
+`woods:validate` lists the same warning (the index stays valid),
+and [incremental readiness](INCREMENTAL_EXTRACTION.md#incremental-readiness) asks for a full extraction.
+An incremental run or refresh over a readable index makes the same check against the live database
+when it rewrites models, table units or view units, and refuses rather than publish them without columns.
+To fix it, prepare the database (`bin/rails db:prepare`) and run `woods:extract` again,
+or seed the index from a checkout whose database is ready (`rake "woods:seed[DIR]"`).
+
 ## One generation, pinned for the reader's whole life
 
 Unlike `Woods::MCP::IndexReader`, a `PublishedIndex` never refreshes between calls. It resolves one generation at `.new`/`.open` time and every fact it returns, `units`, the table map, `generation_number`, `external_dependency_checksum`, comes from that one generation for as long as the reader is open. There is no `reload` and no auto-refresh: open a new reader to see a later publish.

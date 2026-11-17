@@ -124,12 +124,15 @@ model lookup through ancestors, and neither confidence adds a dependency edge.
 **Declaration spans (#751).** The literal symbol of a class-body association
 (`belongs_to`, `has_many`, `has_one`, `has_and_belongs_to_many`), callback
 (model callbacks and controller `*_action` filters) or `scope` macro publishes a
-span only when the unit's runtime metadata confirms the declaration:
+span only when the unit's metadata lists the declaration:
 - `kind: "association"` points at the reflected target class through the typed
   registry. A polymorphic association publishes nothing.
 - `kind: "callback_method"` and `kind: "scope"` point at the declaring unit,
   with `method` naming the method or scope. The method must appear in the
   resolved `callbacks` or `filters` chain, or in `scopes`.
+  Runtime reflection confirms an association or a callback.
+  A scope span is `verified` only when its `scopes` entry is; otherwise it is `static`.
+  A scope under `if false` is listed, so its span is published, `static`.
 
 Coordinates cover the whole `:name` literal. These spans add no edge: the
 extractors already publish association relationships. Route helpers, partials and
@@ -367,6 +370,9 @@ publish the same values.
 **What it captures:** Every named, non-abstract `ActiveRecord::Base` descendant loaded in the process, except Rails-generated `HABTM_` join classes. A table is not required: a model whose table is missing is still extracted, with `table_exists: false` and empty column metadata. Models a gem or the framework defines are included too (an engine model, and on Rails before 7.1 `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata`); `origin` says which (below). The source_code is the model's actual Ruby source *plus* all included concerns inlined below it as formatted comment blocks. When the table exists, schema information (columns, types, indexes, foreign keys) is prepended as a header comment.
 The indexes and foreign keys are read from the model's own database.
 A section whose read fails says `unknown (could not be read)` instead of being left out.
+A model whose database cannot be reached at all is not extracted.
+The manifest's [`schema_readability`](PUBLISHED_INDEX.md#manifest-schema-readability) records that database as `unreachable`,
+or as `empty` when it holds no tables.
 
 **Key details:**
 - Uses `ActiveRecord::Base.descendants` for discovery (runtime introspection, not static parsing)
@@ -383,6 +389,16 @@ A section whose read fails says `unknown (could not be read)` instead of being l
 - Proc/lambda filters, including Rails-generated association callbacks, use stable source-site labels in both metadata and callback chunks: `#<Proc app/models/post.rb:12>` (or `lambda`). The site is machine-independent (`Woods::Extractors::SourceOrigin`): an application file is relative to `Rails.root`; a gem file is named by its gem directory, so the lambda `dependent: :destroy` registers reads `#<lambda activerecord-7.1.6/lib/active_record/associations/builder/association.rb:93>` on every machine (`rails-<sha>/…` for a Bundler git checkout, and a `path:` gem by its loaded spec's name and version); a standard-library file is `ruby/<path>`; any other file keeps only its basename as `external/<basename>`; native procs use `native`. No absolute path is ever published. Rails 6's numeric filter identity is resolved through `raw_filter`. These labels describe location and callable kind, not captured closure state; callbacks are never executed. Model condition labels retain their existing format.
 - Default callback-object representations omit process addresses: an instance becomes `#<CleanupCallback>`, an anonymous class becomes `#<Class>`, and its instance becomes `#<#<Class>>`. Anonymous namespace prefixes are normalized too (for example, `#<Module>::CleanupCallback`). Named classes and custom `to_s` labels retain their text. These labels do not distinguish arbitrary object state; separate registered callbacks remain separate entries even when their descriptive labels match. Controller object-filter formatting is unchanged.
 - Each callback also carries `analysis_status`, saying whether its empty `side_effects` mean "none found" or "not read": `analyzed` (the method was found and scanned), `unsupported` (no method definition to read: a proc, a lambda, or a method the source does not define) or `source_unavailable` (the method was found but its text could not be read). The last two carry the same empty `side_effects` shape as before. Jobs, services and mailers in `side_effects` are named in the method's lexical scope, as the unit's dependency edges are. Readers that predate the field see no change to existing keys; treat a missing `analysis_status` as unknown.
+- The body read for a symbol callback is the one Ruby dispatches to for the model.
+  Its `instance_method(name).source_location` is placed in the model file or an inlined concern; that def is read.
+  Several defs of the name on that line are told apart by the column Ruby compiled the method at.
+  That column is the `code_location` of the method's `RubyVM::InstructionSequence`.
+  A Ruby without one falls back to the owner Ruby reports, then to the last def of one statement list.
+  Defs of one owner in exclusive branches on one line (`if c then def a … else def a … end`) are then `unsupported`.
+  So a method redefined later in the class, or overridden by a prepended module, is read where Ruby defines it.
+  When that body calls `super`, the body `super` reaches is read as well, its operations after the first body's.
+  A body outside the model file and its concerns is `unsupported`, such as an inherited STI method or a `define_method`.
+  No same-named definition stands in for it.
 - `origin` says who wrote the callback, which `analysis_status` does not (an application proc and a framework autosave callback both read `unsupported`): `app` (defined under `Rails.root`, a concern under `app/` included), `framework` (one of the Rails gems: railties, activerecord, activemodel, activesupport, actionpack, activestorage, actiontext, activejob, actionmailer, actionview, actioncable, actionmailbox, or a git checkout of `rails`), `gem` (any other bundled gem, the Ruby standard library included) or `unknown` (no source location: a native method, a string filter, a method the class does not define, or a file none of the above claims). A proc is placed by its `source_location`; a symbol by the owner of the method it names on the model (`klass.instance_method(name).source_location`), so `autosave_associated_records_for_*` is `framework` and a method a concern under `app/models/concerns/` defines is `app`; a callback object by its class's definition site. Nothing is called. Readers that predate the field see no change to existing keys; treat a missing `origin` as unknown.
 - Direct Proc/lambda validation option values (for example inclusion/exclusion membership or message callables) use the same stable kind/source-site labels without execution. Validation order and duplicates, condition formats (`if`, `unless`, `on`), and non-Proc values are unchanged. Nested arrays/hashes are not recursively normalized, and labels do not serialize captured closure state. Run a full extraction after upgrading to refresh retained validation metadata; the stored schema is unchanged.
 - Callback side-effects are analyzed via `CallbackAnalyzer`: detects columns written (`self.col =`), jobs enqueued (`perform_later`), and services called
@@ -390,6 +406,23 @@ A section whose read fails says `unknown (could not be read)` instead of being l
 - Reflects model class and instance methods after reading the schema, so Rails schema-loading optimizations produce the same method metadata in cold and warmed runs. Application-defined constructors remain visible; Rails versions that install an optimized singleton `new` during schema loading consistently include it in `class_methods`.
 - `metadata[:attribute_writers]` lists every attribute an instance accepts through a public writer, without the `=`. It is read from `public_instance_methods`, minus what `ActiveRecord::Base` itself defines, together with `attribute_names` and `attribute_aliases`. Unlike `instance_methods` (`instance_methods(false)`), it also covers writers from concerns and other modules: `has_secure_password`, nested attributes, store accessors, and association and collection-id writers. Attribute names count whether or not Rails has generated their methods yet, so cold and warmed runs agree.
 - Automatically skips HABTM join models and anonymous classes
+- `scopes` lists each `scope` call written inside the model's own class declaration as `{ name, source, confidence }`.
+  That includes a call inside one of its method bodies.
+  A call in another class's body, such as a model nested in the same file, is that model's and appears on its unit.
+  If no declaration in the file spells the model's name (`class Shop::Order` in `module Shop`), all stay `static`.
+  `confidence` is `verified` when the live class answers the name as an Active Record scope of its own.
+  That means a class method on the model's singleton class, defined at Active Record's scope definition site.
+  It must also not be a scope an enum generates; nothing is called.
+  An enum defines `V` and `not_V` for every value or, with `scopes: false`, for none.
+  From Rails 6.1 a value that is not a Ruby name (`in-progress`) also defines its alias (`in_progress`).
+  So a name counts as the enum's only when its whole family, of values or of aliases, answers as scopes.
+  An explicit `scope :basic` beside `enum ..., scopes: false` is `verified`.
+  It reads `static` when every value and its `not_` form are declared explicitly too.
+  It also reads `static` when it overrides the scope an enum defined.
+  Every other entry is `static`: dead code, a method body that never ran, a same-named class method, or a regex read.
+  The live check asks whether the class answers the name, not which call defined it.
+  So a call in a class method that runs during boot is `verified`.
+  So is a dead declaration when a concern defines a live scope of the same name.
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
 - **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically, enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
 - **Database partition (multi-DB apps).** `metadata[:database]` is `klass.connection_db_config.name` (Rails 6.1+; `nil` on 6.0). Because reflection climbs to the abstract class that declared `connects_to`, a concrete model that only inherits its connection still reports the right database. Each association entry carries `from_db`, `to_db`, `through_db` (the has_many :through join model's database, guarded the same way and nil for a plain association), and `disable_joins`; `metadata[:foreign_keys]` lists `{ from_table, to_table, column }`, the target table's owning database is resolved separately by the graph-level `cross_database_edges` report (see [Internals](INTERNALS.md#graphanalyzer-structural-metrics)), not stored per model. That report never picks an owner living in the foreign key's own source database, even when another database also claims the table; only when every owner sits elsewhere, across more than one database, does it come back ambiguous rather than guessing. The graph node carries `database`, `table`, and `foreign_key_tables`, and association edges carry `through`, `through_db`, and `disable_joins`. `consolidate_dependencies` keeps the first edge per `[type, target]`, so a model with two associations to the same target keeps only the first edge's `through`/`through_db`/`disable_joins`.
@@ -491,6 +524,28 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Facts bind to the runtime method's original name and exact source line; an alias keeps the dispatched action's implicit template. A line containing multiple definitions, a block/lambda opening, or a recognized generated-method declaration is ambiguous: Ruby can report that line for a renamed Proc-backed method installed elsewhere. Facts for such source sites are omitted, including compact real methods sharing those lines; `actions` remains unchanged. String-evaluated definitions with synthetic source locations are outside this static attribution contract. Nested definitions and foreign receiver eval/exec bodies do not supply action facts. Explicit `self` calls are recognized, splatted params keys remain unresolved, and dynamic template/partial targets retain their expression under `object` rather than inventing a path. Literal integer response statuses remain integers under `status` and strings under `head`.
 - `render RowComponent.new` in a controller produces a `render` edge to the component unit the running app reaches, resolved from the controller's lexical scope as [PhlexExtractor](#phlexextractor) describes for rendered constants (Kit calls and slots do not apply to a controller). A render that names no component class is listed in `metadata.unresolved_renders`; a gem's component in `metadata.external_renders`; neither produces an edge
 - `actions` comes from Rails' `action_methods`, keeping only methods whose body is application source (gem DSL methods such as `define_method` readers are excluded) and never setters. A method the controller defines in its own file is an action whether or not it is routed; any other method (from an included or prepended module, a base controller, or a DSL that defines it onto the class from another file) counts only when a route reaches it on this controller. `action_sources` records each action's owner, the indexed unit holding its body (`defined_in`), and its `file` (relative to `Rails.root`) and `line`. An action whose body lives in another unit adds a `:action_source` edge to that unit, every controller has an `:inheritance` edge to an app-defined parent controller, and an inherited action's flow is assembled from that body with this controller's own before filters
+  - A flow reads the body `action_sources` names, even when the controller also defines the action.
+  - The entry's `column` is the byte column at which the compiled `def` starts on that line, read from the method's
+    instruction sequence, and nil for a body no `def` compiled (a `define_method` block).
+    The key is absent on a Ruby that does not report it.
+  - A body is the definition starting at the recorded `column` on the recorded `line`, even a lone one.
+    That tells apart definitions in exclusive branches of one line (`if`/`else`, a ternary, `case`, `&&`/`||`,
+    a modifier `if`, `rescue`). With no definition there, or a nil `column`, the flow has no body.
+  - Without a `column` (an index written before it), a lone definition on the line is the body.
+    Of several, those the recorded `owner` holds count; of those, the last is the body only when they are
+    statements of one list, since a later definition replaces an earlier one, even on the same line.
+    In any other arrangement the flow has no body: which one Ruby installed depends on the branch it took.
+  - An action whose body no indexed unit holds has no body in its flow, only its filters.
+  - Each `super` call in a body continues, where Ruby makes it, into the definition `super_source` names.
+    It sits in statement order, inside the branch or transaction that holds the call.
+    A call in another call's receiver or arguments (`render json: super`) continues before that call.
+    Operations of a block passed to `super` follow it, though they run only if that definition yields.
+    That entry key records the next definition Ruby looks up (`super_method`, one hop): `owner`, `defined_in`,
+    `file`, `line` and `column`, with `defined_in`, `file` and `line` nil, and no `column`, when its body is not
+    application source.
+    The key is absent when Ruby has no next definition.
+  - Without a `super_source` an indexed unit holds, the flow stops at the call.
+    It shows a `dynamic_dispatch` operation with `method: "super"` and no `target`.
 - `inherited_gem_actions` records each routed action Rails dispatches to a gem-defined body (inherited from a gem superclass, mixed in from a gem module, or defined by a gem DSL) as `{ action => { owner: } }`. These are not admitted to `actions`, get no chunk and no flow, and add no edge; a route to one is not reported as `missing_action`
 - `action_missing: true` is present only when the controller responds to `action_missing` (defined on it, privately, or inherited). Rails dispatches every routed action to it, so none of that controller's routes is reported as `missing_action`
 - `routes_without_action` lists, sorted, the routed actions of the controller that nothing answers.
@@ -1515,6 +1570,12 @@ namespace.
 - Extracts states, events, transitions, guard conditions, and callbacks from supported source forms; it does not claim complete dynamic or inherited registry coverage
 - **Included in Woods 2.1:** directly declared `state_machines` calls in the selected model class support the default `state` attribute (`state_machine initial: :pending do`), explicit attributes, and parenthesized calls, including multiline arguments. The default produces `Model::state_machine_state`; existing named identifiers remain `Model::state_machine_<attribute>`. Each declaration uses its own block and literal initial state, keeping multiple machines separate. Nested/sibling classes, singleton scopes and deferred/receiver blocks cannot supply another model's machine. Dynamic attribute expressions are not guessed, and dynamic initial-state functions are not called.
 - `transition_callbacks` (#796) lists each `before_transition`, `after_transition`, `around_transition` and `after_failure` call as `{ kind, on, from, to, method, block, side_effects }`, read with Prism so a comment is never one. `on`, `from` and `to` are the literal scope (symbols or arrays of symbols, from keywords or a `from => to` pair); `any` stays empty, and any other expression is never evaluated: the field stays empty and is named in `unresolved`. `do: [:a, :b]` and positional method names give one entry per method. A symbol method defined in the model file or an `app/models` concern it includes gets the model callbacks' `side_effects` (columns written against the loaded model's columns, jobs enqueued, services, mailers, operations with their file and line); a block or proc, or a method neither defines, has `side_effects: null` and `unanalysed` (`block`, or `not defined in the model or its concerns`). `callbacks`, one raw DSL line per callback, is deprecated and kept for one release beside it
+- A `transition_callbacks` method is read where the loaded class dispatches it, as model callbacks are.
+  The analysis source is the model file and the `app/models` concerns it includes or prepends by name.
+  A body outside them, including one a `super` reaches, gives `unanalysed: not defined in the model or its concerns`.
+  A class that is not loaded gives `unanalysed: class not loaded`; no definition is read by name.
+  Same-name definitions on one line are told apart as model callbacks' are.
+  When nothing tells them apart, the reason is also `not defined in the model or its concerns`.
 - Returns an array from the file method (like `ScheduledJobExtractor`), cannot be used in the incremental file-based dispatch map; incremental re-extraction re-runs it wholesale on any `.rb` change under the model directories it scans, and on a schema change (`db/schema.rb`, `db/structure.sql`, `db/migrate/**`), since a callback's columns written depend on the columns
 
 ---

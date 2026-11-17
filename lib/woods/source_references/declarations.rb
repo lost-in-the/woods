@@ -6,7 +6,8 @@ module Woods
   module SourceReferences
     # Declaration spans (#751): the literal symbol of an association, callback
     # or scope macro in a class body, published only where the unit's runtime
-    # metadata confirms the declaration. Associations point at their target
+    # metadata confirms the declaration. A scope the unit lists without that
+    # confirmation keeps its span as +static+. Associations point at their target
     # model through the typed registry; callbacks and scopes point at the
     # declaring unit with the method they name. They are spans only and add
     # no dependency: the extractors already publish association edges.
@@ -37,7 +38,7 @@ module Woods
         name = record['name']
         macro = record['macro']
         return association(macro, name) if Collector::ASSOCIATION_MACROS.include?(macro)
-        return (own_method('scope', name) if scope?(name)) if macro == 'scope'
+        return scope(name) if macro == 'scope'
 
         own_method('callback_method', name) if callback?(name)
       end
@@ -68,21 +69,26 @@ module Woods
         target.delete_prefix('::') if target.is_a?(String)
       end
 
-      def own_method(kind, name)
+      def own_method(kind, name, confidence = 'verified')
         { 'target' => @unit['identifier'], 'target_type' => @unit['type'], 'kind' => kind,
-          'confidence' => 'verified', 'method' => name }
+          'confidence' => confidence, 'method' => name }
+      end
+
+      # A listed scope verifies only when the model marked it +verified+.
+      def scope(name)
+        listed = Array(@metadata['scopes']).select do |scope|
+          (scope.is_a?(Hash) ? scope['name'] : scope).to_s == name
+        end
+        return if listed.empty?
+
+        verified = listed.any? { |scope| scope.is_a?(Hash) && scope['confidence'] == 'verified' }
+        own_method('scope', name, verified ? 'verified' : 'static')
       end
 
       # The resolved chain lists the method: model callbacks and controller filters.
       def callback?(name)
         (Array(@metadata['callbacks']) + Array(@metadata['filters'])).any? do |record|
           record.is_a?(Hash) && record['filter'].to_s == name
-        end
-      end
-
-      def scope?(name)
-        Array(@metadata['scopes']).any? do |scope|
-          (scope.is_a?(Hash) ? scope['name'] : scope).to_s == name
         end
       end
     end

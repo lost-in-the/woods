@@ -125,7 +125,8 @@ module Woods
     def ignored_among(relatives)
       return Set.new if relatives.empty?
 
-      out, _err, status = Open3.capture3(*GitCommand.argv(@root, 'check-ignore', '--no-index', '--stdin', '-z'),
+      out, _err, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                         *GitCommand.argv(@root, 'check-ignore', '--no-index', '--stdin', '-z'),
                                          stdin_data: relatives.map { |relative| "#{relative}\0" }.join, binmode: true)
       return unless [0, 1].include?(status.exitstatus)
 
@@ -146,7 +147,7 @@ module Woods
     end
 
     def list(*args)
-      out, _err, status = Open3.capture3(*GitCommand.argv(@root, *args), binmode: true)
+      out, _err, status = Open3.capture3(GitCommand::CHILD_ENV, *GitCommand.argv(@root, *args), binmode: true)
       return nil unless status.success?
 
       out.force_encoding(Encoding::UTF_8).split("\0").to_set
@@ -170,7 +171,7 @@ module Woods
     end
 
     def succeeds?(*args)
-      _out, _err, status = Open3.capture3(*GitCommand.argv(@root, *args))
+      _out, _err, status = Open3.capture3(GitCommand::CHILD_ENV, *GitCommand.argv(@root, *args))
       status.success?
     end
   end

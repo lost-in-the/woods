@@ -133,6 +133,17 @@ RSpec.describe Woods::Extraction::ManifestFacts do
     expect(build(extractor_timings: {})).not_to have_key(:extractor_timings)
   end
 
+  it 'publishes schema readability after Git enrichment only when the caller has it' do
+    readability = { 'version' => 1, 'state' => 'unreadable', 'databases' => [] }
+
+    result = build(schema_readability: readability, extractor_timings: { 'models' => 1.0 })
+
+    expect(result.fetch(:schema_readability)).to equal(readability)
+    expect(result.keys.last(3)).to eq(%i[git_enrichment schema_readability extractor_timings])
+    expect(build).not_to have_key(:schema_readability)
+    expect(build(schema_readability: nil)).not_to have_key(:schema_readability)
+  end
+
   it 'preserves unknown and missing provenance without discovering another revision' do
     expect(build(provenance: { git_sha: 'unknown', git_branch: 'unknown' }))
       .to include(git_sha: 'unknown', git_branch: 'unknown')
