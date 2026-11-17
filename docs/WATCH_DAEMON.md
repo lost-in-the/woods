@@ -360,6 +360,25 @@ exit `75` over the same files. Live restart triggers still stop the daemon,
 including edits during startup extraction. Their paths survive shutdown even
 when the preceding extraction has advanced the generation watermark.
 
+Changes already on disk when a full extraction starts cost that one full extraction, however the watcher splits them.
+Under polling, each batch arrives only after the previous cycle finished.
+Before any full extraction starts, the daemon compares the restart inputs on disk with its boot snapshot.
+If one changed since the boot, the daemon restarts at once and carries the batch.
+A full run there would only be repeated after the restart.
+A restart input changed after a full extraction has started still costs a restart and a second full run.
+
+Once the boot has finished, a restart input rewritten with the bytes the boot read is not a change.
+Examples: `db:prepare` dumping an unchanged `db/schema.rb`, a stash round trip, a checkout of the same content.
+None of them restarts the daemon or causes an extraction on its own.
+The boot snapshot keeps a digest of each restart input and each `config/**/*.rb` file for this.
+An input that changed while the environment booted always requires a restart, even if its bytes were restored.
+The boot read it at an unknown moment in between.
+Files read before the snapshot existed are the exception, since nothing during the boot reads them again.
+These are the Gemfile, its lockfile and gemspecs, `.ruby-version`, and config Ruby already loaded.
+So `bundle check` in another container, which moves the lockfile's timestamps but not its bytes, costs nothing.
+Reload inputs, including `config/routes.rb`, are still judged by inode, size and timestamps.
+Their boot bytes say nothing about what the index last extracted.
+
 The same escalation happens when the app *can't* reload at all, a boot with
 `config.enable_reloading = false`. Extracting against constants that no longer
 match their source would be worse than saying so.
@@ -545,10 +564,18 @@ An older index without this capture boundary, or one with invalid/mismatched
 metadata or a dangling payload pointer, receives a full reconciliation under
 the same reload/restart rules. A successful full publication records the new
 boundary even when no incremental units would change, so the migration does
-not repeat on every startup. With no generation at all, every file is uncovered
-and the normal storm threshold applies. On older installed versions that still
+not repeat on every startup. On older installed versions that still
 use the marker mtime, recover by completing a full extraction against settled
 source before restarting watch.
+
+With no generation published at all, the startup run is one full extraction, whatever the file count.
+An incremental run refuses without a baseline, so before Woods 2.2 a small application never got a first index.
+Its watcher stayed `degraded` at generation 0.
+An application with nothing to extract still gets an empty, valid first generation, as `woods:extract` would publish.
+A `generation.json` that exists but cannot be read is not "no generation".
+The writer refuses to publish over it, so the watcher does not start a full extraction.
+It stays `degraded` and names the file.
+See [generation.json is unreadable](TROUBLESHOOTING.md#generationjson-is-unreadable) for what to do.
 
 **The built-in watcher establishes detection before reconciliation runs.**
 Polling signals readiness after its baseline scan; native watching signals after
@@ -607,6 +634,12 @@ A branch switch or rebase touches hundreds of files at once. Above
 `WOODS_WATCH_FULL_THRESHOLD`, N incremental steps cost more than one full
 extraction and risk interleaving with a still-settling tree, so the daemon
 falls back to a full run and logs that it did.
+
+A path whose bytes the published generation already captured does not count towards the threshold.
+Under polling, the rest of a branch switch can arrive after the full run that already read it.
+That batch is re-extracted incrementally instead of starting a second full run.
+The check compares the published `source_inputs.json` digests within the 30-second startup budget.
+A path it cannot prove unchanged counts.
 
 ## Watcher backends
 

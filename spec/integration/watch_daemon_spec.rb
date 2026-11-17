@@ -211,6 +211,24 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
     end
   end
 
+  describe 'a cold start with no index' do
+    { 'an empty output directory' => nil, 'an unpublished payload left by a killed run' => 'payloads/gen-1' }
+      .each do |shape, leftover|
+        it "builds the first index by one full extraction over #{shape}, matching woods:extract" do
+          cold = Dir.mktmpdir('woods_watch_cold')
+          (@scratch ||= []) << cold
+          FileUtils.mkdir_p(File.join(cold, leftover)) if leftover
+          snapshot = Woods::Watch::BootSnapshot.new(root: @app_root)
+          watch = daemon(output_dir: cold, catch_up: true, boot_snapshot: snapshot)
+
+          watch.send(:catch_up)
+
+          expect(Woods::Generation.new(output_dir: cold).current.number).to eq(1)
+          expect(differences(cold, full_extraction)).to be_empty
+        end
+      end
+  end
+
   describe 'a storm' do
     it 'falls back to a full extraction and still matches' do
       paths = Array.new(8) do |i|
@@ -224,6 +242,17 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
       RSpec.configuration.reporter.message("[watch] #{paths.size}-file storm → full extraction in #{elapsed} ms")
 
       expect(result[:action]).to eq(:full)
+      expect(differences(@index_dir, full_extraction)).to be_empty
+    end
+
+    it 're-extracts a late batch the full run already captured incrementally, and still matches' do
+      paths = Array.new(8) do |i|
+        write_file("app/services/storm_#{i}_service.rb", "class Storm#{i}Service\n  def call = :ok\nend\n")
+      end
+      watch = daemon(full_extraction_threshold: 4)
+      expect(watch.process(paths)[:action]).to eq(:full)
+
+      expect(watch.process(paths)[:action]).to eq(:incremental)
       expect(differences(@index_dir, full_extraction)).to be_empty
     end
   end

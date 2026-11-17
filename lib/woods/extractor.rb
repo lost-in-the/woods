@@ -1502,7 +1502,7 @@ module Woods
     rescue Generation::InvalidMarker => e
       raise Woods::ExtractionError,
             "#{e.message} (#{File.join(@output_dir.to_s, Generation::FILENAME)}); refusing to publish a new " \
-            'generation over it. Restore it to name the newest retained payloads/gen-<n>, then retry'
+            "generation over it. #{Generation::RESTORE_ADVICE}"
     end
 
     # @return [Boolean] whether a full extraction may publish flat when no payload directory opens
