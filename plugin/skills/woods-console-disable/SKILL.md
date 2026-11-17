@@ -115,23 +115,40 @@ List MCP client entries by name, kind and key names:
 ```bash
 woods_mcp_entries() {
   jq -r --arg path "${CONSOLE_PATH:-/mcp/console}" '
-    def kind: ((([.command // ""] + (.args // [])) | join(" ")) as $c
-      | if ($c | test("woods:console|woods-console-mcp|exe/woods-console"))
-           or ((.url // "") | index($path) != null) then "console"
-        elif ($c | test("woods-mcp")) then "index" else "other" end);
+    def endpoint: sub("^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*"; "") | sub("[?#].*$"; "")
+      | rtrimstr("/") | if . == "" then "/" else . end;
+    def want: $path | endpoint;
+    def kind: ([.command // "", (.args // [])[]] | map(tostring) | join(" ")
+        | [splits("[\\s\"\u0027;&|()]+")]) as $t
+      | ([.url // empty] + ($t | map(select(test("^[A-Za-z][A-Za-z0-9+.-]*://")))) | map(endpoint)) as $u
+      | if ($t | any(test("^(woods:console|(.*/)?woods-console-mcp|(.*/)?exe/woods-console)$")))
+           or ($u | any(. == want)) then "console"
+        elif ($t | any(test("woods-mcp"))) then "index"
+        elif (($t + $u) | any(test("console"; "i"))) then "unclear"
+        else "other" end;
     def rows($scope): to_entries[] | [$scope, .key, (.value | kind),
       "fields=" + (.value | keys | join(",")),
       "env=" + ((.value.env // {}) | keys | join(",")),
       "headers=" + ((.value.headers // {}) | keys | join(","))] | @tsv;
-    ((.mcpServers // .servers // {}) | rows("top")),
+    (("mcpServers", "servers") as $m | .[$m] // {} | rows($m)),
     ((.projects // {}) | to_entries[] | .key as $p | (.value.mcpServers // {}) | rows("local " + $p))
   ' "$@"
 }
 woods_mcp_entries .mcp.json
 ```
 
-A `console` row is the entry to remove; an `index` row is the Index Server and stays.
-An `other` row with a URL may be the Index Server over HTTP; leave it too.
+Each row starts with the key that holds the entry (`mcpServers`, `servers`, or `local <project>`), then its name.
+The kind decides what happens to the entry:
+
+- `console`: a command word is a Console launcher (`woods:console`, `woods-console-mcp`, `exe/woods-console`),
+  or the path of a URL is exactly the Console path (the query and a trailing slash aside).
+  This is the entry to remove.
+- `index`: the Index Server. It stays.
+- `unclear`: the entry mentions a console but is neither of the above, for example `/mcp/console-metrics`.
+  The Console answers every path that starts with its own, so only the user can tell what such an entry is.
+  Leave it untouched, and ask the user to confirm it; if it is the Console, its removal is a manual step.
+- `other`: anything else, which may be the Index Server over HTTP. It stays.
+
 Set `CONSOLE_PATH` first if `console_mcp_path` in `config/application.rb` names a custom path.
 Entries can have any name (`woods-console`, `rails-console`, `codebase-console`), so trust the kind, not the name.
 
@@ -179,8 +196,9 @@ Show one table before any edit, naming keys and lines, never values:
 | Switch | `config/initializers/woods.rb:NN` | Remove `config.console_mcp_enabled = true`, or set it to `false` | Agent |
 | Other Console options | same file | Optional: remove the `console_*` lines; inert once the switch is off | Agent |
 | Hand-written Rack mount | `config/application.rb:NN` | Remove the `Woods::Console::RackMiddleware` line | Agent |
-| Client entry, plain JSON | `.mcp.json`, key `mcpServers.<name>` | Remove the entry; keep the Index Server entry | Agent |
+| Client entry, plain JSON | `.mcp.json`, key `mcpServers.<name>` | Remove the `console` entry, keep others | Agent |
 | Client entry, other format | file, entry `<name>` | Remove the entry | User |
+| Unclear client entry | file, key `mcpServers.<name>` | Leave it; the user confirms what it is | User |
 | Client header | `.mcp.json`, key `mcpServers.<name>.headers.Authorization` | Goes with the entry; rotate the token | User rotates |
 | Token (`WOODS_CONSOLE_MCP_TOKEN`) | each file and line found | Remove it there, in `.env` files and the secret store; rotate it | User |
 | Launcher file | `~/.woods/console.yml` | Move aside to `console.yml.disabled` | Agent |
@@ -194,9 +212,11 @@ Stop if they decline.
 
 - Edit only the approved rows, one at a time.
 - Open file: open it and edit the Console line.
+- Remove only entries whose kind is `console`; never an `unclear`, `index` or `other` entry.
 - Remove a Claude Code entry with `claude mcp remove <name> -s project` (or `-s local`, `-s user`); it prints no values.
 - Remove an entry from another plain JSON client file by key, with the helper below.
   It names the file, the key path and the names left, never a value.
+  It reruns the kind check itself, and removes nothing that is not a `console` entry.
 - Move `~/.woods/console.yml` aside with `mv`, without opening it.
 - Every other row is a manual step (see "Manual steps"): Compose files, Procfiles, scripts, env-file templates,
   client files in other formats, and any file the secret check flagged.
@@ -212,6 +232,9 @@ woods_mcp_remove() {
   if [ -L "$f" ]; then echo "$f is a symbolic link: make this a manual step"; return 1; fi
   jq -e --arg m "$m" --arg n "$n" '(.[$m] // {}) | has($n)' "$f" > /dev/null 2>&1 \
     || { echo "$f has no entry $m.$n, or is not plain JSON: make this a manual step"; return 1; }
+  woods_mcp_entries "$f" 2> /dev/null \
+    | awk -F'\t' -v m="$m" -v n="$n" '$1 == m && $2 == n && $3 == "console" { ok = 1 } END { exit ok ? 0 : 1 }' \
+    || { echo "$f: $m.$n is not a console entry: ask the user to confirm, make this a manual step"; return 1; }
   jq . "$f" 2> /dev/null | cmp -s - "$f" || [ "${WOODS_REFORMAT_OK:-}" = 1 ] \
     || { echo "$f: jq would reformat the whole file: ask the user"; return 1; }
   tmp=$(mktemp "$f.XXXXXX") && cp -p "$f" "$tmp" \
@@ -222,7 +245,9 @@ woods_mcp_remove() {
 ```
 
 `MAP` is the key that holds the entries: `mcpServers` in most clients, `servers` in `.vscode/mcp.json`.
-For a symbolic link, a file that is not plain JSON or a missing entry, the helper changes nothing.
+Define `woods_mcp_entries` (step 1) first: the helper uses it.
+For a symbolic link, a file that is not plain JSON, a missing entry, or an entry not of kind `console`,
+the helper changes nothing.
 The edit is then a manual step.
 jq writes the whole file back, so the helper first checks that jq keeps its layout.
 If it would not, ask the user whether a reformatted file is acceptable.

@@ -192,7 +192,12 @@ RSpec.describe 'Console MCP deprecation notices' do
           'rails-console' => { command: 'docker', args: ['exec', '-e', "TOKEN=#{marker}", 'app', 'bin/rake',
                                                          'woods:console'] },
           'console-http' => { type: 'streamable-http', url: "https://u:#{marker}@host/mcp/console?t=#{marker}",
-                              headers: { 'Authorization' => "Bearer #{marker}" } }
+                              headers: { 'Authorization' => "Bearer #{marker}" } },
+          'bridge' => { command: 'npx', args: ['mcp-remote', 'http://localhost:3000/mcp/console/'] },
+          'console-metrics' => { type: 'http', url: 'https://example.invalid/mcp/console-metrics',
+                                 headers: { 'Authorization' => "Bearer #{marker}" } },
+          'metrics' => { type: 'http', url: 'https://example.invalid/mcp/metrics?next=/mcp/console' },
+          'status-task' => { command: 'bin/rake', args: ['woods:console_status'] }
         }
       end
       let(:user_client) do
@@ -257,10 +262,20 @@ RSpec.describe 'Console MCP deprecation notices' do
                                'config/application.rb:1:Woods::Console::RackMiddleware',
                                'Procfile.dev:1:woods:console', 'WOODS_CONSOLE_MCP_TOKEN is set',
                                'console.yml keys: mode,host,command', '.zshrc:1:WOODS_CONSOLE_MCP_TOKEN')
-        expect(out).to match(/^top\twoods\tindex\tfields=args,command,env\tenv=OPENAI_API_KEY\theaders=$/)
-        expect(out).to match(/^top\trails-console\tconsole\t/)
-        expect(out).to match(/^top\tconsole-http\tconsole\t.*\theaders=Authorization$/)
+        expect(out).to match(/^mcpServers\twoods\tindex\tfields=args,command,env\tenv=OPENAI_API_KEY\theaders=$/)
+        expect(out).to match(/^mcpServers\trails-console\tconsole\t/)
+        expect(out).to match(/^mcpServers\tconsole-http\tconsole\t.*\theaders=Authorization$/)
         expect(out).to match(%r{^local /srv/app\twoods-console\tconsole\t.*env=WOODS_CONSOLE_CONFIG})
+      end
+
+      it 'labels an entry console only for a Console launcher or the exact Console path' do
+        out, = run_inventory
+        rows = out.lines.map { |line| line.split("\t") }
+        kinds = rows.select { |row| row[0] == 'mcpServers' }.to_h { |row| row[1, 2] }
+
+        expect(kinds).to eq('woods' => 'index', 'rails-console' => 'console', 'console-http' => 'console',
+                            'bridge' => 'console', 'console-metrics' => 'unclear', 'metrics' => 'other',
+                            'status-task' => 'unclear')
       end
 
       it 'lists key names in an env-file template, and never searches .env or credentials files' do
@@ -298,7 +313,10 @@ RSpec.describe 'Console MCP deprecation notices' do
             'woods' => { 'command' => 'bundle', 'args' => %w[exec woods-mcp-start],
                          'env' => { 'OPENAI_API_KEY' => marker } },
             'rails-console' => { 'type' => 'http', 'url' => "https://host/mcp/console?t=#{marker}",
-                                 'headers' => { 'Authorization' => "Bearer #{marker}" } }
+                                 'headers' => { 'Authorization' => "Bearer #{marker}" } },
+            'console-metrics' => { 'type' => 'http', 'url' => 'https://example.invalid/mcp/console-metrics',
+                                   'headers' => { 'Authorization' => "Bearer #{marker}" } },
+            'metrics' => { 'type' => 'http', 'url' => 'https://example.invalid/mcp/metrics' }
           } }
       end
       let(:pretty) { "#{JSON.pretty_generate(client)}\n" }
@@ -311,8 +329,8 @@ RSpec.describe 'Console MCP deprecation notices' do
       end
 
       define_method(:remove) do |*args, env: {}|
-        helper = read('plugin/skills/woods-console-disable/SKILL.md')[/^woods_mcp_remove\(\) \{\n.*?^\}$/m]
-        script = "#{helper}\nwoods_mcp_remove #{args.map { |arg| Shellwords.escape(arg) }.join(' ')}"
+        helpers = read('plugin/skills/woods-console-disable/SKILL.md').scan(/^woods_mcp_\w+\(\) \{\n.*?^\}$/m)
+        script = "#{helpers.join("\n")}\nwoods_mcp_remove #{args.map { |arg| Shellwords.escape(arg) }.join(' ')}"
         Open3.capture3({ 'BUNDLE_GEMFILE' => nil, 'RUBYOPT' => nil }.merge(env), 'bash', '-c', script, chdir: @dir)
       end
 
@@ -324,7 +342,7 @@ RSpec.describe 'Console MCP deprecation notices' do
 
         expect(status).to be_success
         expect(out + err).not_to include(marker)
-        expect(out).to include('servers.rails-console', 'woods')
+        expect(out).to include('servers.rails-console', 'keeps: console-metrics,metrics,woods')
         kept = client.merge('servers' => client['servers'].except('rails-console'))
         expect(File.read(path)).to eq("#{JSON.pretty_generate(kept)}\n")
         expect(File.stat(path).mode & 0o777).to eq(0o644)
@@ -351,7 +369,7 @@ RSpec.describe 'Console MCP deprecation notices' do
 
         expect(status).to be_success
         expect(out + err).not_to include(marker)
-        expect(JSON.parse(File.read(path))['servers'].keys).to eq(['woods'])
+        expect(JSON.parse(File.read(path))['servers'].keys).to eq(%w[woods console-metrics metrics])
       end
 
       {
@@ -359,7 +377,11 @@ RSpec.describe 'Console MCP deprecation notices' do
                                    'c.json', 'rails-console'],
         'a symbolic link' => [->(dir, _json) { File.symlink('real.json', File.join(dir, 'link.json')) },
                               'link.json', 'rails-console'],
-        'an entry that is not there' => [->(_dir, _json) {}, 'real.json', 'missing']
+        'an entry that is not there' => [->(_dir, _json) {}, 'real.json', 'missing'],
+        'a neighbouring HTTP server whose path only starts with the Console path' =>
+          [->(_dir, _json) {}, 'real.json', 'console-metrics'],
+        'an HTTP server elsewhere' => [->(_dir, _json) {}, 'real.json', 'metrics'],
+        'the Index Server' => [->(_dir, _json) {}, 'real.json', 'woods']
       }.each do |form, (setup, name, entry)|
         it "hands the edit off, changing nothing, for #{form}" do
           write_client('real.json', pretty)
