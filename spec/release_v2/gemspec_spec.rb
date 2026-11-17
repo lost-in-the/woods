@@ -72,6 +72,15 @@ RSpec.describe 'release gemspec dependency contract' do
     expect(requirement).not_to be_satisfied_by(Gem::Version.new('9.0.0'))
   end
 
+  it 'excludes regexp_parser 2.13.2, which json_schemer cannot load, and admits every other 2.x release' do
+    requirement = runtime_requirement('regexp_parser')
+
+    expect(requirement).to be_satisfied_by(Gem::Version.new('2.0.0'))
+    expect(requirement).to be_satisfied_by(Gem::Version.new('2.13.1'))
+    expect(requirement).to be_satisfied_by(Gem::Version.new('2.13.3'))
+    expect(requirement).not_to be_satisfied_by(Gem::Version.new('2.13.2'))
+  end
+
   it 'points release metadata at main while VERSION carries the alpha development marker' do
     metadata = metadata_for('2.1.0.alpha')
 
