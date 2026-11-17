@@ -60,6 +60,9 @@ module Woods
         validation save create update destroy commit rollback before_commit initialize find touch
       ].freeze
 
+      # Stands in for a schema header section whose read failed.
+      UNKNOWN_SCHEMA_SECTION = 'unknown (could not be read)'
+
       # Warnings collected during extraction (skipped associations, failed models)
       attr_reader :warnings
 
@@ -108,8 +111,9 @@ module Woods
 
         unit.namespace = model.module_parent.name unless model.module_parent == Object
         inlined_source, inlined_concerns = build_model_source_with_concerns(model, source)
-        unit.source_code = build_composite_source(model, inlined_source)
-        unit.metadata = extract_metadata(model, source, inlined_concerns: inlined_concerns)
+        foreign_keys = table_foreign_keys(model)
+        unit.source_code = build_composite_source(model, inlined_source, foreign_keys: foreign_keys)
+        unit.metadata = extract_metadata(model, source, inlined_concerns: inlined_concerns, foreign_keys: foreign_keys)
         unit.dependencies = extract_dependencies(model, source)
 
         # Enrich callbacks with side-effect analysis. The analyzer parses real
@@ -175,13 +179,14 @@ module Woods
       # @param model [Class] The ActiveRecord model class
       # @param inlined_source [String] Model source with concerns already
       #   inlined (see {#build_model_source_with_concerns})
+      # @param foreign_keys [Array, nil] the table's foreign keys (see {#table_foreign_keys})
       # @return [String]
-      def build_composite_source(model, inlined_source)
-        [build_schema_comment(model), inlined_source].compact.join("\n\n")
+      def build_composite_source(model, inlined_source, foreign_keys: table_foreign_keys(model))
+        [build_schema_comment(model, foreign_keys: foreign_keys), inlined_source].compact.join("\n\n")
       end
 
       # Generate schema comment block with columns, indexes, and foreign keys
-      def build_schema_comment(model)
+      def build_schema_comment(model, foreign_keys: table_foreign_keys(model))
         return nil unless model.table_exists?
 
         parts = []
@@ -194,16 +199,21 @@ module Woods
         parts << '#'
 
         indexes = format_indexes_comment(model)
-        if indexes.any?
+        if indexes.nil?
+          parts << "# Indexes: #{UNKNOWN_SCHEMA_SECTION}"
+          parts << '#'
+        elsif indexes.any?
           parts << '# Indexes:'
           parts.concat(indexes)
           parts << '#'
         end
 
-        foreign_keys = format_foreign_keys_comment(model)
-        if foreign_keys.any?
+        foreign_key_lines = format_foreign_keys_comment(foreign_keys)
+        if foreign_key_lines.nil?
+          parts << "# Foreign Keys: #{UNKNOWN_SCHEMA_SECTION}"
+        elsif foreign_key_lines.any?
           parts << '# Foreign Keys:'
-          parts.concat(foreign_keys)
+          parts.concat(foreign_key_lines)
         end
 
         parts.join("\n")
@@ -221,21 +231,52 @@ module Woods
         end
       end
 
+      # @return [Array<String>, nil] nil when the indexes could not be read
       def format_indexes_comment(model)
-        ActiveRecord::Base.connection.indexes(model.table_name).map do |idx|
+        read_table_schema(model, :indexes).map do |idx|
           unique = idx.unique ? ' (unique)' : ''
           "#   #{idx.name}: [#{idx.columns.join(', ')}]#{unique}"
         end
       rescue StandardError
-        []
+        nil
       end
 
-      def format_foreign_keys_comment(model)
-        ActiveRecord::Base.connection.foreign_keys(model.table_name).map do |fk|
+      # @param foreign_keys [Array, nil] see {#table_foreign_keys}
+      # @return [Array<String>, nil] nil when the foreign keys could not be read
+      def format_foreign_keys_comment(foreign_keys)
+        foreign_keys&.map do |fk|
           "#   #{fk.from_table}.#{fk.column} → #{fk.to_table}"
         end
       rescue StandardError
-        []
+        nil
+      end
+
+      # The table's foreign keys, read once per model: the schema header and
+      # +metadata[:foreign_keys]+ are both built from this one answer.
+      #
+      # @param model [Class]
+      # @return [Array, nil] the adapter's foreign keys, [] when the table
+      #   does not exist, nil when the read failed
+      def table_foreign_keys(model)
+        return [] unless model.table_exists?
+
+        read_table_schema(model, :foreign_keys)
+      rescue StandardError
+        nil
+      end
+
+      # One schema read of the model's table, from the model's own connection
+      # pool, which follows +connects_to+ and +establish_connection+ up the
+      # class tree. The connection goes back to the pool after the read:
+      # +model.connection+ would keep it leased to this thread for the
+      # thread's life, and a worker thread holding a small pool's only
+      # connection starves every other worker that needs that database.
+      #
+      # @param model [Class]
+      # @param kind [Symbol] +:indexes+ or +:foreign_keys+
+      # @return [Array] what the connection returns for the table
+      def read_table_schema(model, kind)
+        model.connection_pool.with_connection { |connection| connection.public_send(kind, model.table_name) }
       end
 
       # Read model source and inline all included concerns.
@@ -438,8 +479,10 @@ module Woods
       #   {#build_model_source_with_concerns}). When nil, derived by running
       #   the same inlining — the metadata must never claim a concern the
       #   composite source does not carry.
+      # @param foreign_keys [Array, nil] the table's foreign keys, as the
+      #   schema header saw them (see {#table_foreign_keys})
       # @return [Hash]
-      def extract_metadata(model, source = nil, inlined_concerns: nil)
+      def extract_metadata(model, source = nil, inlined_concerns: nil, foreign_keys: table_foreign_keys(model))
         callbacks = extract_callbacks(model)
         {
           # Core identifiers
@@ -494,7 +537,7 @@ module Woods
           # Foreign keys as the connection reports them. The target table's
           # database is a graph-level concern, resolved by the
           # cross_database_edges report, not stored per model here (#280).
-          foreign_keys: extract_foreign_keys(model),
+          foreign_keys: extract_foreign_keys(model, foreign_keys),
 
           # ActiveStorage / ActionText
           active_storage_attachments: extract_active_storage_attachments(source),
@@ -1018,11 +1061,11 @@ module Woods
       # report, which resolves it from table owners.
       #
       # @param model [Class]
+      # @param foreign_keys [Array, nil] see {#table_foreign_keys}; a failed
+      #   read (nil) publishes no foreign keys
       # @return [Array<Hash>] `{ from_table:, to_table:, column: }`
-      def extract_foreign_keys(model)
-        return [] unless model.table_exists?
-
-        model.connection.foreign_keys(model.table_name).map do |fk|
+      def extract_foreign_keys(model, foreign_keys = table_foreign_keys(model))
+        Array(foreign_keys).map do |fk|
           { from_table: fk.from_table.to_s, to_table: fk.to_table.to_s, column: fk.column.to_s }
         end
       rescue StandardError

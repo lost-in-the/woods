@@ -339,7 +339,7 @@ module Woods
             parsed = Woods::ParseCache.parse(text)
             next if parsed.errors.any?
 
-            definitions(parsed.value.statements, nil, name).each { |line| found << (line + first - 1) }
+            definitions(parsed.value.statements, [], name).each { |line| found << (line + first - 1) }
           end
         end
 
@@ -355,19 +355,21 @@ module Woods
           parsed = Woods::ParseCache.parse(source)
           return Set.new if parsed.errors.any?
 
-          definitions(parsed.value.statements, nil, identifier).to_set
+          definitions(parsed.value.statements, [], identifier).to_set
         end
 
         # Start lines of the `class_methods` definitions in the body of the
-        # module named +concern+.
-        def definitions(node, owner, concern)
+        # module named +concern+, +nesting+ being the enclosing qualified
+        # names, outermost first.
+        def definitions(node, nesting, concern, names = DeclarationName.new)
           statements(node).flat_map do |statement|
             next [] unless statement.is_a?(Prism::ModuleNode) || statement.is_a?(Prism::ClassNode)
 
-            inner = MethodTable::Names.qualified(owner, statement.constant_path)
+            inner = MethodTable::Names.declared(names, nesting, statement.constant_path)
             next [] unless inner
+            next class_methods_in(statement.body) if inner == concern
 
-            inner == concern ? class_methods_in(statement.body) : definitions(statement.body, inner, concern)
+            definitions(statement.body, [*nesting, inner], concern, names)
           end
         end
 

@@ -3,6 +3,7 @@
 require_relative 'line_neutralizer'
 require 'prism'
 require_relative '../parse_cache'
+require_relative '../declaration_name'
 
 module Woods
   module Extractors
@@ -77,9 +78,10 @@ module Woods
       # Every class and module body in the source, with the byte range it
       # spans, for asking what `Module.nesting` is at a position.
       #
-      # A scope's name is its declaration joined onto the enclosing scopes'
-      # names, as written: `class Fleet::Shipment` inside `module Ops` is
-      # +Ops::Fleet::Shipment+, and contributes one nesting entry, not two.
+      # A scope's name is its declaration named as Ruby's constant lookup
+      # names it ({Woods::DeclarationName}): `class Fleet::Shipment` inside
+      # `module Ops` is +Ops::Fleet::Shipment+ and contributes one nesting
+      # entry, not two, while `class Ops::Shipment` there is +Ops::Shipment+.
       #
       # @param source [String] Ruby source code
       # @return [Array<Array(Integer, Integer, String)>, nil] start and end
@@ -107,26 +109,26 @@ module Woods
         return nil unless parsed.success?
 
         scopes = []
-        collect_scopes(parsed.value, [], scopes)
+        collect_scopes(parsed.value, [], scopes, DeclarationName.new)
         scopes
       end
 
       # Keep source order without recursing through arbitrarily deep
       # expression trees, including long constant paths in method bodies.
       # @return [void]
-      def self.collect_scopes(node, namespace, scopes)
+      def self.collect_scopes(node, namespace, scopes, names)
         pending = [[node, namespace]]
         while (entry = pending.pop)
           current, enclosing = entry
           next unless current
 
           if current.is_a?(Prism::ClassNode) || current.is_a?(Prism::ModuleNode)
-            declaration = DECLARATION_PATTERN.match(current.location.slice)
-            next unless declaration
+            path = DeclarationName.path(current.constant_path)
+            next unless path
 
-            nesting = [*enclosing, declaration[2]]
-            scopes << [current.location.start_offset, current.location.end_offset, nesting.join('::')]
-            pending << [current.body, nesting]
+            qualified = names.declare(path, enclosing)
+            scopes << [current.location.start_offset, current.location.end_offset, qualified]
+            pending << [current.body, [*enclosing, qualified]]
           else
             current.compact_child_nodes.reverse_each { |child| pending << [child, enclosing] }
           end
@@ -205,12 +207,12 @@ module Woods
         parsed = Woods::ParseCache.parse(source)
         return unless parsed.success?
 
-        each_syntax_declaration(parsed.value) do |kind, name, _qualified, node|
+        each_syntax_declaration(parsed.value) do |kind, name, qualified, node|
           return unless kind == 'module'
           return if name.split('::').any? { |part| MIXIN_INNER_MODULES.include?(part) }
           next if !node.body && node.location.start_line == node.location.end_line
 
-          return primary_module_chain(node) || name
+          return primary_module_chain(node) || qualified
         end
 
         nil
@@ -218,16 +220,18 @@ module Woods
 
       # Only a sole nonempty module is a namespace wrapper. Parse the complete
       # source before calling this so heredoc bodies remain literal text.
-      def primary_module_chain(node)
+      def primary_module_chain(node, nesting = [], names = DeclarationName.new)
         return unless node.is_a?(Prism::ModuleNode) && node.body
 
-        name = DECLARATION_PATTERN.match(node.location.slice)&.[](2)
-        return if !name || name.split('::').any? { |part| MIXIN_INNER_MODULES.include?(part) }
-        return name unless node.body.is_a?(Prism::StatementsNode) # rescue/ensure belongs to this owner
+        path = DeclarationName.path(node.constant_path)
+        return if !path || path.split('::').any? { |part| MIXIN_INNER_MODULES.include?(part) }
+
+        qualified = names.declare(path, nesting)
+        return qualified unless node.body.is_a?(Prism::StatementsNode) # rescue/ensure belongs to this owner
 
         statements = node.body.body
-        nested = primary_module_chain(statements.first) if statements.one?
-        [name, nested].compact.join('::')
+        nested = primary_module_chain(statements.first, [*nesting, qualified], names) if statements.one?
+        nested || qualified
       end
       private :primary_module_chain
 
@@ -256,7 +260,9 @@ module Woods
       # @param source [String] Ruby source code
       # @yieldparam kind [String] 'module' or 'class'
       # @yieldparam name [String] The declared (possibly compact) name
-      # @yieldparam qualified [String] Enclosing stack joined with the name
+      # @yieldparam qualified [String] The name Ruby's constant lookup gives
+      #   it ({Woods::DeclarationName}); the line scanner joins the enclosing
+      #   stack with the name
       # @return [void]
       def each_declaration(source, &block)
         parsed = Woods::ParseCache.parse(source)
@@ -285,19 +291,19 @@ module Woods
       # Walk syntactic scopes without evaluating conditionals or interpreting
       # literal contents as Ruby. Declarations under method/singleton scopes
       # cannot establish the ordinary constant ownership used by these units.
-      def each_syntax_declaration(node, namespace = [], &block)
+      def each_syntax_declaration(node, namespace = [], names = DeclarationName.new, &block)
         return unless node
         return if node.is_a?(Prism::DefNode) || node.is_a?(Prism::SingletonClassNode)
 
         if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
-          declaration = DECLARATION_PATTERN.match(node.location.slice)
-          return unless declaration
+          path = DeclarationName.path(node.constant_path)
+          return unless path
 
-          nesting = [*namespace, declaration[2]]
-          yield declaration[1], declaration[2], nesting.join('::'), node
-          each_syntax_declaration(node.body, nesting, &block)
+          qualified = names.declare(path, namespace)
+          yield node.is_a?(Prism::ClassNode) ? 'class' : 'module', path, qualified, node
+          each_syntax_declaration(node.body, [*namespace, qualified], names, &block)
         else
-          node.compact_child_nodes.each { |child| each_syntax_declaration(child, namespace, &block) }
+          node.compact_child_nodes.each { |child| each_syntax_declaration(child, namespace, names, &block) }
         end
       end
 
