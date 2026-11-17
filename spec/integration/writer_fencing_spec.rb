@@ -305,7 +305,7 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
           expire_lease!
           b, b_ready = spawn_writer('B', shape: shape, pause_at: :staged)
           wait_stopped(b, b_ready)
-          b_stage = stages.find { |name| !name.end_with?(lock_token_of(a_ready)) }
+          b_stage = stages.find { |name| !name.include?(lock_token_of(a_ready)) }
 
           Process.kill('CONT', a)
           expect(finish(a)).to eq(2)
