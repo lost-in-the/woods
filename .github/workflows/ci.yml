@@ -241,14 +241,18 @@ jobs:
           spec/integration/booted_extraction_spec.rb
           spec/integration/lazy_routes_equivalence_spec.rb
           spec/integration/mailer_determinism_spec.rb
+          spec/integration/callback_dispatch_forms_spec.rb
           spec/integration/validation_options_spec.rb
+          spec/integration/scope_owner_forms_spec.rb
           spec/integration/concurrent_extraction_pool_spec.rb
           spec/integration/writer_fencing_booted_spec.rb
           spec/integration/declaration_identity_spec.rb
           spec/integration/console_credential_rotation_spec.rb
           spec/integration/session_controller_identity_spec.rb
+          spec/integration/flow_action_owner_spec.rb
           spec/integration/multi_database_extraction_spec.rb
           spec/integration/multi_database_concurrent_extraction_spec.rb
+          spec/integration/schema_readability_spec.rb
           spec/integration/multi_database_schema_comment_spec.rb
           spec/integration/hook_refresh_spec.rb
           spec/integration/source_input_drift_spec.rb

@@ -24,6 +24,7 @@ This guide covers the most common problems encountered when installing, extracti
 | `JSON parse errors` (MCP) | Rails boot noise on stdout | Remove `puts` calls from initializers |
 | Query timeout | Large table, no scope | Add scope conditions to narrow results |
 | `Extraction failed for …; the previous generation remains active` | A consumer handled a source error during incremental extraction or refresh (included in Woods `2.0.0`) | Fix the logged source error and retry the [complete batch](INCREMENTAL_EXTRACTION.md#handled-source-errors-and-retry); watch keeps it pending |
+| `Published generation marker is unreadable or malformed` | `generation.json` exists but cannot be read | Restore it only from a backup of the marker and its payload, otherwise extract into a fresh output directory: [generation.json is unreadable](#generationjson-is-unreadable) |
 | Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
 | Git metadata missing | Shallow clone in CI | Use `fetch-depth: 0` for complete history |
 | Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
@@ -518,6 +519,35 @@ An image with no `git` binary at all reports `git unavailable: …` and takes th
 - Notion: check `NOTION_API_TOKEN` and that every database ID in `notion_database_ids` is shared with the integration.
 
 A partial run is not rolled back: whatever succeeded is durable, and re-running after the fix converges.
+
+---
+
+### generation.json is unreadable
+
+**Symptom:** a writer refuses with `Published generation marker is unreadable or malformed`.
+Or `has an invalid shape`; both name `generation.json` and say `refusing to publish a new generation over it`.
+A resident `woods:watch` reports `degraded` with the same advice and does not extract.
+
+**Cause:** the marker that names the published generation exists but cannot be read.
+A writer will not number from 0 over it: that would replace a retained `payloads/gen-1` and move the marker backward.
+
+**Fix:** restore the marker only from a complete backup of `generation.json` and the `payloads/gen-<n>` it names.
+Put both back as they were saved; the marker has this shape:
+
+```json
+{"number":3,"payload":"payloads/gen-3"}
+```
+
+A saved marker on its own, or a generation a reader once served, is not enough.
+It proves what was published then, not what the directory holds now.
+The marker's number can go backward: an older marker is restored, or `generation.json` is deleted.
+The next writer then stages the following number and replaces that unpinned `gen-<n>` before it writes its marker.
+A run that fails in between leaves the directory holding a payload that was never published.
+The index records no checksum of a payload's contents, so nothing in it can prove a retained directory is unchanged.
+Neither the retained directories nor their order are evidence of publication.
+
+Without a complete backup, keep the old output directory as it is.
+Extract into a fresh output directory, validate it with `woods:validate`, and point readers at it.
 
 ---
 

@@ -45,10 +45,13 @@ module Woods
 
       # A full run records the missing boundary even when incremental discovery
       # would find no units to change (and therefore publish no new generation).
+      # With no generation published at all there is no baseline either, and an
+      # incremental run refuses, so the first index is always a full run.
       #
-      # @return [Boolean] true when a published generation has no usable source manifest
+      # @return [Boolean] true when no generation is published, or the published
+      #   one has no usable source manifest
       def rebuild?
-        @marker.number.positive? && @manifest.nil?
+        @manifest.nil?
       end
 
       # Whether {#paths} compares against the published generation's
@@ -79,6 +82,19 @@ module Woods
         kept = candidates.reject { |path| check.unchanged?(path) }
         @unchanged = candidates.size - kept.size
         kept
+      end
+
+      # Whether the published generation captured this file's current bytes,
+      # by the same test {#paths} drops a candidate with. Calls on one
+      # instance share one digest budget.
+      #
+      # @param path [String] absolute path
+      # @return [Boolean] false unless {#comparable?}
+      def captured?(path)
+        return false unless comparable?
+
+        @content ||= UnchangedContent.new(root: @root, key: @key, recorded: recorded_identities)
+        @content.unchanged?(path)
       end
 
       # Absolute paths the published generation captured that are no longer
