@@ -148,7 +148,8 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
 
       expect(logged.grep(/\[profile total\] full in/).size).to eq(1)
       expect(profiled_phases).to eq(
-        ['source capture', 'payload seed', 'eager load', 'component load', 'extraction', 'owner fallback',
+        ['source capture', 'payload seed', 'eager load', 'component load', 'schema readability', 'extraction',
+         'owner fallback',
          'deduplication', 'package annotation',
          'container annotation', 'source size',
          'source references', 'graph rebuild', 'doc references', 'dependents', 'git enrichment', 'graph analysis',

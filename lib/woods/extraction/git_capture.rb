@@ -232,7 +232,7 @@ module Woods
 
       # @return [Hash] see {#availability}
       def probe_availability
-        _output, error, status = Open3.capture3(*git_argv('rev-parse', 'HEAD'))
+        _output, error, status = Open3.capture3(GitCommand::CHILD_ENV, *git_argv('rev-parse', 'HEAD'))
         unless status.success?
           warn_unresolvable(error)
           return { available: false, reason: requested? ? 'head_unresolvable' : 'no_repository' }
@@ -280,7 +280,8 @@ module Woods
       #
       # @return [Boolean]
       def complete_history?
-        output, _error, status = Open3.capture3(*git_argv('rev-parse', '--is-shallow-repository'))
+        output, _error, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                                *git_argv('rev-parse', '--is-shallow-repository'))
         return true if status.success? && output.strip == 'false'
 
         shallow = status.success? && output.strip == 'true'
@@ -346,12 +347,13 @@ module Woods
       def replacement_refs
         return '' if ENV.key?('GIT_NO_REPLACE_OBJECTS')
 
-        enabled, _error, status = Open3.capture3(*git_argv('config', '--bool', 'core.useReplaceRefs'))
+        enabled, _error, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                                 *git_argv('config', '--bool', 'core.useReplaceRefs'))
         return '' if status.success? && enabled.strip == 'false'
 
         base = replace_ref_base
         output, _error, status = Open3.capture3(
-          *git_argv('for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)')
+          GitCommand::CHILD_ENV, *git_argv('for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)')
         )
         return nil unless status.success?
 
@@ -374,7 +376,8 @@ module Woods
       # @return [String, nil] the grafts file's bytes, empty without one; nil
       #   when git could not name it
       def grafts_content
-        output, _error, status = Open3.capture3(*git_argv('rev-parse', '--git-path', 'info/grafts'))
+        output, _error, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                                *git_argv('rev-parse', '--git-path', 'info/grafts'))
         return nil unless status.success?
 
         path = File.expand_path(output.strip, @root.to_s)
@@ -398,7 +401,7 @@ module Woods
       # @param args [Array<String>] Git command arguments
       # @return [String] command output (empty string on failure)
       def run_git(*args)
-        output, _error, status = Open3.capture3(*git_argv(*args))
+        output, _error, status = Open3.capture3(GitCommand::CHILD_ENV, *git_argv(*args))
         status.success? ? output.strip : ''
       rescue StandardError
         ''

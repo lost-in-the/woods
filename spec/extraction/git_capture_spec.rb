@@ -94,7 +94,8 @@ RSpec.describe Woods::Extraction::GitCapture do
       allow(Open3).to receive(:capture3).and_call_original
 
       2.times { expect(capture.available?).to be(true) }
-      expect(Open3).to have_received(:capture3).with('git', '-C', root.to_s, 'rev-parse', 'HEAD').once
+      expect(Open3).to have_received(:capture3)
+        .with(Woods::GitCommand::CHILD_ENV, 'git', '-C', root.to_s, 'rev-parse', 'HEAD').once
     end
 
     it 'answers no_repository quietly for a source archive' do
@@ -206,6 +207,20 @@ RSpec.describe Woods::Extraction::GitCapture do
       capture.request_recheck('Post')
 
       expect(capture.rechecks).to eq(Set['Post'])
+    end
+  end
+
+  describe '#history_rewrites' do
+    it 'reads replacement, the replace refs and the grafts path with the child environment' do
+      init_repository
+      allow(Open3).to receive(:capture3).and_call_original
+
+      expect(capture.history_rewrites).to be_nil
+      [%w[config --bool core.useReplaceRefs],
+       ['for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)'],
+       %w[rev-parse --git-path info/grafts]].each do |args|
+        expect(Open3).to have_received(:capture3).with(Woods::GitCommand::CHILD_ENV, 'git', '-C', root.to_s, *args)
+      end
     end
   end
 

@@ -45,6 +45,17 @@ module Woods
     # Raised by strict readers instead of treating corruption as a legacy index.
     class InvalidMarker < IOError; end
 
+    # How to recover from an {InvalidMarker}, for every message that reports
+    # one. A saved marker proves what was published when it was saved, not
+    # what its directory holds now: once the number goes backward, a writer
+    # replaces the unpinned `gen-<n>` it names before writing its own marker.
+    # The index records no checksum of a payload, so only a backup of both
+    # proves a restore.
+    RESTORE_ADVICE = 'Restore it only from a complete backup of generation.json and the payloads/gen-<n> it ' \
+                     'names; nothing in the index proves a retained payload still holds what was published. ' \
+                     'Otherwise keep the old output directory as it is, and extract and validate into a fresh ' \
+                     'output directory.'
+
     # An immutable snapshot of the generation file.
     #
     # @!attribute number

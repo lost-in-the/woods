@@ -169,7 +169,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
 
     it 'wins over an unreachable commondir and restores the git keys' do
       break_commondir!
-      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => @mounted_gitdir))
+      replace_env(ENV.to_h.merge('WOODS_GIT_DIR' => @mounted_gitdir))
 
       unit = enrich!
 
@@ -180,7 +180,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
 
     it 'uses the relocated layout when the original shared directory is absent' do
       FileUtils.rm_rf(File.join(main_repo, '.git'))
-      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => @mounted_gitdir))
+      replace_env(ENV.to_h.merge('WOODS_GIT_DIR' => @mounted_gitdir))
 
       unit = enrich!
 
@@ -203,7 +203,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
     end
 
     it 'is ignored when it is empty' do
-      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => ''))
+      replace_env(ENV.to_h.merge('WOODS_GIT_DIR' => ''))
 
       unit = enrich!
 

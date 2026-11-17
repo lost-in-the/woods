@@ -85,7 +85,7 @@ module Woods
           path = Layout::WRAPPER
           raise Conflict, 'Refusing to overwrite an unowned bin/woods-watch' if content(path)
 
-          text = Templates.wrapper(@options.child_command)
+          text = Templates.wrapper(@options.child_command, @options.update_command)
           @contents[path] = text
           @modes[path] = 0o755
           @new_receipt.fetch('files')[path] = { 'sha256' => Digest::SHA256.hexdigest(text), 'mode' => 0o755, 'exists' => true }

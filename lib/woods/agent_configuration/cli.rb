@@ -7,6 +7,7 @@ require_relative 'launcher'
 require_relative 'preflight'
 require_relative 'planner'
 require_relative 'applier'
+require_relative 'entry_form'
 
 module Woods
   module AgentConfiguration
@@ -68,17 +69,50 @@ module Woods
         path = options[:plan]
         raise Conflict, 'Choose --plan FILE for the private, reviewable write plan' unless path
 
-        launcher = if operation != 'remove'
-                     Launcher.new(root: layout.root, **options.slice(:index, :mode, :service, :container_root))
-                   end
+        launcher, form, note = build_launcher(layout, options) if operation != 'remove'
         evidence = launcher ? @preflight.call(launcher) : {}
-        plan = Planner.new(layout: layout, operation: operation, entry: launcher&.entry,
-                           name: options.fetch(:name), instructions: options[:instructions],
-                           evidence: evidence, intent: launcher ? launcher.intent : {}).call
+        planner = Planner.new(layout: layout, operation: operation, entry: launcher&.entry,
+                              name: options.fetch(:name), instructions: options[:instructions],
+                              evidence: evidence, intent: launcher ? launcher.intent : {})
+        plan = planner.call
         write_plan(path, plan, layout)
         PlanDiff.show(plan, @stderr) if options[:diff]
-        plan.summary.merge('plan_file' => File.expand_path(path),
-                           'runtime_files' => layout.runtime_paths)
+        plan.summary.merge('plan_file' => File.expand_path(path), 'runtime_files' => layout.runtime_paths)
+            .merge(outcome(layout, launcher, form, note, planner)).compact
+      end
+
+      def outcome(layout, launcher, form, form_note, planner)
+        { 'entry_form' => form, 'adopted' => (true if planner.adopted?),
+          'notes' => notes(layout, launcher, form_note, planner) }
+      end
+
+      # What the plan cannot do itself and the user should know.
+      def notes(layout, launcher, form_note, planner)
+        return if launcher.nil?
+
+        list = [form_note]
+        if planner.adopted?
+          list << 'adopted the existing woods entry, identical to what setup writes; ' \
+                  'this checkout now has its own receipt'
+        end
+        if layout.scope == 'project'
+          list << ".woods-agent-config.json is this machine's, and apply keeps a lock beside each file it manages: " \
+                  "add #{Layout::GITIGNORE.join(' and ')} to .gitignore and commit .mcp.json"
+        end
+        if launcher.form == 'relative' && launcher.mode == 'compose'
+          list << "the #{launcher.service} service's working_dir must be the application root inside the " \
+                  'container (the preflight ran there, as the entry will), and a linked worktree reaches the ' \
+                  'running service only when the Compose project name is pinned (a top-level `name:` or ' \
+                  'COMPOSE_PROJECT_NAME)'
+        end
+        list.compact
+      end
+
+      def build_launcher(layout, options)
+        form, note = EntryForm.choose(layout, options[:entry_form])
+        launcher = Launcher.new(root: layout.root, form: form,
+                                **options.slice(:index, :mode, :service, :container_root))
+        [launcher, form, note]
       end
 
       def write_plan(path, plan, layout)

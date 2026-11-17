@@ -23,7 +23,8 @@ module Woods
       private
 
       def paths_and_scope
-        output, _error, status = Open3.capture3(*GitCommand.argv(@root, 'ls-files', '-z', '--cached', '--others',
+        output, _error, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                                *GitCommand.argv(@root, 'ls-files', '-z', '--cached', '--others',
                                                                  '--exclude-standard'))
         status.success? ? [output.split("\0"), 'git_nonignored'] : [[], 'covered_sources_only_git_unavailable']
       rescue Errno::ENOENT

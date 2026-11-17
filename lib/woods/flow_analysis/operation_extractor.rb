@@ -29,6 +29,9 @@ module Woods
       # Keys of an operation that hold the operations nested inside it.
       NESTED_KEYS = %i[nested then_ops else_ops].freeze
 
+      # Node types of a `super` call: explicit arguments, bare (Prism), and bare (parser gem).
+      SUPER_TYPES = %i[super forwarding_super zsuper].freeze
+
       # Node types whose children do not run where they are written: a
       # lambda body (Prism), the operand of `defined?` (Prism, parser gem).
       UNEVALUATED_TYPES = %i[lambda defined defined?].freeze
@@ -69,10 +72,15 @@ module Woods
         end
       end
 
+      # @param super_calls [Boolean] mark each `super` call with a
+      #   `{ type: :super_call }` operation where Ruby makes it: after its
+      #   arguments, before its block, inside the branch or block that holds
+      #   it. Without it a `super` call is no operation.
       # @param inside_definition [Boolean] @api private: true for the walker
       #   of a definition's own statements, where a nested `def` only installs
       #   a method
-      def initialize(inside_definition: false)
+      def initialize(super_calls: false, inside_definition: false)
+        @super_calls = super_calls
         @inside_definition = inside_definition
       end
 
@@ -94,6 +102,7 @@ module Woods
       def walk(node, operations)
         return unless node.is_a?(Ast::Node)
         return if UNEVALUATED_TYPES.include?(node.type)
+        return handle_super(node, nil, operations) if super_call?(node)
 
         case node.type
         when :block
@@ -117,7 +126,7 @@ module Woods
       def walk_definition(node, operations)
         children = Array(node.children).reject { |child| child.is_a?(Ast::Node) && child.type == :definition_receiver }
         defaults, body = children.partition { |child| child.is_a?(Ast::Node) && child.type == :parameter_defaults }
-        walker = (@definition_walker ||= self.class.new(inside_definition: true))
+        walker = (@definition_walker ||= self.class.new(super_calls: @super_calls, inside_definition: true))
         (defaults + body).each { |child| walker.send(:walk, child, operations) }
       end
 
@@ -154,6 +163,9 @@ module Woods
             **call_lines(send_child),
             nested: nested
           }
+        elsif super_call?(send_child)
+          # The parser gem wraps `super do ... end` the way it wraps a call.
+          handle_super(send_child, node.children.drop(1), operations)
         else
           # Non-transaction block: emit the send as a normal call, walk body
           handle_send(send_child, operations) if send_child.is_a?(Ast::Node) && send_child.type == :send
@@ -161,10 +173,71 @@ module Woods
         end
       end
 
+      def super_call?(node)
+        @super_calls && node.is_a?(Ast::Node) && SUPER_TYPES.include?(node.type)
+      end
+
+      # A `super` call evaluates its arguments, then calls the next
+      # definition, which runs any block it was given.
+      #
+      # @param node [Ast::Node] the `super` node
+      # @param block [Array<Ast::Node>, nil] the block body, when the parser
+      #   holds it outside +node+; otherwise read from +node+'s children
+      # @param nested [Boolean] whether the call is part of an expression
+      #   (another call's receiver or argument), where only `super` calls
+      #   are marked, as only enqueues are collected there
+      def handle_super(node, block, operations, nested: false)
+        children = Array(node.children).grep(Ast::Node)
+        block ||= children.select { |child| child.type == :block_body }
+        visit = nested ? method(:collect_nested_super) : method(:walk)
+        (children - block).each { |child| visit.call(child, operations) }
+        operations << { type: :super_call, line: node.line }
+        block.each { |child| visit.call(child, operations) }
+      end
+
+      # Mark each `super` call in the expression +node+, a call's receiver or
+      # argument, where Ruby makes it: before that call, and inside the
+      # conditional expression (`ok? ? super : {}`) that holds it.
+      def collect_nested_super(node, operations)
+        return unless node.is_a?(Ast::Node)
+        return handle_super(node, nil, operations, nested: true) if super_call?(node)
+        return if deferred_expression?(node)
+
+        case node.type
+        when :if then collect_conditional_super(node, operations, 'if')
+        when :case then collect_conditional_super(node, operations, 'case')
+        else Array(node.children).each { |child| collect_nested_super(child, operations) }
+        end
+      end
+
+      # An expression whose code runs only when something calls it.
+      def deferred_expression?(node)
+        UNEVALUATED_TYPES.include?(node.type) || %i[def defs].include?(node.type) || self.class.deferred_block?(node)
+      end
+
+      # The `super` calls of an `if` or `case` expression: its predicate's
+      # first, then each branch's inside a conditional, as
+      # {#handle_conditional} and {#handle_case} lay out statements.
+      def collect_conditional_super(node, operations, kind)
+        children = node.children || []
+        collect_nested_super(children[0], operations)
+        branches = kind == 'if' ? [[children[1]], [children[2]]] : [children.drop(1), []]
+        then_ops, else_ops = branches.map do |branch|
+          branch.each_with_object([]) { |child, ops| collect_nested_super(child, ops) }
+        end
+        return if then_ops.empty? && else_ops.empty?
+
+        operations << { type: :conditional, kind: kind, condition: condition_source(children[0]) || node.source,
+                        line: node.line, then_ops: then_ops, else_ops: else_ops }
+      end
+
       # Handle :send nodes - classify into operation types.
       def handle_send(node, operations)
         return unless node.is_a?(Ast::Node) && node.type == :send
         return walk_negated(node, operations) if negation?(node)
+
+        # Ruby evaluates a call's receiver and arguments before the call.
+        (node.children || []).each { |child| collect_nested_super(child, operations) } if @super_calls
 
         if async_call?(node)
           operations << {

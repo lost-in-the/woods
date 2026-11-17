@@ -148,7 +148,8 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     allow(Rails).to receive(:root).and_return(shallow)
     allow(Open3).to receive(:capture3).and_call_original
     expect(Open3).to receive(:capture3)
-      .with('git', '-C', shallow.to_s, 'rev-parse', '--is-shallow-repository').once.and_call_original
+      .with(Woods::GitCommand::CHILD_ENV, 'git', '-C', shallow.to_s, 'rev-parse', '--is-shallow-repository')
+      .once.and_call_original
     logger = Rails.logger
     expect(logger).to receive(:warn).once.with(/shallow.*git fetch --unshallow.*fetch-depth: 0/)
     expect(Woods::GitHistory).not_to receive(:new)
@@ -167,7 +168,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
   it 'omits enrichment when repository depth cannot be verified' do
     allow(Open3).to receive(:capture3).and_call_original
     allow(Open3).to receive(:capture3)
-      .with('git', '-C', root.to_s, 'rev-parse', '--is-shallow-repository')
+      .with(Woods::GitCommand::CHILD_ENV, 'git', '-C', root.to_s, 'rev-parse', '--is-shallow-repository')
       .and_return(['', 'repository inaccessible', double(success?: false)])
     expect(Rails.logger).to receive(:warn).once.with(/repository depth could not be verified/)
 
@@ -201,7 +202,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
   %w[WOODS_GIT_DIR GIT_DIR].each do |variable|
     it "warns for a missing git executable when #{variable} selects a repository without a root .git" do
       FileUtils.rm_rf(root.join('.git'))
-      stub_const('ENV', ENV.to_h.merge(variable => root.join('external-git').to_s))
+      replace_env(ENV.to_h.merge(variable => root.join('external-git').to_s))
       allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT, 'git')
       expect(Rails.logger).to receive(:warn).once.with(/Git history unavailable: git executable/)
 
@@ -211,7 +212,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
 
   it 'keeps no-git source archives quiet and preserves their supplied provenance' do
     FileUtils.rm_rf(root.join('.git'))
-    stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => '', 'GIT_DIR' => ''))
+    replace_env(ENV.to_h.merge('WOODS_GIT_DIR' => '', 'GIT_DIR' => ''))
     allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT, 'git')
     expect(Rails.logger).not_to receive(:warn)
 
