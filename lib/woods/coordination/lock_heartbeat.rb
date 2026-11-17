@@ -27,9 +27,8 @@ module Woods
       # {Woods::Watch::Status} uses for its own heartbeat.
       INTERVAL_RATIO = 3.0
 
-      # How often the loop wakes to re-check the stop flag. Independent of the
-      # refresh interval so a short run's end is noticed promptly rather than a
-      # third of the window later.
+      # How often the loop wakes to check whether a refresh is due. A stop does
+      # not wait for it: the end of the block wakes the loop at once.
       TICK = 1.0
 
       # Run a block with the lock kept fresh underneath it.
@@ -46,6 +45,8 @@ module Woods
         @tick = tick
         @interval = lock.stale_timeout / INTERVAL_RATIO
         @stop = false
+        @mutex = Mutex.new
+        @wake = ConditionVariable.new
       end
 
       # @return [Object] the block's return value
@@ -53,11 +54,24 @@ module Woods
         thread = start_thread
         yield
       ensure
-        @stop = true
+        stop
         thread&.join(@tick + 1)
       end
 
       private
+
+      def stop
+        @mutex.synchronize do
+          @stop = true
+          @wake.signal
+        end
+      end
+
+      # Waits one tick, or less when {#stop} signals. The flag is checked under
+      # the mutex so a stop issued before the wait begins is not missed.
+      def wait_tick
+        @mutex.synchronize { @wake.wait(@mutex, @tick) unless @stop }
+      end
 
       def start_thread
         # A raising heartbeat must never become the caller's error. `join`
@@ -87,7 +101,7 @@ module Woods
         # on a dev machine.
         last = now
         until @stop
-          sleep(@tick)
+          wait_tick
           next if @stop || now - last < @interval
 
           @lock.touch
