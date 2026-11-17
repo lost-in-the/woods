@@ -544,6 +544,21 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
+    it 'reports an unknown store adapter with no connection detail anywhere in the cause chain' do
+      Woods.configuration.embedding_provider = nil
+      Woods.configuration.embedding_options = nil
+      Dir.mktmpdir do |dir|
+        write_fake_snapshot(dir)
+        allow_any_instance_of(Woods::Builder).to receive(:build_retriever)
+          .and_raise(ArgumentError, 'Unknown vector_store: cassandra (host=db-fakesecretmarker)')
+
+        expect { described_class.build_retriever(index_dir: dir) }.to raise_error(Woods::MCP::BootstrapError) do |e|
+          expect(e.message).to start_with('Unknown vector_store: cassandra (host=[REDACTED]')
+          expect(cause_chain_text(e)).not_to include('fakesecretmarker')
+        end
+      end
+    end
+
     it 'keeps a ConfigurationError from the Builder as it is, for the exes to print' do
       Woods.configuration.embedding_provider = nil
       Woods.configuration.embedding_options = nil
@@ -1222,6 +1237,32 @@ RSpec.describe Woods::MCP::Bootstrapper do
         # A and B got their metadata back-filled; D keeps empty hash
         ids = vs.each_entry.map { |id, _, _| id }
         expect(ids).to contain_exactly('A', 'B', 'D')
+      end
+    end
+
+    # A reload error's message is redacted; the error it translates carries
+    # the same text unredacted, so it is not kept as the cause.
+    {
+      'resolving the configuration' => -> { allow(Woods::MCP::ConfigResolver).to receive(:resolve) },
+      'loading the vector candidate' => -> { allow(Woods::Storage::Snapshotter::Vector).to receive(:load_dump_dir) },
+      'loading the metadata candidate' => lambda {
+        allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_dump_dir)
+      },
+      'hydrating the graph candidate' => -> { allow(described_class).to receive(:hydrated_graph_store) }
+    }.each do |step, stub|
+      it "degrades a reload that fails #{step} with no connection detail anywhere in the cause chain" do
+        Dir.mktmpdir do |dir|
+          write_artifact(dir, vector_entries: [['User', [1.0, 0.0, 0.0, 0.0], {}]],
+                              metadata_entries: [['User', { 'type' => 'model' }]])
+          retriever, = described_class.build_retriever(index_dir: dir)
+          instance_exec(&stub).and_raise(RuntimeError, 'failed: host=db-fakesecretmarker password=pw-fakesecretmarker')
+
+          expect { described_class.reload_stores!(retriever, index_dir: dir) }
+            .to raise_error(Woods::MCP::ReloadDegraded) do |error|
+              expect(error.message).to include('host=[REDACTED]')
+              expect(cause_chain_text(error)).not_to include('fakesecretmarker')
+            end
+        end
       end
     end
   end

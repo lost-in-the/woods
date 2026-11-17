@@ -600,7 +600,19 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect { store.count }.to raise_error(described_class::RequestError) do |error|
         expect(error.message).to include('Qdrant transport error: SocketError: getaddrinfo for https://[REDACTED]@')
-        expect(error.message).not_to include('fakesecretmarker')
+        expect(error.cause).to be_nil
+        expect(error.full_message(highlight: false)).not_to include('fakesecretmarker')
+      end
+    end
+
+    it 'names a TLS failure without connection details, in its message or a cause' do
+      allow(http).to receive(:request)
+        .and_raise(OpenSSL::SSL::SSLError, 'certificate rejected for https://key-fakesecretmarker@qdrant.example')
+
+      expect { store.count }.to raise_error(described_class::RequestError) do |error|
+        expect(error.message).to include('Qdrant TLS error: certificate rejected for https://[REDACTED]@')
+        expect(error.cause).to be_nil
+        expect(error.full_message(highlight: false)).not_to include('fakesecretmarker')
       end
     end
 
@@ -815,6 +827,23 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       expect do
         described_class.new(url: 'http:///', collection: 'x')
       end.to raise_error(ArgumentError, /must include a host/)
+    end
+
+    it 'rejects a URL the parser cannot read without repeating the URL, in its message or a cause' do
+      url = 'https://key:pw-fakesecretmarker value@qdrant.example'
+
+      expect { described_class.new(url: url, collection: 'x') }
+        .to raise_error(ArgumentError, /not a valid URI/) do |error|
+          expect(error.cause).to be_nil
+          expect(error.full_message(highlight: false)).not_to include('fakesecretmarker')
+        end
+    end
+
+    it "rejects a URL with no host without repeating the URL's credentials" do
+      expect { described_class.new(url: 'https://key:pw-fakesecretmarker@', collection: 'x') }
+        .to raise_error(ArgumentError, /must include a host/) do |error|
+          expect(error.message).not_to include('fakesecretmarker')
+        end
     end
 
     it 'rejects the AWS IMDS address by default' do

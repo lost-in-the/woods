@@ -255,13 +255,17 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
       %w[a b c].each { |id| expect(sql.scan("'#{id}'").length).to eq(1) }
     end
 
-    it 'names a cardinality violation without connection details' do
+    it 'names a cardinality violation without connection details, in its message or a cause' do
       stub_const('PG::CardinalityViolation', Class.new(StandardError))
       allow(strict_connection).to receive(:execute)
         .and_raise(PG::CardinalityViolation, 'cannot affect row a second time (host=db-fakesecretmarker)')
 
       expect { strict_store.store_batch([{ id: 'alpha', vector: [1.0, 2.0, 3.0], metadata: {} }]) }
-        .to raise_error(Woods::Error) { |e| expect(e.message).not_to include('fakesecretmarker') }
+        .to raise_error(Woods::Error) do |error|
+          expect(error.message).to include('host=[REDACTED]')
+          expect(error.cause).to be_nil
+          expect(error.full_message(highlight: false)).not_to include('fakesecretmarker')
+        end
     end
 
     it 're-raises a PG cardinality violation as Woods::Error naming the batch ids' do

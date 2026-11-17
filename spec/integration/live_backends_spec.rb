@@ -25,6 +25,7 @@ require 'json'
 require 'net/http'
 require 'open3'
 require 'securerandom'
+require 'timeout'
 require 'uri'
 require 'woods'
 require 'woods/tasks'
@@ -68,20 +69,41 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     store.ensure_collection!(dimensions: dimensions)
   end
 
-  # Drive the packaged stdio server: one JSON-RPC line out, one back, per request.
-  def serve_stdio(env, index_dir, *requests)
+  # Writes each request to woods-mcp on +index_dir+ and reads its response
+  # within one deadline, then closes stdin and allows 30 seconds to exit.
+  # The child is killed past either limit and reaped whatever happens.
+  # +url+ is passed in +env_var+, the server's only store setting.
+  #
+  # @return [Array(Array<Hash>, String, Process::Status)] responses, stderr, status
+  def run_woods_mcp(url, *requests, env_var: 'WOODS_PG_URL')
     exe = File.expand_path('../../exe/woods-mcp', __dir__)
-    Open3.popen3(env.merge('OPENAI_API_KEY' => nil), 'bundle', 'exec', 'ruby', exe,
-                 index_dir) do |stdin, stdout, stderr, wait|
-      errors = Thread.new { stderr.read }
-      responses = requests.map do |request|
+    stdin, stdout, stderr, wait = Open3.popen3({ env_var => url, 'OPENAI_API_KEY' => nil },
+                                               'bundle', 'exec', 'ruby', exe, index_dir)
+    errors = Thread.new { stderr.read }
+    responses = exchange(stdin, stdout, errors, requests)
+    stdin.close
+    wait.join(30) || stop_child(wait)
+    [responses, errors.value.force_encoding(Encoding::UTF_8).scrub, wait.value]
+  ensure
+    stop_child(wait) if wait
+    [stdin, stdout, stderr].compact.each { |io| io.close unless io.closed? }
+  end
+
+  def exchange(stdin, stdout, errors, requests)
+    Timeout.timeout(60, Timeout::Error, 'woods-mcp did not answer within 60 seconds') do
+      requests.map do |request|
         stdin.puts(JSON.generate(request))
         JSON.parse(stdout.gets || raise("woods-mcp exited: #{errors.value}"))
       end
-      stdin.close
-      wait.join(30) || Process.kill('KILL', wait.pid)
-      [responses, errors.value.force_encoding(Encoding::UTF_8).scrub]
     end
+  end
+
+  def stop_child(wait)
+    Process.kill('KILL', wait.pid) if wait.alive?
+  rescue Errno::ESRCH
+    nil
+  ensure
+    wait.join
   end
 
   after do
@@ -738,12 +760,9 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
 
     after { FileUtils.rm_rf(index_dir) }
 
-    def serve(*requests)
-      serve_stdio({ 'WOODS_PG_URL' => pg_url }, index_dir, *requests)
-    end
-
     it 'boots, and answers a semantic query from the real database' do
-      responses, errors = serve(
+      responses, errors = run_woods_mcp(
+        pg_url,
         { jsonrpc: '2.0', id: 1, method: 'initialize',
           params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'live', version: '1' } } },
         { jsonrpc: '2.0', id: 2, method: 'tools/call',
@@ -758,15 +777,12 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     end
 
     it 'exits 2 without connection details when the database rejects the credentials' do
-      exe = File.expand_path('../../exe/woods-mcp', __dir__)
       rejected = URI.parse(pg_url).tap do |uri|
         uri.user = 'u-fakesecretmarker'
         uri.password = 'pw-fakesecretmarker'
         uri.path = '/d-fakesecretmarker'
       end.to_s
-      _out, err, status = Open3.capture3({ 'WOODS_PG_URL' => rejected, 'OPENAI_API_KEY' => nil },
-                                         'bundle', 'exec', 'ruby', exe, index_dir, stdin_data: '')
-      err = err.force_encoding(Encoding::UTF_8).scrub
+      _responses, err, status = run_woods_mcp(rejected)
 
       expect(status.exitstatus).to eq(2), err.gsub('fakesecretmarker', 'MARKER')
       expect(err).to include('[woods-mcp] BootstrapError:')
@@ -775,17 +791,20 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     end
 
     it 'exits 2 with one BootstrapError line when the database refuses the connection' do
-      exe = File.expand_path('../../exe/woods-mcp', __dir__)
       refused = URI.parse(pg_url).tap { |uri| uri.port = 1 }.to_s
-      _out, err, status = Open3.capture3({ 'WOODS_PG_URL' => refused, 'OPENAI_API_KEY' => nil },
-                                         'bundle', 'exec', 'ruby', exe, index_dir, stdin_data: '')
-      err = err.force_encoding(Encoding::UTF_8).scrub
+      _responses, err, status = run_woods_mcp(refused)
 
       expect(status.exitstatus).to eq(2), err
       # Before Active Record 7.2 the resolver's checkout connects; later
       # versions connect lazily, at the Builder's schema setup.
       opened = /pgvector index could not open|index stores could not be opened/
-      expect(err).to match(/^\[woods-mcp\] BootstrapError: (?:#{opened}).*refused/)
+      # Active Record replaces libpq's message with its own when that
+      # message names the host as the URL does (an address, for one).
+      refusal = Regexp.union(
+        /ActiveRecord::ConnectionNotEstablished: .*refused/,
+        /ActiveRecord::DatabaseConnectionError: .*connecting with your hostname: \[REDACTED\]\./
+      )
+      expect(err).to match(/^\[woods-mcp\] BootstrapError: (?:#{opened}).*#{refusal}/)
       expect(err.lines.grep(/BootstrapError/).size).to eq(1)
       expect(err).not_to match(/from .+\.rb:\d+:in/)
     end
@@ -823,16 +842,17 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       Woods::Tasks.build_embed_indexer(output_dir: index_dir).index_all
     end
 
-    def query_server(env)
-      serve_stdio(env, index_dir,
-                  { jsonrpc: '2.0', id: 1, method: 'initialize',
-                    params: { protocolVersion: '2025-06-18', capabilities: {},
-                              clientInfo: { name: 'live', version: '1' } } },
-                  { jsonrpc: '2.0', id: 2, method: 'tools/call',
-                    params: { name: 'codebase_retrieve', arguments: { query: 'Post model' } } })
+    def query_server(url, env_var:)
+      run_woods_mcp(url,
+                    { jsonrpc: '2.0', id: 1, method: 'initialize',
+                      params: { protocolVersion: '2025-06-18', capabilities: {},
+                                clientInfo: { name: 'live', version: '1' } } },
+                    { jsonrpc: '2.0', id: 2, method: 'tools/call',
+                      params: { name: 'codebase_retrieve', arguments: { query: 'Post model' } } },
+                    env_var: env_var)
     end
 
-    def expect_semantic_answer(responses, errors)
+    def expect_semantic_answer(responses, errors, _status)
       expect(errors).to include('[woods-mcp] config_source: loaded from woods.json')
       expect(errors).to include('[woods-mcp] semantic search: hydrated (fake)')
       expect(errors).not_to include('pattern/structural tools only', 'BootstrapError')
@@ -852,7 +872,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
         embed_with(:pgvector, { connection: connection, table: table }, metadata_store)
 
         expect(File.read(File.join(index_dir, 'woods.json'))).not_to include(pg_url)
-        expect_semantic_answer(*query_server('WOODS_PG_URL' => pg_url))
+        expect_semantic_answer(*query_server(pg_url, env_var: 'WOODS_PG_URL'))
       end
 
       it "serves Qdrant with #{metadata_store} metadata given only WOODS_QDRANT_URL" do
@@ -862,7 +882,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
         embed_with(:qdrant, { url: qdrant_url, collection: collection, allow_private_hosts: true }, metadata_store)
 
         expect(File.read(File.join(index_dir, 'woods.json'))).not_to include(qdrant_url)
-        expect_semantic_answer(*query_server('WOODS_QDRANT_URL' => qdrant_url))
+        expect_semantic_answer(*query_server(qdrant_url, env_var: 'WOODS_QDRANT_URL'))
       end
     end
   end

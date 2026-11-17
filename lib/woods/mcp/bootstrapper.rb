@@ -232,7 +232,7 @@ module Woods
         warn '[woods-mcp] lexical retrieval: hydrated (published extraction units; no embeddings)'
         [retriever, state]
       rescue StandardError => e
-        raise BootstrapError, "lexical index could not be loaded: #{e.class}: #{e.message}"
+        raise BootstrapError, "lexical index could not be loaded: #{e.class}: #{e.message}", cause: nil
       end
       private_class_method :build_lexical_retriever
 
@@ -384,7 +384,7 @@ module Woods
             'reload could not resolve the index configuration; the previous generation is still ' \
             "being served: #{e.class}: #{e.message}",
             generation: served.number, stores: %w[vector metadata graph], error: e
-          )
+          ), cause: nil
         end
         resolved = build_resolved_config(config)
 
@@ -438,7 +438,7 @@ module Woods
             end
             counts = { vectors: 0, metadata: candidate.metadata_store.count, graph: 0 }
             reader.reload!
-            retriever.install_snapshot!(candidate.snapshot)
+            retriever.install_from!(candidate)
             state&.clear_reload_failure!
             counts
           end
@@ -449,7 +449,7 @@ module Woods
         raise
       rescue StandardError => e
         raise ReloadDegraded.new("lexical snapshot reload failed: #{e.class}: #{e.message}",
-                                 generation: reader.loaded_generation || 0, stores: ['metadata'])
+                                 generation: reader.loaded_generation || 0, stores: ['metadata']), cause: nil
       end
       private_class_method :reload_lexical_stores!
 
@@ -612,7 +612,7 @@ module Woods
         raise ReloadDegraded.new(
           "vector store refresh failed: #{e.class}: #{e.message}",
           generation: served.number, stores: [:vector], error: e
-        )
+        ), cause: nil
       end
       private_class_method :reload_vector_candidate
 
@@ -626,7 +626,7 @@ module Woods
         raise ReloadDegraded.new(
           "metadata store refresh failed: #{e.class}: #{e.message}",
           generation: served.number, stores: [:metadata], error: e
-        )
+        ), cause: nil
       end
       private_class_method :reload_metadata_candidate
 
@@ -636,7 +636,7 @@ module Woods
         raise ReloadDegraded.new(
           "graph store refresh failed: #{e.class}: #{e.message}",
           generation: served.number, stores: [:graph], error: e
-        )
+        ), cause: nil
       end
       private_class_method :reload_graph_candidate
 
@@ -835,7 +835,7 @@ module Woods
           'build. Re-run woods:embed, or set vector_store, metadata_store and graph_store explicitly.',
           details: { stores: { vector_store: config.vector_store, metadata_store: config.metadata_store,
                                graph_store: config.graph_store } }
-        )
+        ), cause: nil
       end
       private_class_method :build_stores_or_fail
 
