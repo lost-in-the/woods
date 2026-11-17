@@ -72,6 +72,49 @@ RSpec.describe Woods::Console::EvalGuard do
       end
     end
 
+    [true, false].each do |prism|
+      context "with a denied expression nested where it still runs, parsed by #{prism ? 'Prism' : 'the parser gem'}" do
+        let(:parser) { Woods::Ast::Parser.new }
+        let(:guard) { described_class.new(parser: parser) }
+
+        before { allow(parser).to receive(:prism_available?).and_return(prism) }
+
+        credentials = /Rails\.application\.credentials/
+        secret = 'Rails.application.credentials.secret_key_base'
+        {
+          'a plain call' => ['ENV.to_h', /ENV/],
+          'an array element' => ["[#{secret}]", credentials],
+          'a hash value' => ['{ key: ENV.to_h }', /ENV/],
+          'a hash key' => ['{ ENV.keys => 1 }', /ENV/],
+          'a double splat' => ['{ **ENV }', /ENV/],
+          'a string interpolation' => ["\"key \#{#{secret}}\"", credentials],
+          'a heredoc interpolation' => ["<<~TXT\n  \#{#{secret}}\nTXT", credentials],
+          'an interpolated argument' => ["puts(\"key \#{#{secret}}\")", credentials],
+          'the else of a rescue' => ["begin\n  1\nrescue StandardError\n  2\nelse\n  #{secret}\nend", credentials],
+          'a second rescue branch' => ["begin\n  1\nrescue ArgumentError\n  2\nrescue\n  ENV.to_h\nend", /ENV/],
+          'a rescue exception list' => ["begin\n  1\nrescue *ENV.keys\n  2\nend", /ENV/],
+          'a block-pass expression' => ['Runner.run(&ENV.fetch("HOOK"))', /ENV/],
+          'a yield argument' => ["def run\n  yield ENV.to_h\nend", /ENV/],
+          'a default parameter value' => ["def run(key = ENV.fetch(\"KEY\"))\n  key\nend", /ENV/],
+          'a lambda in a hash value' => ['{ cb: -> { ENV.to_h } }', /ENV/],
+          'a constant path under an expression' => ['x = ENV.fetch("K")::VALUE', /ENV/],
+          'a block parameter default' => ['[1].each { |a, b = ENV.to_h| b }', /ENV/],
+          'a lambda parameter default' => ['->(a = ENV.to_h) { a }', /ENV/],
+          'a singleton class of an expression' => ["class << ENV.to_h\nend", /ENV/],
+          'a definition receiver expression' => ["def (ENV.to_h).hook\nend", /ENV/],
+          'a rescue target' => ["begin\n  1\nrescue => ENV.to_h.error\nend", /ENV/]
+        }.each do |form, (code, reason)|
+          it "rejects it in #{form}" do
+            expect { guard.check!(code) }.to raise_error(Woods::Console::ForbiddenExpressionError, reason)
+          end
+        end
+
+        it 'still allows a safe hash value and interpolation' do
+          expect { guard.check!("{ count: User.count, label: \"\#{User.count} users\" }") }.not_to raise_error
+        end
+      end
+    end
+
     context 'with reflection escapes' do
       it 'rejects bare instance_eval' do
         expect { described_class.check!('User.first.instance_eval("self")') }
