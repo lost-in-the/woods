@@ -7,6 +7,7 @@ require 'woods/mcp/index_reader'
 require 'woods/generation'
 require 'woods/watch/status'
 require 'tmpdir'
+require 'digest'
 require 'fileutils'
 
 RSpec.describe 'woods_status tool' do
@@ -224,9 +225,9 @@ RSpec.describe 'woods_status tool' do
       # leave it reporting a match while every answer describes the tree
       # before those edits.
       def stub_porcelain(stdout, stderr = '', success: true)
-        allow(Open3).to receive(:capture3).with('git', '-C', anything, 'status', '--porcelain')
-                                          .and_return([stdout, stderr,
-                                                       instance_double(Process::Status, success?: success)])
+        allow(Open3).to receive(:capture3)
+          .with(Woods::GitCommand::CHILD_ENV, 'git', '-C', anything, 'status', '--porcelain')
+          .and_return([stdout, stderr, instance_double(Process::Status, success?: success)])
       end
 
       it 'reports a clean working tree' do
@@ -332,6 +333,61 @@ RSpec.describe 'woods_status tool' do
     end
   end
 
+  # A client polls woods_status while the developer works in the same
+  # checkout. A git write the status probe takes there collides with the
+  # developer's own `git checkout` on .git/index.lock.
+  describe 'working-tree probe against a real checkout' do
+    around do |example|
+      Dir.mktmpdir('woods_status_checkout') do |root|
+        @root = root
+        example.run
+      end
+    end
+
+    let(:reader) { double('reader', manifest: { 'extracted_at' => nil, 'counts' => {} }) }
+    let(:index_dir) { File.join(@root, 'tmp', 'woods') }
+    let(:lock_path) { File.join(@root, '.git', 'index.lock') }
+
+    def git(*args)
+      _out, err, status = Open3.capture3('git', '-C', @root, *args)
+      raise err unless status.success?
+    end
+
+    def index_digest
+      Digest::SHA256.file(File.join(@root, '.git', 'index')).hexdigest
+    end
+
+    def status_for
+      Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: index_dir)
+    end
+
+    before do
+      FileUtils.mkdir_p(index_dir)
+      File.write(File.join(@root, '.gitignore'), "/tmp/\n")
+      File.write(File.join(@root, 'post.rb'), "class Post; end\n")
+      git('init', '-q')
+      git('add', '.')
+      git('-c', 'user.name=Spec', '-c', 'user.email=spec@example.invalid', 'commit', '-qm', 'init')
+      # Same content, older stat data: a plain `git status` refreshes the index and writes it back.
+      past = Time.now - 86_400
+      File.utime(past, past, File.join(@root, 'post.rb'))
+    end
+
+    it 'answers without rewriting .git/index' do
+      before = index_digest
+
+      expect(status_for[:index]).to include(working_tree_dirty: false)
+      expect(index_digest).to eq(before)
+    end
+
+    it 'still answers while another process holds .git/index.lock, and leaves that lock alone' do
+      File.write(lock_path, 'held by a git checkout')
+
+      expect(status_for[:index]).to include(working_tree_dirty: false)
+      expect(File.read(lock_path)).to eq('held by a git checkout')
+    end
+  end
+
   describe 'staleness gate (index.git_sha_matches_head)' do
     # Regression — the manifest captures git_sha / gemfile_lock_sha / schema_sha
     # at extraction time, but historic build_status never compared them against
@@ -344,14 +400,15 @@ RSpec.describe 'woods_status tool' do
 
     def stub_git_head(head:, status_ok: true, porcelain: '')
       process_status = instance_double(Process::Status, success?: status_ok)
-      allow(Open3).to receive(:capture3).with('git', '-C', anything, 'rev-parse', 'HEAD')
+      allow(Open3).to receive(:capture3).with(Woods::GitCommand::CHILD_ENV, 'git', '-C', anything, 'rev-parse', 'HEAD')
                                         .and_return(["#{head}\n", '', process_status])
       # build_status also asks for the working-tree state; without a stub the
       # real git runs against whatever /tmp happens to be. Note capture3 —
       # that probe deliberately keeps stderr out of the porcelain output, and
       # stubbing capture2e here left the stub dead and the real git running.
-      allow(Open3).to receive(:capture3).with('git', '-C', anything, 'status', '--porcelain')
-                                        .and_return([porcelain, '', process_status])
+      allow(Open3).to receive(:capture3)
+        .with(Woods::GitCommand::CHILD_ENV, 'git', '-C', anything, 'status', '--porcelain')
+        .and_return([porcelain, '', process_status])
     end
 
     it 'reports git_sha_matches_head=true when manifest.git_sha matches HEAD' do

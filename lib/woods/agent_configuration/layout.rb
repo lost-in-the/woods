@@ -8,6 +8,12 @@ module Woods
   module AgentConfiguration
     # Explicit client/scope selection; no discovery or fallback into a user home.
     class Layout
+      # .gitignore lines for a project: the per-machine receipt with its lock
+      # and journal, and the lock apply keeps beside each file it manages
+      # ({#lock_paths}). The locks stay: apply serializes on their inodes, and
+      # unlinking a lock another process may hold would split it across two.
+      GITIGNORE = %w[.woods-agent-config.json* *.woods.lock].freeze
+
       attr_reader :root, :scope, :config_dir
 
       def initialize(root:, scope:, client: 'claude', home: Dir.home, config_dir: ENV.fetch('CLAUDE_CONFIG_DIR', nil))

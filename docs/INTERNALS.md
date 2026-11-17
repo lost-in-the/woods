@@ -329,7 +329,8 @@ end
 
 ### Index server (`woods-mcp`)
 
-**32 schemas; 16 register in the packaged default. Two resources and two templates.
+**32 schemas; 16 register in the packaged default.
+Two resources and two templates.
 Reads pre-extracted JSON without booting Rails.**
 
 Starts with a path to the extraction output directory and reads from it:

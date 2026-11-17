@@ -1217,6 +1217,94 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  # A host callback that forks on the thread running #run leaves a child that
+  # unwinds the same run: its cycle publishes status, and its shutdown
+  # persists pending paths, publishes `stopped` and releases the claim. The
+  # extractor during start-up catch-up is such a callback. Every one of those
+  # writes belongs to the process that claimed the index.
+  describe 'a child forked on the thread running #run', if: Process.respond_to?(:fork) do
+    let(:lock) do
+      instance_double(Woods::Coordination::PipelineLock, acquire: true, release: true, touch: true, stale_timeout: 600)
+    end
+
+    def claim_file
+      File.join(output_dir, described_class::CLAIM_FILENAME)
+    end
+
+    def pending_file
+      File.join(output_dir, 'watch_pending.json')
+    end
+
+    # Forks inside the catch-up extraction. The parent records what the
+    # child left behind and then publishes; the child does what +in_child+
+    # says and then unwinds the rest of the run on its own.
+    def fork_during_catch_up(in_child, &parent)
+      hook = lambda do
+        child = fork
+        next in_child.call if child.nil?
+
+        Process.wait(child)
+        parent.call
+        publish_generation('incremental') && ['Thing']
+      end
+      allow(extractor).to receive(:extract_changed) { hook.call }
+      allow(extractor).to receive(:extract_all) { hook.call && {} }
+    end
+
+    def run_once_in_parent(daemon)
+      parent = Process.pid
+      daemon.run
+    ensure
+      exit!(0) unless Process.pid == parent
+    end
+
+    { 'returns normally' => :return, 'raises' => :raise, 'calls exit!' => :exit! }.each do |exit_kind, mode|
+      it "leaves the claim, status and pending paths to the parent when the child #{exit_kind}" do
+        touch('config/locales/en.yml')
+        seen = {}
+        leave = lambda do
+          exit!(0) if mode == :exit!
+          raise 'the child failed' if mode == :raise
+
+          ['Thing']
+        end
+        fork_during_catch_up(leave) do
+          seen.merge!(claim: File.exist?(claim_file), state: status['state'], pid: status['pid'],
+                      pending: File.exist?(pending_file))
+        end
+
+        result = run_once_in_parent(build(watcher: FakeWatcher.new, lock: lock, catch_up: true,
+                                          conservative_claims: true))
+
+        expect(seen).to eq(claim: true, state: 'running', pid: Process.pid, pending: false)
+        expect(result).to eq(:stopped)
+        expect(File.exist?(claim_file)).to be(false)
+        expect(status).to include('state' => 'stopped', 'pid' => Process.pid)
+        expect(JSON.parse(File.read(pending_file))).to eq([])
+      end
+    end
+
+    it 'does not let the child believe it owns the claim, and a daemon there stands down' do
+      touch('config/locales/en.yml')
+      daemon = build(watcher: FakeWatcher.new, lock: lock, catch_up: true, conservative_claims: true)
+      reader, writer = IO.pipe
+      report = lambda do
+        writer.write(JSON.generate(owns_claim: daemon.send(:own_claim?),
+                                   second_daemon: build(watcher: FakeWatcher.new, conservative_claims: true).run))
+        exit!(0)
+      end
+      seen = nil
+      fork_during_catch_up(report) do
+        writer.close
+        seen = JSON.parse(reader.read)
+      end
+
+      run_once_in_parent(daemon)
+
+      expect(seen).to eq('owns_claim' => false, 'second_daemon' => 'already_running')
+    end
+  end
+
   # Carried paths survived within a run but were dropped at shutdown, and the
   # mtime watermark does not cover them: if another writer bumps the generation
   # after the daemon carried a path forward, the watermark is newer than that

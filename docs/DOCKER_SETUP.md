@@ -69,14 +69,26 @@ docker compose exec app bundle exec rake woods:extract
 # Incremental (changed files only)
 docker compose exec app bundle exec rake woods:incremental
 
-# Automatic structural updates while the container is running
+# Raw watcher task; run it under one owner, as described below
 docker compose exec app bundle exec rake woods:watch
 
 # Framework/gem sources only
 docker compose exec app bundle exec rake woods:extract_framework
 ```
 
-Run the watcher as its own development service or process-manager entry, not as a one-off terminal command. Docker Desktop bind mounts may not deliver reliable native filesystem events; set `WOODS_WATCH_POLL=1` for polling when needed. The watcher updates structural generations automatically, while semantic vectors still require `woods:embed_incremental`.
+Run the watcher under one owner, not as a one-off terminal command.
+If the container runs `bin/rails server`,
+the Puma mode of the [watcher generator](WATCH_DAEMON.md#managed-development-startup) works inside it.
+Puma in the container then starts the watcher, and no separate service is needed.
+Otherwise run it as its own development service or process-manager entry.
+
+Docker Desktop bind mounts may not deliver reliable native filesystem events, so the watcher polls by default
+inside a container (it looks for `/.dockerenv` or `/run/.containerenv`) and whenever the `listen` gem is absent.
+Its startup line in the Rails log names the choice:
+`[Woods] watch: polling every 1.0s` or `[Woods] watch: using native FS events (listen)`.
+Set `WOODS_WATCH_POLL=1` when it chose native events and edits made on the host do not reach it.
+The watcher updates structural generations automatically.
+Semantic vectors still require `woods:embed_incremental`.
 
 Use the application's actual Rails task entrypoint. If its root `Rakefile` wraps
 Compose, the container may need `bundle exec rails woods:watch`. Keep the raw
@@ -137,10 +149,22 @@ Use the path visible to the process that actually runs the command:
 
 ### Default: run it through the application container
 
-This path needs no Ruby, Bundler, Woods executable, or host-visible index on the host.
-From Woods `2.2.0`, `docker compose exec app bundle exec rails generate woods:install --mcp-config --mcp-service app`
-writes an entry with no absolute path, so one committed `.mcp.json` works in every checkout and on every machine.
-Add `--skip` in an application installed earlier, so an edited initializer is kept:
+The server process needs no Ruby, Bundler, Woods executable, or host-visible index on the host.
+From Woods `2.2.0`, Claude Code users write it with the managed setup, where the host can run the application bundle
+and reach Docker Compose:
+
+```bash
+bundle exec woods-agent-config setup --client claude --scope project --root "$PWD" \
+  --mode compose --service app --container-root /app --plan "$woods_plan_dir/setup.json" --diff
+bundle exec woods-agent-config apply "$woods_plan_dir/setup.json" --client claude --scope project --root "$PWD"
+```
+
+When Woods is installed only in the container, the install generator prints the same entry:
+`docker compose exec app bundle exec rails generate woods:install --mcp-service app`
+(add `--mcp-config` to write `.mcp.json`, and `--skip` in an application installed earlier, so an edited
+initializer is kept).
+Either way the entry names no absolute path, so one committed `.mcp.json` works in every checkout and on every
+machine. See [managed configuration](AGENT_SETUP.md#managed-claude-code-configuration) and its entry forms:
 
 ```json
 {
@@ -170,7 +194,19 @@ Add `--skip` in an application installed earlier, so an edited initializer is ke
   That must be the application root inside the container, in a mount of the whole checkout.
   For an application below its checkout root, it is the application directory (for example `/app/apps/web` with
   the checkout at `/app`), not the checkout root: Bundler looks for the Gemfile up from there, never down.
+  `woods-agent-config setup` runs its preflight the same way, and refuses a service whose working directory is not
+  the `--container-root` application, or where Bundler resolves another application, naming both directories.
   The generator only prints the entry and does not check the service.
+
+**A `BUNDLE_BIN` directory on the image's `PATH`.**
+With `BUNDLE_BIN` set, `bundle install` writes a binstub for every executable, `bundle` itself included.
+Each binstub fixes the Gemfile at its install-time path (`ENV["BUNDLE_GEMFILE"] ||= ...`).
+With that directory first on `PATH`, `bundle exec` uses that one Gemfile from any working directory.
+The setup preflight compares the service's working directory itself, so a wrong `working_dir` is still refused.
+A bundle volume installed for another application path makes every `bundle exec` fail with
+`Bundler::GemfileNotFound`, naming the install-time Gemfile path.
+Either remedy works: remove the `BUNDLE_BIN` directory from `PATH` in the service's environment,
+or use one bundle volume per application layout.
 
 The generated entry was run with a stand-in `docker` that runs the inner command in place, or in a given service
 working directory (`spec/integration/generated_mcp_entry_spec.rb`).
@@ -208,6 +244,9 @@ Replace `app` and `/app` with the Compose service and container path used by the
 }
 ```
 
+`woods-mcp-start` also works in these commands in place of `woods-mcp`.
+It checks the index path and its published generation first, then starts `woods-mcp`.
+
 Two persistence gotchas:
 
 1. **tmpfs wipes the index on container restart.** If `/app/tmp` is tmpfs, re-run `rake woods:extract` after each restart, or persist the index by mounting a named volume at the index path (e.g. `- woods-data:/app/tmp/woods`) or writing the index outside the tmpfs mount.
@@ -218,7 +257,8 @@ Two persistence gotchas:
 
 Use this only when the application bundle, a supported Ruby, and the Woods executable are installed on the host
 **and** the index directory is host-visible.
-From Woods `2.2.0`, `rails generate woods:install --mcp-config` writes the path-free form:
+From Woods `2.2.0`, `woods-agent-config setup --scope project` (host mode) writes the path-free form, and
+`rails generate woods:install` prints it (`--mcp-config` writes it):
 
 ```json
 {
@@ -251,7 +291,8 @@ Before Woods `2.2.0`, name the host application root (machine-specific; do not c
 | | Container process (default) | Host process (optional) |
 |---|---|---|
 | **Index location** | Anywhere in the container | Host-visible bind mount |
-| **Path in `.mcp.json`** | Container path (`/app/tmp/woods`) | Host path (`./tmp/woods`) |
+| **Path in `.mcp.json`** | None from Woods `2.2.0` (`--checkout`); before that, the container path (`/app/tmp/woods`) | None from Woods `2.2.0`; before that, the host path (`./tmp/woods`) and an absolute `cwd` |
+| **Needs `sh` where the client runs** | Yes, for the path-free form | Yes, for the path-free form |
 | **Survives container replacement** | Only with a bind/named volume | Yes, on host disk |
 | **Needs Ruby/Woods bundle on host** | No | Yes |
 
@@ -267,15 +308,16 @@ shared volume for every worktree would mix their indexes. See
 
 ## Complete `.mcp.json` Example
 
-An application uses one entry, the Index Server:
+An application uses one entry, the Index Server.
+It is the path-free form from Woods `2.2.0` (before that, use the container form with `cwd` above):
 
 ```json
 {
   "mcpServers": {
     "woods": {
-      "command": "docker",
-      "args": ["compose", "exec", "-T", "app", "bundle", "exec", "woods-mcp", "/app/tmp/woods"],
-      "cwd": "/absolute/host/path/to/app"
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
     }
   }
 }
@@ -356,7 +398,8 @@ Docker:  "args": ["exec", "-i", "container-name", ...]
 
 ### Path confusion between host and container
 
-**Symptom:** Index Server reports "No manifest.json" even though extraction succeeded.
+**Symptom:** The Index Server exits 1 with `Index directory does not exist: <path>` even though extraction succeeded.
+Woods 1.x reported this as "No manifest.json".
 
 **Fix:** Match the path to the server process:
 

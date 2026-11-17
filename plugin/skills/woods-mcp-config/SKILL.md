@@ -62,12 +62,17 @@ Use `bin/rails woods:notion_sync` for ordinary application export and verify
 ## Shape 1: Index-only
 
 From Woods `2.2.0` (check the installed version's release notes), prefer the
-path-free entry. `bin/rails generate woods:install --mcp-config` adds it to
-`.mcp.json` at the application root, never replacing an existing `woods` entry;
-without the option the generator prints it. In an application installed
-earlier, add `--skip`: a non-interactive run otherwise overwrites an edited
-initializer. One committed file then works in every checkout and worktree, on
-every machine:
+path-free entry. For Claude Code, write it with the managed setup,
+`woods-agent-config setup --client claude --scope project --root "$PWD" --plan FILE`
+then `apply FILE` (add `--mode compose --service app --container-root /app` for
+a container launch). A new project installation inside a git checkout gets
+`entry_form: relative`; an existing absolute one changes only with
+`update --entry-form relative`. Keep the receipt `.woods-agent-config.json` out
+of version control. Without the managed setup, `bin/rails generate woods:install`
+prints the same entry, and `--mcp-config` adds it to `.mcp.json` without
+replacing an existing `woods` entry; in an application installed earlier add
+`--skip`, or a non-interactive run overwrites an edited initializer. One
+committed file then works in every checkout and worktree, on every machine:
 
 ```json
 {
