@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'digest'
 require 'fileutils'
 require 'open3'
 require 'tmpdir'
@@ -38,6 +39,19 @@ RSpec.describe Woods::BuildIdentity do
 
     File.write(File.join(gem_root, 'lib', 'woods.rb'), "# edited\n")
     expect(described_class.new(spec: nil, root: gem_root).dirty).to be(true)
+  end
+
+  it 'reads the dirty flag without rewriting the checkout index' do
+    gem_root = File.join(@base, 'gem-checkout')
+    repository(gem_root)
+    # Same content, older stat data: a plain `git status` refreshes the index and writes it back.
+    past = Time.now - 86_400
+    File.utime(past, past, File.join(gem_root, 'lib', 'woods.rb'))
+    index = File.join(gem_root, '.git', 'index')
+    before = Digest::SHA256.file(index).hexdigest
+
+    expect(described_class.new(spec: nil, root: gem_root).dirty).to be(false)
+    expect(Digest::SHA256.file(index).hexdigest).to eq(before)
   end
 
   it "never reports the enclosing application's revision for a gem vendored inside it" do

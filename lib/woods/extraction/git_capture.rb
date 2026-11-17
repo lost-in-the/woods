@@ -192,7 +192,7 @@ module Woods
 
       # @return [Hash] see {#availability}
       def probe_availability
-        _output, error, status = Open3.capture3(*git_argv('rev-parse', 'HEAD'))
+        _output, error, status = Open3.capture3(GitCommand::CHILD_ENV, *git_argv('rev-parse', 'HEAD'))
         unless status.success?
           warn_unresolvable(error)
           return { available: false, reason: requested? ? 'head_unresolvable' : 'no_repository' }
@@ -240,7 +240,8 @@ module Woods
       #
       # @return [Boolean]
       def complete_history?
-        output, _error, status = Open3.capture3(*git_argv('rev-parse', '--is-shallow-repository'))
+        output, _error, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                                *git_argv('rev-parse', '--is-shallow-repository'))
         return true if status.success? && output.strip == 'false'
 
         shallow = status.success? && output.strip == 'true'
@@ -287,7 +288,7 @@ module Woods
       # @param args [Array<String>] Git command arguments
       # @return [String] command output (empty string on failure)
       def run_git(*args)
-        output, _error, status = Open3.capture3(*git_argv(*args))
+        output, _error, status = Open3.capture3(GitCommand::CHILD_ENV, *git_argv(*args))
         status.success? ? output.strip : ''
       rescue StandardError
         ''

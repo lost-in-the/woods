@@ -119,7 +119,7 @@ exactly which HTTP verbs and paths map to which actions. URL → code is always 
 **Dependency graph.** 42 extractors build a bidirectional graph: what each unit depends on,
 and what depends on it. Change `Auditable` and you can trace every model affected.
 
-**Two MCP servers.** The Index Server defines 31 schemas and registers 15 in the normal
+**Two MCP servers.** The Index Server defines 32 schemas and registers 16 in the normal
 packaged launch; it reads pre-extracted JSON without booting Rails. The Console Server
 has a 31-schema inventory but registers 9 tools by default, or 11 with explicit embedded
 read tools, and bridges to a live Rails process for bounded database queries.
@@ -212,10 +212,13 @@ bin/rails woods:extract
 bin/rails woods:validate
 bin/rails woods:stats
 
-# 5. Add to .mcp.json
-# { "mcpServers": { "woods": { "command": "bundle",
-#     "args": ["exec", "woods-mcp-start", "./tmp/woods"],
-#     "cwd": "/absolute/path/to/your-rails-app" } } }
+# 5. Add to .mcp.json (from Woods 2.2.0, path-free and committable; needs sh)
+bundle exec woods-agent-config setup --client claude --scope project --root "$PWD" --plan "$plan"
+bundle exec woods-agent-config apply "$plan" --client claude --scope project --root "$PWD"
+#    or print the entry: bin/rails generate woods:install
+#    before 2.2.0: { "mcpServers": { "woods": { "command": "bundle",
+#      "args": ["exec", "woods-mcp-start", "./tmp/woods"],
+#      "cwd": "/absolute/path/to/your-rails-app" } } }
 
 # 6. Ask your AI tool a question about your codebase
 ```
