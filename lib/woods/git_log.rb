@@ -57,23 +57,12 @@ module Woods
     # @yieldparam stdout [IO]
     # @return [void]
     # @raise [ReadError] when git exits unsuccessfully
-    def stream(format:, since:, revision: 'HEAD')
+    def stream(format:, since:, revision: 'HEAD', &block)
       argv = GitCommand.argv(@root, '-c', 'log.showSignature=false', 'log', revision,
                              "--since=#{since}", '--root', '--raw', '-z', '--no-renames',
                              '--no-relative', '--no-ext-diff', '--encoding=UTF-8',
                              '--diff-merges=first-parent', "--format=#{format}")
-      Open3.popen3(GitCommand::CHILD_ENV, *argv) do |stdin, stdout, stderr, wait|
-        stdin.close
-        stdout.binmode
-        drain = drain_stderr(stderr)
-        begin
-          yield stdout
-          raise ReadError, failure('history', wait.value, drain) unless wait.value.success?
-        ensure
-          stdout.close
-          drain.join
-        end
-      end
+      run(argv, &block)
     end
 
     # Run a patch walk over exactly +shas+ (fed on stdin, in that order) and
