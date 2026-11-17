@@ -491,6 +491,28 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Facts bind to the runtime method's original name and exact source line; an alias keeps the dispatched action's implicit template. A line containing multiple definitions, a block/lambda opening, or a recognized generated-method declaration is ambiguous: Ruby can report that line for a renamed Proc-backed method installed elsewhere. Facts for such source sites are omitted, including compact real methods sharing those lines; `actions` remains unchanged. String-evaluated definitions with synthetic source locations are outside this static attribution contract. Nested definitions and foreign receiver eval/exec bodies do not supply action facts. Explicit `self` calls are recognized, splatted params keys remain unresolved, and dynamic template/partial targets retain their expression under `object` rather than inventing a path. Literal integer response statuses remain integers under `status` and strings under `head`.
 - `render RowComponent.new` in a controller produces a `render` edge to the component unit the running app reaches, resolved from the controller's lexical scope as [PhlexExtractor](#phlexextractor) describes for rendered constants (Kit calls and slots do not apply to a controller). A render that names no component class is listed in `metadata.unresolved_renders`; a gem's component in `metadata.external_renders`; neither produces an edge
 - `actions` comes from Rails' `action_methods`, keeping only methods whose body is application source (gem DSL methods such as `define_method` readers are excluded) and never setters. A method the controller defines in its own file is an action whether or not it is routed; any other method (from an included or prepended module, a base controller, or a DSL that defines it onto the class from another file) counts only when a route reaches it on this controller. `action_sources` records each action's owner, the indexed unit holding its body (`defined_in`), and its `file` (relative to `Rails.root`) and `line`. An action whose body lives in another unit adds a `:action_source` edge to that unit, every controller has an `:inheritance` edge to an app-defined parent controller, and an inherited action's flow is assembled from that body with this controller's own before filters
+  - A flow reads the body `action_sources` names, even when the controller also defines the action.
+  - The entry's `column` is the byte column at which the compiled `def` starts on that line, read from the method's
+    instruction sequence, and nil for a body no `def` compiled (a `define_method` block).
+    The key is absent on a Ruby that does not report it.
+  - A body is the definition starting at the recorded `column` on the recorded `line`, even a lone one.
+    That tells apart definitions in exclusive branches of one line (`if`/`else`, a ternary, `case`, `&&`/`||`,
+    a modifier `if`, `rescue`). With no definition there, or a nil `column`, the flow has no body.
+  - Without a `column` (an index written before it), a lone definition on the line is the body.
+    Of several, those the recorded `owner` holds count; of those, the last is the body only when they are
+    statements of one list, since a later definition replaces an earlier one, even on the same line.
+    In any other arrangement the flow has no body: which one Ruby installed depends on the branch it took.
+  - An action whose body no indexed unit holds has no body in its flow, only its filters.
+  - Each `super` call in a body continues, where Ruby makes it, into the definition `super_source` names.
+    It sits in statement order, inside the branch or transaction that holds the call.
+    A call in another call's receiver or arguments (`render json: super`) continues before that call.
+    Operations of a block passed to `super` follow it, though they run only if that definition yields.
+    That entry key records the next definition Ruby looks up (`super_method`, one hop): `owner`, `defined_in`,
+    `file`, `line` and `column`, with `defined_in`, `file` and `line` nil, and no `column`, when its body is not
+    application source.
+    The key is absent when Ruby has no next definition.
+  - Without a `super_source` an indexed unit holds, the flow stops at the call.
+    It shows a `dynamic_dispatch` operation with `method: "super"` and no `target`.
 - `inherited_gem_actions` records each routed action Rails dispatches to a gem-defined body (inherited from a gem superclass, mixed in from a gem module, or defined by a gem DSL) as `{ action => { owner: } }`. These are not admitted to `actions`, get no chunk and no flow, and add no edge; a route to one is not reported as `missing_action`
 - `action_missing: true` is present only when the controller responds to `action_missing` (defined on it, privately, or inherited). Rails dispatches every routed action to it, so none of that controller's routes is reported as `missing_action`
 - `routes_without_action` lists, sorted, the routed actions of the controller that nothing answers.
