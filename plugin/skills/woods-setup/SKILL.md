@@ -123,7 +123,32 @@ it names the last manifest publisher; `server.version` names the MCP reader.
 Missing/null means unknown. A matching version after an incremental run never
 replaces a required full upgrade extraction. See [writer provenance](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
 
-Configure the Index Server with the application bundle, absolute app `cwd`, and an index path visible to that process. For a host-installed bundle:
+From Woods `2.2.0` (check the installed version's release notes), prefer the
+path-free entry. For Claude Code, `woods-agent-config setup --client claude
+--scope project --root "$PWD" --plan FILE`, then `apply FILE`, writes it (a new
+project installation inside a git checkout gets `entry_form: relative`; keep the
+receipt out of version control). Otherwise `bin/rails generate woods:install
+--mcp-config` writes it to `.mcp.json` (add `--mcp-service app` for a container
+launch), never replacing an existing `woods` entry. When the initializer already
+exists, add `--skip`, or a non-interactive run overwrites it. One committed file
+then works in every checkout and worktree:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
+    }
+  }
+}
+```
+
+Before `2.2.0`, or for a client that does not start project servers in the
+project directory, configure the Index Server with the application bundle,
+absolute app `cwd`, and an index path visible to that process. These forms name
+one machine's paths: do not commit them. For a host-installed bundle:
 
 ```json
 {

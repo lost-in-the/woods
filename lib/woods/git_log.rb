@@ -42,7 +42,8 @@ module Woods
     def repository_prefix
       return @repository_prefix if defined?(@repository_prefix)
 
-      prefix, _error, status = Open3.capture3(*GitCommand.argv(@root, 'rev-parse', '--show-prefix'))
+      prefix, _error, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                              *GitCommand.argv(@root, 'rev-parse', '--show-prefix'))
       raise ReadError, 'cannot resolve application path in repository' unless status.success?
 
       @repository_prefix = prefix.delete_suffix("\n").b
@@ -61,7 +62,7 @@ module Woods
                              "--since=#{since}", '--root', '--raw', '-z', '--no-renames',
                              '--no-relative', '--no-ext-diff', '--encoding=UTF-8',
                              '--diff-merges=first-parent', "--format=#{format}")
-      Open3.popen3(*argv) do |stdin, stdout, stderr, wait|
+      Open3.popen3(GitCommand::CHILD_ENV, *argv) do |stdin, stdout, stderr, wait|
         stdin.close
         stdout.binmode
         drain = drain_stderr(stderr)
@@ -126,7 +127,7 @@ module Woods
     private
 
     def run(argv, input: nil, label: 'history')
-      Open3.popen3(*argv) do |stdin, stdout, stderr, wait|
+      Open3.popen3(GitCommand::CHILD_ENV, *argv) do |stdin, stdout, stderr, wait|
         writer = Thread.new { stdin.write(input.to_s).then { stdin.close } }
         stdout.binmode
         drain = drain_stderr(stderr)

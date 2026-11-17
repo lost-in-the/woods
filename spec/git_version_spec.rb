@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'logger'
 require 'woods/git_version'
 
 RSpec.describe Woods::GitVersion do

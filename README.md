@@ -76,19 +76,66 @@ bin/rails generate woods:install
 
 The generator writes `config/initializers/woods.rb` and nothing else; its defaults are sufficient, and it needs no Active Record. The legacy `woods_units`/`woods_edges`/`woods_embeddings` migration is written only with `--legacy-migration`, for an older/custom integration that deliberately uses those tables; the shipped index and storage backends never touch them. See [Getting started](docs/GETTING_STARTED.md#2-generate-and-review-configuration).
 
-### 2. Extract and validate
+### 2. Set up the watcher and start the app
+
+Add one watcher to your normal development startup.
+It builds the first index and keeps it current.
+Pick your mode from the list below and use it in place of `puma`.
+Preview the setup, then run the same command without `--pretend`:
 
 ```bash
-bin/rails woods:extract
+bin/rails generate woods:watch --mode puma --pretend
+```
+
+Choose the mode that matches how you start the app:
+
+- `puma`: you run `bin/rails server`, or a `bin/dev` that only starts Rails; Puma starts the watcher.
+- `procfile`: you run an existing Foreman Procfile; the generator adds a `woods` entry to it.
+- `external`: Docker Compose, Grove or another supervisor runs the watcher; the generator prints its command.
+
+The [startup guide](docs/WATCH_DAEMON.md#managed-development-startup) gives the options for each mode.
+In `external` mode, add the printed command to your supervisor before you start the app.
+Then start the app as usual.
+When the watcher finds no index, it builds the first one in the background under `tmp/woods/`.
+In `puma` mode the app serves requests while it does.
+
+**No watcher, or running in CI?** Build the index by hand with `bin/rails woods:extract` instead.
+
+### 3. Validate
+
+```bash
+bin/rails woods:extract    # only without a watcher
 bin/rails woods:validate
 bin/rails woods:stats
 ```
 
+With a watcher, run them once the first index is published.
+The watcher logs to the Rails log (`log/development.log` by default) and records `→ generation 1` then.
 Run these where your Rails application can boot. The default output is `tmp/woods/`; keep this generated directory out of source control.
 
-### 3. Connect your MCP client
+### 4. Connect your MCP client
 
-Adapt this example to your MCP client's project configuration format, using your application path and preserving other server entries. See [client configuration locations](docs/MCP_SERVERS.md#client-configuration-locations) for guidance:
+`bundle exec woods-agent-config setup --client claude --scope project --root "$PWD" --plan FILE`
+(then `apply FILE`) writes a project `.mcp.json` with no absolute path, so the team can commit it;
+`bin/rails generate woods:install` prints the same entry for any client.
+See [managed configuration](docs/AGENT_SETUP.md#managed-claude-code-configuration):
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
+    }
+  }
+}
+```
+
+It needs `sh` where the client runs. On a Woods release without `--checkout`, or without `sh`, adapt this
+per-machine example to your MCP
+client's project configuration format, using your application path and preserving other server entries.
+See [client configuration locations](docs/MCP_SERVERS.md#client-configuration-locations) for guidance:
 
 ```json
 {
@@ -128,9 +175,10 @@ The [lexical guide](docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) an
 Run one watcher through your normal development startup. It catches up on
 changes, publishes complete generations, and lets the Index Server refresh on
 later tool calls. The [startup guide](docs/WATCH_DAEMON.md#managed-development-startup)
-covers Puma, existing Foreman workflows, and Docker/Grove supervision. Managed
-startup requires a supporting gem; **check installed capabilities**. Older packages run the raw
-`bin/rails woods:watch` task under an external restart-capable supervisor.
+covers Puma, existing Foreman workflows, and Docker/Grove supervision.
+Managed startup needs Woods 2.0 or later.
+If `bin/rails generate woods:watch --help` prints the generator's options, your installed Woods has it.
+With an older Woods, run the raw `bin/rails woods:watch` task under an external supervisor that restarts it.
 
 Without a watcher, run `bin/rails woods:incremental` after edits or
 `bin/rails woods:extract` for a full rebuild. MCP registration alone does not
@@ -144,7 +192,7 @@ Incremental cost depends on the affected code and relationships; broad changes c
 |---|---|---|
 | Purpose | Inspect extracted code context | Query live Rails models and schema |
 | Reads | Published index files | A booted application and its database |
-| Packaged tools | 15; retrieval usable when configured | 9; 11 with embedded read tools enabled |
+| Packaged tools | 16; retrieval usable when configured | 9; 11 with embedded read tools enabled |
 | Setup | The workflow above | Deprecated, removed in Woods 3.0; disabled by default |
 
 Extraction itself boots and eager-loads your application, so its boot-time behavior still runs. Treat the generated index as confidential application source. Enabling hosted embeddings sends the embedded content to that provider. MCP responses also contain application source, which your client may send to its model provider even when Woods uses lexical retrieval or local embeddings.

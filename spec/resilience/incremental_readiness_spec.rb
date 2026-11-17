@@ -29,11 +29,12 @@ RSpec.describe Woods::Resilience::IncrementalReadiness do
       'files' => {}, 'owners' => [] }
   end
 
-  def build_index(writer: Woods::VERSION, cache: valid_cache, nodes: graph_nodes, flat: false)
+  def build_index(writer: Woods::VERSION, cache: valid_cache, nodes: graph_nodes, flat: false, schema: nil)
     dir = flat ? @index : Woods::PayloadStore.new(@index).create(1)
     dir.mkpath
     manifest = { 'total_units' => 0, 'counts' => {} }
     manifest['woods_version'] = writer if writer
+    manifest['schema_readability'] = schema if schema
     dir.join('manifest.json').write(JSON.generate(manifest))
     graph = { nodes: nodes, edges: {}, reverse: {}, file_map: {}, type_index: {} }
     dir.join('dependency_graph.json').write(JSON.generate(graph))
@@ -107,6 +108,33 @@ RSpec.describe Woods::Resilience::IncrementalReadiness do
     payload.join('manifest.json').write('{not json')
 
     expect(readiness.to_s).to match(/needs full extraction \(.*manifest/i)
+  end
+
+  describe 'over the schema the full extraction read' do
+    def schema(state, databases = [])
+      { 'version' => 1, 'state' => state, 'databases' => databases }
+    end
+
+    it 'needs a full extraction when the schema could not be read, naming each database' do
+      build_index(schema: schema('unreadable', [{ 'name' => 'primary', 'state' => 'empty' },
+                                                { 'name' => 'billing', 'state' => 'unreachable' }]))
+
+      expect(readiness.to_s).to eq('needs full extraction (an index extracted without a readable database ' \
+                                   'schema (primary: holds no tables; billing: could not connect))')
+      expect(described_class.check_writer(Woods::Generation.new(output_dir: @index)).problem)
+        .to start_with('an index extracted without a readable database schema')
+    end
+
+    it 'is ready over a readable or not applicable schema, or a manifest that predates the record' do
+      build_index(schema: schema('readable', [{ 'name' => 'primary', 'state' => 'readable' }]))
+      expect(readiness).to be_ready
+
+      build_index(schema: schema('not_applicable'))
+      expect(readiness).to be_ready
+
+      build_index
+      expect(readiness).to be_ready
+    end
   end
 
   it 'needs a full extraction when nothing is published' do

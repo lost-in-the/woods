@@ -235,7 +235,8 @@ module Woods
         def toplevel(dir)
           return nil unless File.directory?(dir.to_s)
 
-          out, _err, status = Open3.capture3(*GitCommand.argv(dir.to_s, 'rev-parse', '--show-toplevel'))
+          out, _err, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                             *GitCommand.argv(dir.to_s, 'rev-parse', '--show-toplevel'))
           status.success? && !out.strip.empty? ? real(out.strip) : nil
         rescue SystemCallError
           nil
@@ -249,7 +250,8 @@ module Woods
         end
 
         def listed_worktrees(base)
-          out, _err, status = Open3.capture3(*GitCommand.argv(base, 'worktree', 'list', '--porcelain'))
+          out, _err, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                             *GitCommand.argv(base, 'worktree', 'list', '--porcelain'))
           return nil unless status.success?
 
           out.split(/\n{2,}/).filter_map do |block|
