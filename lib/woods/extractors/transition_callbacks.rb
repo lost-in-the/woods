@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'prism'
-require 'set'
 require_relative '../source_file'
 require_relative 'callback_analyzer'
 require_relative '../parse_cache'
@@ -23,8 +22,11 @@ module Woods
     #
     # A symbol method is analysed with {CallbackAnalyzer}, the same analysis
     # model callbacks get, over the model file and the app/models concerns
-    # it includes by a literal `include`. A block or proc is marked and left
-    # unanalysed, as is a method neither defines (`unanalysed` says which).
+    # it includes or prepends by a literal `include` or `prepend`. The body
+    # read is the one the loaded class dispatches to. A block or proc is
+    # marked and left unanalysed, as is a method whose dispatched body is in
+    # none of those files, or one of a class that is not loaded
+    # (`unanalysed` says which).
     module TransitionCallbacks
       KINDS = %w[before_transition after_transition around_transition after_failure].freeze
 
@@ -40,6 +42,12 @@ module Woods
 
       UNDEFINED = 'not defined in the model or its concerns'
 
+      # No loaded class to ask which body Ruby dispatches to.
+      UNLOADED = 'class not loaded'
+
+      # Mixin calls whose literal constant arguments join the analysis source.
+      MIXIN_CALLS = %i[include prepend].freeze
+
       module_function
 
       # @param node [Prism::Node, nil] the machine's block, or the whole program
@@ -51,34 +59,36 @@ module Woods
       end
 
       # @param entries [Array<Hash>] from {.read}
-      # @param analyzer [CallbackAnalyzer]
+      # @param analyzer [CallbackAnalyzer, nil] built with the loaded class;
+      #   nil when the class is not loaded
       # @return [Array<Hash>] entries with side_effects (nil when unanalysed)
       def analyze(entries, analyzer)
-        defined = method_names(analyzer)
         entries.map do |entry|
-          if entry[:block]
-            entry.merge(side_effects: nil, unanalysed: 'block')
-          elsif defined.include?(entry[:method])
-            entry.merge(side_effects: analyzer.analyze(filter: entry[:method])[:side_effects])
-          else
+          next entry.merge(side_effects: nil, unanalysed: 'block') if entry[:block]
+          next entry.merge(side_effects: nil, unanalysed: UNLOADED) unless analyzer
+
+          result = analyzer.analyze(filter: entry[:method])
+          if result[:analysis_status] == CallbackAnalyzer::UNSUPPORTED
             entry.merge(side_effects: nil, unanalysed: UNDEFINED)
+          else
+            entry.merge(side_effects: result[:side_effects])
           end
         end
       end
 
-      # The model file followed by the concerns it includes by name, with the
-      # segment each occupies, for {CallbackAnalyzer}.
+      # The model file followed by the concerns it includes or prepends by
+      # name, with the segment each occupies, for {CallbackAnalyzer}.
       #
       # @param source [String] the model file
       # @param file_path [String] its absolute path
       # @param root [String] the application root
       # @return [Array(String, Array<Hash>)]
       def analysis_source(source, file_path, root)
-        parts = [[source, relative(file_path, root)]] + included_concerns(source, root)
+        parts = [[source, file_path]] + included_concerns(source, root)
         start = 1
         segments = parts.map do |code, path|
           length = code.count("\n") + (code.end_with?("\n") ? 0 : 1)
-          segment = { start: start, length: length, file: path }
+          segment = { start: start, length: length, file: relative(path, root), path: path }
           start += length + (code.end_with?("\n") ? 2 : 1)
           segment
         end
@@ -154,28 +164,24 @@ module Woods
 
       # ── analysis ─────────────────────────────────────────────────────────
 
-      def method_names(analyzer)
-        root = analyzer.parsed_root
-        root ? root.find_all(:def).to_set(&:method_name) : Set.new
-      end
-
       def included_concerns(source, root)
         names = include_names(source)
         names.filter_map do |name|
           path = CONCERN_DIRECTORIES.map { |dir| File.join(root, dir, "#{name.underscore}.rb") }
                                     .find { |p| File.file?(p) }
-          [SourceFile.read(path), relative(path, root)] if path
+          [SourceFile.read(path), path] if path
         end
       end
 
-      # Constants passed to a receiverless `include` anywhere in a class body.
+      # Constants passed to a receiverless `include` or `prepend` anywhere in
+      # a class body.
       def include_names(source)
         names = []
         visit = lambda do |node|
           next unless node
           next if node.is_a?(Prism::DefNode)
 
-          if node.is_a?(Prism::CallNode) && node.name == :include && node.receiver.nil?
+          if node.is_a?(Prism::CallNode) && MIXIN_CALLS.include?(node.name) && node.receiver.nil?
             Array(node.arguments&.arguments).each do |argument|
               if argument.is_a?(Prism::ConstantReadNode) || argument.is_a?(Prism::ConstantPathNode)
                 names << argument.slice.delete_prefix('::')

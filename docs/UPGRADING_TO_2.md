@@ -432,7 +432,24 @@ artifacts.
 
 ## Reconnect MCP clients
 
-Use the project bundle so the server and application resolve the same Woods version:
+Use the project bundle so the server and application resolve the same Woods version.
+From Woods `2.2.0`, `woods-agent-config setup --scope project` writes this path-free entry, which a team can
+commit (see [managed configuration](AGENT_SETUP.md#managed-claude-code-configuration)); it needs `sh` where the
+client runs:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
+    }
+  }
+}
+```
+
+Before `2.2.0`, or without `sh`, name the application root (per machine; do not commit it):
 
 ```json
 {

@@ -258,6 +258,7 @@ jobs:
           spec/integration/source_input_drift_spec.rb
           spec/integration/source_output_spec.rb
           spec/integration/source_manifest_capacity_spec.rb
+          spec/integration/worktree_seed_task_spec.rb
           spec/console/transport_boot_spec.rb
           spec/console/stdio_e2e_spec.rb
           spec/console/collection_redaction_spec.rb
@@ -322,7 +323,9 @@ jobs:
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
         env:
           BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
-        run: bundle exec rspec spec/integration/state_machine_forms_spec.rb
+        run: >-
+          bundle exec rspec spec/integration/state_machine_forms_spec.rb
+          spec/integration/transition_callback_forms_spec.rb
 
       - name: Install optional component fixture bundle
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}

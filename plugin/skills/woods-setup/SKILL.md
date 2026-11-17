@@ -124,11 +124,14 @@ Missing/null means unknown. A matching version after an incremental run never
 replaces a required full upgrade extraction. See [writer provenance](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
 
 From Woods `2.2.0` (check the installed version's release notes), prefer the
-path-free entry: `bin/rails generate woods:install --mcp-config` writes it to
-`.mcp.json` (add `--mcp-service app` for a container launch), never replacing an
-existing `woods` entry. When the initializer already exists, add `--skip`, or
-a non-interactive run overwrites it. One committed file then works in every
-checkout and worktree:
+path-free entry. For Claude Code, `woods-agent-config setup --client claude
+--scope project --root "$PWD" --plan FILE`, then `apply FILE`, writes it (a new
+project installation inside a git checkout gets `entry_form: relative`; keep the
+receipt out of version control). Otherwise `bin/rails generate woods:install
+--mcp-config` writes it to `.mcp.json` (add `--mcp-service app` for a container
+launch), never replacing an existing `woods` entry. When the initializer already
+exists, add `--skip`, or a non-interactive run overwrites it. One committed file
+then works in every checkout and worktree:
 
 ```json
 {
