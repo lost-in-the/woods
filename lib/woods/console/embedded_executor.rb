@@ -915,6 +915,7 @@ module Woods
       end
 
       def run_capped_sql(sql, cap)
+        refuse_open_sql_comment!(sql)
         # One lookahead row distinguishes "exactly cap rows" from "more exist".
         query_sql = "SELECT * FROM (\n#{sql}\n) AS _limited LIMIT #{cap + 1}"
         validate_sql_policy!(query_sql)
@@ -983,6 +984,20 @@ module Woods
         { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
       end
 
+      # An unterminated block comment would swallow the appended cap: SQLite
+      # reads it to the end of input. Closed comments and literals are already
+      # blank in the security view, so a visible opener outside a quoted
+      # identifier or a closed executable comment is unterminated.
+      def refuse_open_sql_comment!(sql)
+        open = sql_security_views(sql).any? do |view|
+          view.scan(%r{"(?:[^"]|"")*"|`(?:[^`]|``)*`|/\*M?!.*?\*/|/\*}m).include?('/*')
+        end
+        return unless open
+
+        raise ValidationError, 'Rejected: console_sql cannot apply its row cap to a statement with an ' \
+                               'unterminated block comment. Close or remove the comment.'
+      end
+
       def sql_completeness(returned, has_more)
         MCP::SearchResults.row_limit_outcome(returned: returned, has_more: has_more).transform_keys(&:to_s)
       end
@@ -1011,6 +1026,7 @@ module Woods
       # complements pre-execution checks without relying on alias spelling.
       # Legitimate custom types can also refuse while redaction is active.
       def validate_sql_result_types!(result)
+        refuse_repeated_protected_headers!(result.columns)
         return unless sql_dialect == :postgres
         return if @safe_context.redacted_columns.empty? && redacted_kv_columns.empty?
 
@@ -1020,6 +1036,29 @@ module Woods
               'Rejected: PostgreSQL returned an unrecognized result type that cannot preserve ' \
               'protected field identity. ' \
               'Select ordinary scalar columns or use a structured Console tool.'
+      end
+
+      # The redactor matches output headers by exact name, so a protected name
+      # must reach it once and as written. SQLite renames a repeated column of
+      # the row-cap subquery `name:1`, which the redactor would not match.
+      def refuse_repeated_protected_headers!(columns)
+        protected = (@safe_context.redacted_columns + redacted_kv_columns).to_set(&:downcase)
+        return if protected.empty? || !repeated_protected_header?(Array(columns), protected)
+
+        raise ValidationError,
+              'Rejected: the console_sql result names a protected column more than once, so redaction ' \
+              'cannot tell its values apart. Select each protected column once, or use a structured Console tool.'
+      end
+
+      def repeated_protected_header?(columns, protected)
+        identities = columns.map { |column| sql_header_identity(column.to_s) }
+        names = identities.map(&:first)
+        identities.any? { |name, renamed| protected.include?(name) && (renamed || names.count(name) > 1) }
+      end
+
+      def sql_header_identity(header)
+        name = sql_dialect == :sqlite ? header.sub(/(?::\d+)+\z/, '') : header
+        [name.downcase, name != header]
       end
 
       def recognized_sql_result_types?(result)
@@ -1992,13 +2031,38 @@ module Woods
 
           list = sql_projection_before(lists, clause)
           next unless list
-          next unless sql_projection_expressions(stripped[position[:start]..]).any? do |item|
-            protected_sql_ordinal?(item, list[:expressions])
-          end
+
+          items = sql_projection_expressions(stripped[position[:start]..])
+          refuse_wildcard_sql_ordinal!(items, list[:expressions])
+          next unless items.any? { |item| protected_sql_ordinal?(item, list[:expressions]) }
 
           raise ValidationError,
                 'Rejected: positional SQL ordering or grouping cannot reference protected output columns.'
         end
+      end
+
+      # A `*` or `alias.*` item expands to columns the projection does not
+      # name, so no ordinal can be proven to miss a protected one.
+      def refuse_wildcard_sql_ordinal!(items, expressions)
+        return if @safe_context.redacted_columns.empty? && redacted_kv_columns.empty?
+        return unless expressions.any? { |expression| sql_wildcard_item?(expression) }
+        return unless items.any? { |item| sql_ordinal(item) }
+
+        raise ValidationError,
+              'Rejected: positional SQL ordering or grouping cannot be used with a wildcard projection while ' \
+              'redaction is active. Order or group by column name instead.'
+      end
+
+      # The first item carries any select modifier (`DISTINCT *`,
+      # `DISTINCT ON (id) *`, `SQL_NO_CACHE *`), so read only its last term.
+      def sql_wildcard_item?(expression)
+        identifier = /(?:[A-Za-z_\u0080-\u{10ffff}][A-Za-z0-9_$\u0080-\u{10ffff}]*|"(?:""|[^"])+"|`(?:``|[^`])+`)/u
+        expression.match?(/(?:\A|[\s)])(?:#{identifier}\s*\.\s*)*\*\z/)
+      end
+
+      def sql_ordinal(item)
+        ordinal = /\A\s*\(*\s*([0-9]+)\s*\)*(?:\s|\z)/.match(item)
+        ordinal[1].to_i if ordinal && ordinal[1].to_i.positive?
       end
 
       def sql_projection_before(lists, clause)
@@ -2008,10 +2072,10 @@ module Woods
       end
 
       def protected_sql_ordinal?(item, expressions)
-        ordinal = /\A\s*\(*\s*([0-9]+)\s*\)*(?:\s|\z)/.match(item)
-        return false unless ordinal && ordinal[1].to_i.positive?
+        ordinal = sql_ordinal(item)
+        return false unless ordinal
 
-        expression = expressions[ordinal[1].to_i - 1]
+        expression = expressions[ordinal - 1]
         return false unless expression
         return true if expression.include?('*')
 

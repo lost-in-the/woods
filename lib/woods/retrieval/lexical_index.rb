@@ -95,6 +95,7 @@ module Woods
         @shared_postings = !candidate_postings.nil?
         @postings, @exact_identifiers = candidate_postings
         build_candidate_postings unless documents
+        @stems.freeze
       end
 
       # Everything besides the indexed text that decides how a unit is
@@ -328,13 +329,21 @@ module Woods
       end
 
       # Interned, so a term reused from an earlier build and the same term
-      # tokenized now are one String.
+      # tokenized now are one String. The table fills while the corpus is
+      # tokenized and is frozen with the index; a query's terms are stemmed
+      # without being kept, so no query grows it.
       def stem(term)
-        @stems[term] ||= -(if term.length > 3 && term.match?(/\A\p{L}+\z/u)
-                             ActiveSupport::Inflector.singularize(term)
-                           else
-                             term
-                           end)
+        return @stems.fetch(term) { singular(term) } if @stems.frozen?
+
+        @stems[term] ||= singular(term)
+      end
+
+      def singular(term)
+        -(if term.length > 3 && term.match?(/\A\p{L}+\z/u)
+            ActiveSupport::Inflector.singularize(term)
+          else
+            term
+          end)
       end
 
       def field_values(unit)

@@ -202,7 +202,7 @@ ruby script/test-minimum-dependencies
 Run outside `bundle exec`. The harness builds and installs the candidate gem,
 resolves `gemfiles/minimum_runtime.gemfile` independently of the development
 bundle, and verifies every loaded Woods library comes from that installed gem.
-All five direct runtime dependencies are pinned to their advertised gemspec
+All six direct runtime dependencies are pinned to their advertised gemspec
 floors. Transitive dependencies are compatible solver selections, **not** a
 claim that every transitive version is minimal. CI retains the full resolved
 version/platform list, lockfile, candidate gem and SHA-256 under the
