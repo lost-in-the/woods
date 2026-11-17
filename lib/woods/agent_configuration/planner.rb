@@ -30,6 +30,11 @@ module Woods
         @intent = options.fetch(:intent, {})
       end
 
+      # @return [Boolean] whether setup took over an identical, unowned entry
+      def adopted?
+        @adopted == true
+      end
+
       def call
         @receipt_document = Document.new(@layout.receipt_path)
         @previous = @receipt_document.content && @receipt_document.json

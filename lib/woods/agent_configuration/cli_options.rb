@@ -13,10 +13,13 @@ module Woods
                    woods-agent-config recover --client claude --scope project|user [--root ROOT]
             Setup/update/remove create a private plan without changing managed configuration.
             Apply consumes that exact plan. Only Index MCP is configured; client trust remains separate.
+            --entry-form relative (project default inside a git checkout) writes no absolute path;
+            absolute names this machine's paths (user scope, and earlier installations until updated).
           USAGE
           { client: '--client NAME', scope: '--scope SCOPE', root: '--root DIRECTORY',
             plan: '--plan FILE', name: '--name NAME', index: '--index PATH', mode: '--mode MODE',
-            service: '--service NAME', container_root: '--container-root PATH' }.each do |key, option|
+            service: '--service NAME', container_root: '--container-root PATH',
+            entry_form: '--entry-form FORM' }.each do |key, option|
             parser.on(option) { |value| options[key] = value }
           end
           parser.on('--instructions LIST', Array) { |value| options[:instructions] = value }
