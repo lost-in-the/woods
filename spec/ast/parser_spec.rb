@@ -409,4 +409,100 @@ RSpec.describe Woods::Ast::Parser do
       end
     end
   end
+
+  describe 'child expressions Ruby evaluates, which no adapter drops' do
+    def calls_in(node)
+      node.find_all(:send).map { |call| [call.receiver, call.method_name].compact.join('.') }
+    end
+
+    def calls_in_method(body)
+      calls_in(parser.parse("def run\n#{body}\nend\n").find_first(:def))
+    end
+
+    [true, false].each do |prism|
+      context "with #{prism ? 'Prism' : 'the parser gem'}" do
+        before { allow(parser).to receive(:prism_available?).and_return(prism) }
+
+        {
+          'a hash value' => ['x = { job: Report.build }', 'Report.build'],
+          'a hash key' => ['x = { Key.build => 1 }', 'Key.build'],
+          'a double splat in a hash' => ['x = { **Options.build }', 'Options.build'],
+          'a string interpolation' => ["x = \"a\#{Label.build}\"", 'Label.build'],
+          'a heredoc interpolation' => ["x = <<~TXT\n  a \#{Letter.build}\nTXT", 'Letter.build'],
+          'an interpolation inside a call argument' => ["Log.info(\"done \#{Count.build}\")", 'Count.build'],
+          'a yield argument' => ['yield Item.build', 'Item.build'],
+          'a block-pass expression' => ['Runner.run(&Builder.build)', 'Builder.build'],
+          'a splatted rescue list' => ["Work.call\nrescue *Errors.list\nRecover.call", 'Errors.list'],
+          'an interpolated symbol' => ["x = :\"a\#{Tag.build}\"", 'Tag.build'],
+          'an interpolated regex' => ["x = /a\#{Pattern.build}/", 'Pattern.build'],
+          'an array element' => ['x = [Entry.build]', 'Entry.build'],
+          'a ternary branch' => ['x = flag ? Yes.build : No.build', 'No.build'],
+          'a rescue modifier' => ['x = Integer(v) rescue Fallback.build', 'Fallback.build'],
+          'an or-assign value' => ['@x ||= Cached.build', 'Cached.build'],
+          'a super argument' => ['super(Parent.build)', 'Parent.build'],
+          'a lambda body' => ['x = -> { Later.build }', 'Later.build'],
+          'a constant path under an expression' => ['x = Holder.build::VALUE', 'Holder.build'],
+          'a block parameter default' => ['items.each { |a, b = Fill.build| b }', 'Fill.build'],
+          'a lambda parameter default' => ['x = ->(a = Fill.build) { a }', 'Fill.build'],
+          'a singleton class of an expression' => ["class << Holder.build\nend", 'Holder.build'],
+          'a definition receiver expression' => ["def (Holder.build).hook\nend", 'Holder.build'],
+          'a rescue target' => ["Work.call\nrescue => Holder.build.error\nRecover.call", 'Holder.build']
+        }.each do |form, (body, call)|
+          it "keeps a call in #{form}" do
+            expect(calls_in_method(body)).to include(call)
+          end
+        end
+
+        it 'keeps every rescue branch and the else of a begin' do
+          source = <<~RUBY
+            begin
+              Body.call
+            rescue ArgumentError
+              First.call
+            rescue TypeError
+              Second.call
+            else
+              Otherwise.call
+            ensure
+              Always.call
+            end
+          RUBY
+
+          expect(calls_in(parser.parse(source)))
+            .to include('First.call', 'Second.call', 'Otherwise.call', 'Always.call')
+        end
+
+        it 'keeps every rescue branch and the else of a method body' do
+          body = "Body.call\nrescue ArgumentError\nFirst.call\nrescue TypeError\nSecond.call\n" \
+                 "else\nOtherwise.call\nensure\nAlways.call"
+
+          expect(calls_in_method(body)).to include('First.call', 'Second.call', 'Otherwise.call', 'Always.call')
+        end
+
+        it 'keeps default parameter values after the body statements' do
+          def_node = parser.parse("def run(a = First.build, b: Client.new)\n  Body.call\nend\n").find_first(:def)
+
+          expect(def_node.children.first.method_name).to eq('call')
+          expect(calls_in(def_node)).to include('First.build', 'Client.new')
+        end
+
+        it 'keeps a default parameter value of a singleton method' do
+          defs_node = parser.parse("def self.run(c: Client.new)\n  Body.call\nend\n").find_first(:defs)
+
+          expect(defs_node.children.first.method_name).to eq('call')
+          expect(calls_in(defs_node)).to include('Client.new')
+        end
+
+        it 'adds no child to a method without default values' do
+          def_node = parser.parse("def run(a, b:)\n  Body.call\nend\n").find_first(:def)
+
+          expect(def_node.children.size).to eq(1)
+        end
+
+        it 'parses an empty pair of parentheses' do
+          expect(calls_in_method("x = ()\nAfter.call")).to include('After.call')
+        end
+      end
+    end
+  end
 end

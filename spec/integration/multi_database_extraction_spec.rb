@@ -67,8 +67,13 @@ RSpec.describe 'Booted multi-database extraction', :booted_app do
     FileUtils.rm_rf(@scratch_dir) if @scratch_dir
   end
 
+  # Both databases hold an accounts table, with different indexes and
+  # foreign keys; invoices exists in billing only.
   def create_tables
-    PrimaryRecord.connection.create_table(:accounts) { |t| t.string :name }
+    PrimaryRecord.connection.create_table(:accounts) do |t|
+      t.string :name
+      t.index :name, unique: true
+    end
     PrimaryRecord.connection.create_table(:posts) do |t|
       t.string :title
       t.integer :status, default: 0
@@ -79,12 +84,20 @@ RSpec.describe 'Booted multi-database extraction', :booted_app do
       t.text :body
       t.timestamps
     end
-    BillingRecord.connection.create_table(:accounts) { |t| t.string :name }
-    BillingRecord.connection.create_table(:invoices) { |t| t.references :account, foreign_key: true }
+    create_billing_tables(BillingRecord.connection)
     ReportingRecord.connection.create_table(:subscriptions) do |t|
       t.integer :account_id
       t.integer :subscriber_id
     end
+  end
+
+  def create_billing_tables(billing)
+    billing.create_table(:regions) { |t| t.string :name }
+    billing.create_table(:accounts) do |t|
+      t.string :name
+      t.references :region, foreign_key: true
+    end
+    billing.create_table(:invoices) { |t| t.references :account, foreign_key: true }
   end
 
   def model_unit(identifier)
@@ -161,8 +174,8 @@ RSpec.describe 'Booted multi-database extraction', :booted_app do
     tables = unit_snapshot(@output_dir).values.select { |unit| unit['type'] == 'database_table' }
 
     expect(tables.map { |unit| unit['identifier'] }).to contain_exactly(
-      'table:billing.accounts', 'table:billing.invoices', 'table:primary.accounts', 'table:primary.comments',
-      'table:primary.posts', 'table:reporting.subscriptions'
+      'table:billing.accounts', 'table:billing.invoices', 'table:billing.regions', 'table:primary.accounts',
+      'table:primary.comments', 'table:primary.posts', 'table:reporting.subscriptions'
     )
     expect(unit_of('database_table', 'table:primary.accounts')['metadata'])
       .to include('database' => 'primary', 'model' => 'MultiAccount', 'model_less' => false)
@@ -230,5 +243,97 @@ RSpec.describe 'Booted multi-database extraction', :booted_app do
     expect(reverse.fetch(:explanation).fetch(:edges).values).to include(edge)
     expect(reverse[:explanation][:witnesses]['MultiAccount']).to include(parent: 'MultiReplicaAccount',
                                                                          impact: 'direct')
+  end
+
+  # The schema header of a published model unit, as lines.
+  def schema_header(unit)
+    lines = unit.fetch('source_code').lines.map(&:chomp)
+    lines.first == '# == Schema Information' ? lines.take_while { |line| line.start_with?('#') } : []
+  end
+
+  # The entries under one header section, nil when the section is absent.
+  def header_section(lines, title)
+    start = lines.index("# #{title}:")
+    start && lines.drop(start + 1).take_while { |line| line.start_with?('#   ') }
+  end
+
+  def foreign_key(from, column, to)
+    { 'from_table' => from, 'to_table' => to, 'column' => column }
+  end
+
+  it "describes each model's table in its schema header from the model's own database, as its metadata does" do
+    replica = model_unit('MultiReplicaAccount')
+    expect(header_section(schema_header(replica), 'Indexes')).to eq(['#   index_accounts_on_region_id: [region_id]'])
+    expect(header_section(schema_header(replica), 'Foreign Keys')).to eq(['#   accounts.region_id → regions'])
+    expect(replica.dig('metadata', 'foreign_keys')).to eq([foreign_key('accounts', 'region_id', 'regions')])
+
+    account = model_unit('MultiAccount')
+    expect(header_section(schema_header(account), 'Indexes')).to eq(['#   index_accounts_on_name: [name] (unique)'])
+    expect(header_section(schema_header(account), 'Foreign Keys')).to be_nil
+    expect(account.dig('metadata', 'foreign_keys')).to eq([])
+
+    invoice = model_unit('MultiInvoice')
+    expect(header_section(schema_header(invoice), 'Foreign Keys')).to eq(['#   invoices.account_id → accounts'])
+    expect(invoice.dig('metadata', 'foreign_keys')).to eq([foreign_key('invoices', 'account_id', 'accounts')])
+  end
+
+  # Before Rails 7.2 Active Record's own schema reads (table_exists?,
+  # columns) lease the model's connection to the calling thread, so a
+  # one-connection pool stays held by whichever thread extracted its models.
+  def skip_unless_schema_reads_return_connections
+    return if ActiveRecord.version >= Gem::Version.new('7.2')
+
+    skip 'Active Record before 7.2 leases connections in its own schema reads'
+  end
+
+  # Rails 8.1 names the size max_connections and refuses two different values.
+  def with_billing_pool_of_one
+    config = BillingRecord.connection_db_config
+    settings = config.configuration_hash.merge(pool: 1, max_connections: 1)
+    single = ActiveRecord::DatabaseConfigurations::HashConfig.new(config.env_name, config.name, settings)
+    BillingRecord.establish_connection(single)
+    yield BillingRecord.connection_pool
+  ensure
+    BillingRecord.establish_connection(config) if config
+  end
+
+  it 'leaves no second-database connection leased to the thread that extracted its models' do
+    skip_unless_schema_reads_return_connections
+
+    with_billing_pool_of_one do |pool|
+      held = Thread.new do
+        %w[MultiInvoice MultiReplicaAccount].each do |name|
+          Woods::Extractors::ModelExtractor.new.extract_model(name.constantize)
+        end
+        pool.active_connection?
+      end.value
+
+      expect(held).to be_falsey
+    end
+  end
+
+  it 'publishes the second database tables and foreign keys from a concurrent run on a one-connection pool' do
+    skip_unless_schema_reads_return_connections
+
+    # The concurrent run goes first, so no connection the sequential control
+    # took on this thread can be what starves its workers.
+    with_billing_pool_of_one do
+      Woods.configuration.concurrent_extraction = true
+      concurrent = File.join(@scratch_dir, 'pool-of-one-concurrent')
+      Woods::Extractor.new(output_dir: concurrent).extract_all
+      Woods.configuration.concurrent_extraction = false
+      sequential = File.join(@scratch_dir, 'pool-of-one-sequential')
+      Woods::Extractor.new(output_dir: sequential).extract_all
+
+      billing = lambda do |index|
+        unit_snapshot(index).values.select { |unit| unit['identifier'].to_s.start_with?('table:billing.') }
+      end
+      expect(billing.call(sequential).map { |unit| unit['identifier'] })
+        .to contain_exactly('table:billing.accounts', 'table:billing.invoices', 'table:billing.regions')
+      expect(billing.call(concurrent)).to match_array(billing.call(sequential))
+      expect(differences(concurrent, sequential)).to eq([])
+    ensure
+      Woods.configuration.concurrent_extraction = false
+    end
   end
 end

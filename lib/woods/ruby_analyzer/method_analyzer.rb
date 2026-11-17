@@ -35,35 +35,37 @@ module Woods
       def analyze(source:, file_path:)
         root = @parser.parse(source)
         units = []
-        extract_methods_from_tree(root, source, file_path, [], units)
+        extract_methods_from_tree(root, source, file_path, [DeclarationName.new, []], units)
         units
       end
 
       private
 
-      def extract_methods_from_tree(node, source, file_path, namespace_stack, units)
+      # +lexical+ is the source's declarations so far and the enclosing
+      # qualified names, outermost first.
+      def extract_methods_from_tree(node, source, file_path, lexical, units)
         return unless node.is_a?(Ast::Node)
 
         case node.type
         when :class
-          process_container_methods(node, :class, source, file_path, namespace_stack, units)
+          process_container_methods(node, :class, source, file_path, lexical, units)
         when :module
-          process_container_methods(node, :module, source, file_path, namespace_stack, units)
+          process_container_methods(node, :module, source, file_path, lexical, units)
         else
           (node.children || []).each do |child|
-            extract_methods_from_tree(child, source, file_path, namespace_stack, units)
+            extract_methods_from_tree(child, source, file_path, lexical, units)
           end
         end
       end
 
-      def process_container_methods(node, type, source, file_path, namespace_stack, units)
-        name = node.method_name
-        fqn = build_fqn(name, namespace_stack)
+      def process_container_methods(node, type, source, file_path, lexical, units)
+        names, nesting = lexical
+        fqn = build_fqn(node.method_name, nesting, names)
         body_offset = type == :class ? 2 : 1
         body_children = (node.children || [])[body_offset..] || []
 
         visibility_tracker = VisibilityTracker.new
-        inner_ns = fqn.split('::')
+        inner = [names, [*nesting, fqn]]
 
         body_children.each do |child|
           next unless child.is_a?(Ast::Node)
@@ -80,7 +82,7 @@ module Woods
               units << build_method_unit(method, fqn, '.', visibility, file_path)
             end
           when :class, :module
-            extract_methods_from_tree(child, source, file_path, inner_ns, units)
+            extract_methods_from_tree(child, source, file_path, inner, units)
           end
         end
       end

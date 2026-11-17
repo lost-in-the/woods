@@ -27,13 +27,28 @@ module Woods
       # Resolve and validate the index directory from CLI args or environment.
       #
       # @param argv [Array<String>] Command-line arguments
+      # @param await_index [Boolean] accept a directory that holds no
+      #   published index yet, or does not exist ({IndexWait})
       # @return [String] Validated index directory path
-      def self.resolve_index_dir(argv)
+      def self.resolve_index_dir(argv, await_index: false)
+        if await_index && [argv[0], ENV.fetch('WOODS_DIR', nil), ENV.fetch('WOODS_OUTPUT', nil)].all?(&:nil?)
+          warn 'Error: --await-index needs an index path: pass it as an argument, WOODS_DIR or WOODS_OUTPUT. ' \
+               'woods-mcp-start --checkout serves the current checkout instead.'
+          exit 1
+        end
         dir = argv[0] || ENV['WOODS_DIR'] || ENV['WOODS_OUTPUT'] || Dir.pwd
         examined = dir.empty? ? '(empty path)' : File.expand_path(dir)
+        if File.exist?(dir) && !File.directory?(dir)
+          warn "Error: #{examined} is not a directory."
+          warn index_path_remedy
+          exit 1
+        end
+        return dir if await_index && !dir.empty?
 
         unless Dir.exist?(dir)
           warn "Error: Index directory does not exist: #{examined}"
+          warn 'This process sees nothing at that path. A server run inside a container needs the container path ' \
+               '(for example /app/tmp/woods); a server on the host needs the host path.'
           warn index_path_remedy
           exit 1
         end
@@ -86,8 +101,12 @@ module Woods
       # unavailable or encounters errors.
       #
       # @param index_dir [String] Path to extraction output directory
+      # @param await_index [Boolean] the index directory may not exist yet
+      #   ({IndexWait}); no store is built then, so nothing creates it
       # @return [Woods::Temporal::SnapshotStore, Woods::Temporal::JsonSnapshotStore, nil]
-      def self.build_snapshot_store(index_dir)
+      def self.build_snapshot_store(index_dir, await_index: false)
+        return nil if await_index && !File.directory?(index_dir)
+
         db_path = File.join(index_dir, 'woods.sqlite3')
         enabled = ENV['WOODS_SNAPSHOTS'] == 'true' ||
                   Woods.configuration.enable_snapshots ||
@@ -139,16 +158,18 @@ module Woods
       #
       # @param index_dir [String, nil] Path to the extraction output directory.
       #   When nil, uses Woods.configuration.output_dir.
+      # @param await_index [Boolean] the index may not be published yet
+      #   ({IndexWait}); a lexical retriever then reads it once it is
       # @return [Array(Woods::Retriever, Woods::MCP::BootstrapState)]
       # @raise [Woods::MCP::BootstrapError] on config-invalid (missing
       #   credentials, dimension mismatch, unsupported artifact, or a missing
       #   artifact under WOODS_REQUIRE_INDEX=1).
-      def self.build_retriever(index_dir: nil)
+      def self.build_retriever(index_dir: nil, await_index: false)
         mode = ENV.fetch('WOODS_RETRIEVAL_MODE', Woods.configuration.retrieval_mode.to_s)
         unless %w[semantic lexical].include?(mode)
           raise BootstrapError, "WOODS_RETRIEVAL_MODE must be semantic or lexical, got #{mode.inspect}"
         end
-        return build_lexical_retriever(index_dir) if mode == 'lexical'
+        return build_lexical_retriever(index_dir, await_index: await_index) if mode == 'lexical'
 
         state = BootstrapState.new
         state.mark(:hydrating)
@@ -196,10 +217,12 @@ module Woods
         [retriever, state]
       end
 
-      def self.build_lexical_retriever(index_dir)
+      def self.build_lexical_retriever(index_dir, await_index: false)
         state = BootstrapState.new
         state.mark(:hydrating)
-        retriever = PublishedLexicalRetriever.new(index_dir: index_dir || Woods.configuration.output_dir,
+        dir = index_dir || Woods.configuration.output_dir
+        reader = IndexReader.new(dir, require_index: false) if await_index
+        retriever = PublishedLexicalRetriever.new(index_dir: dir, reader: reader,
                                                   default_budget: Woods.configuration.max_context_tokens)
         # Not warmed here: {Server.build} binds its own reader, which clears
         # any snapshot built against this one, and warms the retriever once
@@ -415,7 +438,7 @@ module Woods
             end
             counts = { vectors: 0, metadata: candidate.metadata_store.count, graph: 0 }
             reader.reload!
-            retriever.install_snapshot!(candidate.snapshot)
+            retriever.install_from!(candidate)
             state&.clear_reload_failure!
             counts
           end
