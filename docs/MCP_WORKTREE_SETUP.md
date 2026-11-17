@@ -118,7 +118,16 @@ What it does:
 3. **Rewrites what names the checkout.** `git_branch`, `git_sha` and `root` in the manifest, and the recorded source root in `source_inputs.json`, now describe the new worktree. The generation number restarts at 1.
 4. **Updates incrementally.** The change set is `git diff <seed commit>` against the working tree (committed and uncommitted tracked changes) plus untracked files. Ignored files are not in it.
 
-If any check fails, or a changed path needs a fresh Rails boot (`Gemfile.lock`, an initializer, `db/schema.rb`), or the extraction configuration differs, or the incremental run raises, the task runs a full extraction instead and prints the reason. It does nothing when the output directory already has a published index, and it stands down while a watch daemon maintains that directory.
+The task falls back to a full extraction when any check fails.
+It also falls back when a changed path needs a fresh Rails boot (`Gemfile.lock`, an initializer, `db/schema.rb`).
+So does a changed extraction configuration, or an incremental run that raises.
+A run that has lost its staging directory's writer lock is the exception: the task fails with the lock error.
+It then prints one line, `Not seeded, ran a full extraction instead: <reason>`.
+Paths in the reason are relative to the worktree; a path outside it shows only its last component.
+The task still exits 0, as the full extraction leaves a complete index.
+A seeded index's `generation.json` records the reason `incremental`; a fallback records `full`.
+It does nothing when the output directory already has a published index.
+It stands down while a watch daemon maintains that directory.
 
 Embedding dumps and other operational state are not copied; run `woods:embed` in the new worktree if you need them. After seeding, start the [watch daemon](WATCH_DAEMON.md#multiple-worktrees) there as usual, or pass [`root`](#one-server-several-worktrees-root) to a shared server.
 

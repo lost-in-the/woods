@@ -1,0 +1,35 @@
+# frozen_string_literal: true
+
+# Each body calls super where a flow cannot place it by line alone.
+module SuperCalls
+  def twice
+    super
+    BetweenJob.perform_later
+    super
+  end
+
+  # rubocop:disable-next Style/SingleLineMethods, Style/Semicolon
+  def compact; super; AfterCompactJob.perform_later; end
+
+  def gated
+    if gate_open? # rubocop:disable Style/GuardClause
+      super
+      AfterGatedJob.perform_later
+    end
+  end
+
+  # Ruby makes a super call in an operand before the call that receives it.
+  def handed
+    record(super)
+    record(value: super)
+    record(handed? ? super : nil)
+    super.then { AfterHandedJob.perform_later }
+  end
+
+  def locked
+    ActiveRecord::Base.transaction do
+      super
+      AfterLockedJob.perform_later
+    end
+  end
+end

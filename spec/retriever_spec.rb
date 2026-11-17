@@ -339,7 +339,7 @@ RSpec.describe Woods::Retriever do
       end
 
       it 'excludes them when WOODS_RETRIEVE_DOCUMENTATION=0, whatever the configuration says' do
-        stub_const('ENV', ENV.to_h.merge('WOODS_RETRIEVE_DOCUMENTATION' => '0'))
+        replace_env(ENV.to_h.merge('WOODS_RETRIEVE_DOCUMENTATION' => '0'))
 
         expect(assembled_types).to eq(%w[controller rails_source])
       end
