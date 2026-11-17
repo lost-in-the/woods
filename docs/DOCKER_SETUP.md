@@ -11,7 +11,7 @@ HOST                                    APPLICATION CONTAINER
 ─────────────────────────────           ───────────────────────────
 MCP client                              Rails App + Woods bundle
   docker compose exec -T ────────────▶    woods-mcp /app/tmp/woods
-                                          31 schemas; 15 registered
+                                          32 schemas; 16 registered
                                           reads the published index
 
 Extraction commands ─────────────────▶   bundle exec rake woods:extract
@@ -78,14 +78,26 @@ docker compose exec app bundle exec rake woods:extract
 # Incremental (changed files only)
 docker compose exec app bundle exec rake woods:incremental
 
-# Automatic structural updates while the container is running
+# Raw watcher task; run it under one owner, as described below
 docker compose exec app bundle exec rake woods:watch
 
 # Framework/gem sources only
 docker compose exec app bundle exec rake woods:extract_framework
 ```
 
-Run the watcher as its own development service or process-manager entry, not as a one-off terminal command. Docker Desktop bind mounts may not deliver reliable native filesystem events; set `WOODS_WATCH_POLL=1` for polling when needed. The watcher updates structural generations automatically, while semantic vectors still require `woods:embed_incremental`.
+Run the watcher under one owner, not as a one-off terminal command.
+If the container runs `bin/rails server`,
+the Puma mode of the [watcher generator](WATCH_DAEMON.md#managed-development-startup) works inside it.
+Puma in the container then starts the watcher, and no separate service is needed.
+Otherwise run it as its own development service or process-manager entry.
+
+Docker Desktop bind mounts may not deliver reliable native filesystem events, so the watcher polls by default
+inside a container (it looks for `/.dockerenv` or `/run/.containerenv`) and whenever the `listen` gem is absent.
+Its startup line in the Rails log names the choice:
+`[Woods] watch: polling every 1.0s` or `[Woods] watch: using native FS events (listen)`.
+Set `WOODS_WATCH_POLL=1` when it chose native events and edits made on the host do not reach it.
+The watcher updates structural generations automatically.
+Semantic vectors still require `woods:embed_incremental`.
 
 Use the application's actual Rails task entrypoint. If its root `Rakefile` wraps
 Compose, the container may need `bundle exec rails woods:watch`. Keep the raw
@@ -216,6 +228,9 @@ Replace `app` and `/app` with the Compose service and container path used by the
   }
 }
 ```
+
+`woods-mcp-start` also works in these commands in place of `woods-mcp`.
+It checks the index path and its published generation first, then starts `woods-mcp`.
 
 Two persistence gotchas:
 
@@ -521,7 +536,8 @@ Docker:  "args": ["exec", "-i", "container-name", ...]
 
 ### Path confusion between host and container
 
-**Symptom:** Index Server reports "No manifest.json" even though extraction succeeded.
+**Symptom:** The Index Server exits 1 with `Index directory does not exist: <path>` even though extraction succeeded.
+Woods 1.x reported this as "No manifest.json".
 
 **Fix:** Match the path to the server process:
 

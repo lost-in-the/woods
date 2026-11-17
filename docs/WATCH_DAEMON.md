@@ -28,7 +28,7 @@ Ctrl-C to stop.
 | `WOODS_OUTPUT` | `tmp/woods` | Index directory |
 | `WOODS_WATCH_DEBOUNCE` | `0.4` | Seconds of quiet before a batch is considered settled |
 | `WOODS_WATCH_FULL_THRESHOLD` | `50` | Actionable changed-file count above which a full extraction replaces incremental |
-| `WOODS_WATCH_POLL` | unset | `1` forces the polling backend, set this inside a container watching a bind mount |
+| `WOODS_WATCH_POLL` | unset | `1` forces the polling backend; `0` lets a detected container use `listen`. Unset, a detected container polls; see [watcher backends](#watcher-backends) |
 | `WOODS_WATCH_POLL_INTERVAL` | `1.0` | Positive, finite seconds of sleep between polling scans; does not select the polling backend |
 | `WOODS_WATCH_IDLE_TIMEOUT` | unset | Seconds of quiet after which a dormant daemon exits |
 | `WOODS_WATCH_CATCH_UP` | `1` | `0` skips the startup reconciliation |
@@ -645,15 +645,17 @@ A path it cannot prove unchanged counts.
 
 | Backend | When | Trade-off |
 |---|---|---|
-| `listen` gem | Used automatically when the host has it | Native FS events; low latency, no idle CPU |
-| Polling | Fallback; no dependency | Costs a scan per interval, but works across container bind mounts |
+| `listen` gem | Used when the bundle has it, outside a detected container | Native FS events; low latency, no idle CPU |
+| Polling | Default in a detected container, and whenever `listen` is absent; no dependency | Costs a scan per interval, but works across container bind mounts |
 
-The fallback is not a consolation prize. Native FS events **do not propagate
-reliably across container bind mounts**, `listen` documents this, and macOS
-Docker VMs are the usual casualty. Since extraction typically runs inside a dev
-container with the source bind-mounted, a host in that position should force
-polling rather than trust a watcher that may sit silent while files change
-under it:
+The fallback is not a consolation prize.
+Native FS events **do not propagate reliably across container bind mounts**, `listen` documents this,
+and macOS Docker VMs are the usual casualty.
+So the watcher polls by default when it detects a container (`/.dockerenv` or `/run/.containerenv`).
+Its startup line in the Rails log names the choice:
+`[Woods] watch: polling every 1.0s` or `[Woods] watch: using native FS events (listen)`.
+`WOODS_WATCH_POLL=0` keeps `listen` in a container whose runtime does propagate events.
+Force polling when no container is detected and edits do not reach the watcher:
 
 ```bash
 WOODS_WATCH_POLL=1 WOODS_WATCH_POLL_INTERVAL=2.5 bundle exec rake woods:watch
@@ -1013,7 +1015,14 @@ tools, and disjoint-by-construction is what makes this design safe.
 
 ### Seeding a new worktree
 
-A new worktree needs an index before its daemon has anything to maintain. Instead of a cold full extraction, `woods:seed` copies another checkout's published generation and runs an incremental update for the difference, falling back to a full extraction when the copy cannot be trusted. It builds in a sibling directory and publishes by renaming `generation.json` last, so the daemon and every reader see either no index or the finished one. It does not run while a daemon is alive on the target directory. Details and the verification rules are in [MCP worktree setup](MCP_WORKTREE_SETUP.md#seed-a-new-worktrees-index).
+A new worktree's daemon builds the first index itself when it starts and finds none.
+Instead of building it from scratch, `woods:seed` copies another checkout's published generation
+and runs an incremental update for the difference,
+falling back to a full extraction when the copy cannot be trusted.
+It builds in a sibling directory and publishes by renaming `generation.json` last,
+so the daemon and every reader see either no index or the finished one.
+It does not run while a daemon is alive on the target directory.
+Details and the verification rules are in [MCP worktree setup](MCP_WORKTREE_SETUP.md#seed-a-new-worktrees-index).
 
 ### Within one worktree, writers serialize
 
