@@ -387,6 +387,16 @@ step before it.
    genuine simultaneous source owners still abort before publication.
 3. **Re-extract the rest of the blast radius**: units whose own file did not
    change but which depend on something that did.
+
+   A reference resolves by name against the loaded constants, so an edit in another file can move it.
+   Adding `Billing::ReconcileJob` retargets an unchanged `Billing::Invoice` that enqueues `ReconcileJob`.
+   No graph edge leads there, so such units join the blast radius by name.
+   `RenderScope` reads the constants each changed Ruby file adds, removes or redefines, as in step 4.
+   Every unit whose source holds a reference through one of those names is re-extracted.
+   The preceding generation's source-reference cache lists the references, so no source is parsed again.
+   A method body edit touches no constant and adds no unit.
+   An edit the syntax tree cannot read counts every constant the file declares.
+   A constant created only by name at run time (`const_set`) is not followed.
 4. **Reconcile class-based types** against each extractor's
    `#discoverable_classes`, classes added since the last extraction, and
    classes the graph still holds that the set no longer contains. Exact by

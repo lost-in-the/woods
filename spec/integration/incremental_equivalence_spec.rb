@@ -5691,6 +5691,247 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # An untouched unit names `ShadowProbeJob`, and Ruby's lookup at that call
+  # site answers the innermost scope or ancestor that defines it. A constant
+  # added or removed elsewhere can change that answer while the unit's own
+  # file, and every edge of the graph before the run, stays the same.
+  describe 'a constant added or removed under the scope of an untouched reference' do
+    let(:shadow_constants) do
+      %i[ShadowProbeWitness ShadowProbeHost ShadowLedger ShadowDepot ShadowProbeJob ShadowAuditService ShadowOtherJob]
+    end
+
+    after do
+      shadow_constants.each do |name|
+        next unless Object.const_defined?(name, false)
+
+        constant = Object.const_get(name)
+        nested = constant.constants(false).map { |child| constant.const_get(child, false) }
+        ([constant] + nested).each { |klass| klass.abstract_class = true if klass.respond_to?(:abstract_class=) }
+        Object.send(:remove_const, name)
+      end
+    end
+
+    def load_written(relative, source)
+      load app_path(write_file(relative, source))
+      relative
+    end
+
+    def write_shadow_fixture
+      load_written('app/jobs/shadow_probe_job.rb', "class ShadowProbeJob < ApplicationJob\n  def perform; end\nend\n")
+      load_written('app/services/shadow_audit_service.rb', "class ShadowAuditService\n  def self.call; end\nend\n")
+      load_written('app/models/shadow_ledger.rb',
+                   "class ShadowLedger < ApplicationRecord\n  self.table_name = 'posts'\nend\n")
+      write_shadow_referrers
+    end
+
+    def write_shadow_referrers
+      load_written('app/models/shadow_probe_host.rb', <<~RUBY)
+        class ShadowProbeHost < ApplicationRecord
+          self.table_name = 'posts'
+          after_save :enqueue_probe
+
+          def enqueue_probe = ShadowProbeJob.perform_later
+        end
+      RUBY
+      load_written('app/models/shadow_ledger/entry.rb', <<~RUBY)
+        class ShadowLedger
+          class Entry < ApplicationRecord
+            self.table_name = 'comments'
+
+            def settle
+              ShadowAuditService.call
+              ShadowProbeJob.perform_later
+              ShadowTally.count
+            end
+          end
+        end
+      RUBY
+    end
+
+    def nested_job(namespace)
+      "class #{namespace}::ShadowProbeJob < ::ShadowProbeJob\nend\n"
+    end
+
+    def remove_nested(namespace, name)
+      Object.const_get(namespace).send(:remove_const, name)
+    end
+
+    it 'retargets an untouched model when a job is nested under it' do
+      write_shadow_fixture
+      index = full_extraction
+      added = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowProbeHost::ShadowProbeJob', 'ShadowProbeHost')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    def job_dependents(index, job)
+      Woods::DependencyGraph.from_h(read_json(index, 'dependency_graph.json')).dependents_of(job).sort
+    end
+
+    it 'retargets a subclass that reaches the nested job through its parent, keeping a rooted reference' do
+      write_shadow_fixture
+      load_written('app/models/shadow_probe_witness.rb', <<~RUBY)
+        class ShadowProbeWitness < ShadowProbeHost
+          def root_job = ::ShadowProbeJob.perform_later
+          def chosen_job = ShadowProbeJob.perform_later
+        end
+      RUBY
+      index = full_extraction
+      added = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowProbeWitness')
+      expect(job_dependents(index, 'ShadowProbeJob')).to include('ShadowProbeWitness')
+      expect(job_dependents(index, 'ShadowProbeHost::ShadowProbeJob')).to include('ShadowProbeWitness')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    # The names are read from the preceding generation's reference cache, so
+    # a run without a usable one must not fall back to the graph alone.
+    def damage_reference_cache(path, state)
+      return File.delete(path) if state == 'missing'
+
+      File.binwrite(path, JSON.generate(JSON.parse(File.binread(path)).merge('version' => 8)))
+    end
+
+    ['missing', 'from an older format'].each do |state|
+      it "refuses a shadowing edit while the reference cache is #{state}, then recovers after a full extraction" do
+        write_shadow_fixture
+        index = full_extraction
+        generation = Woods::Generation.new(output_dir: index)
+        token = generation.current.token
+        damage_reference_cache(generation.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME).to_s, state)
+        added = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+
+        expect { Woods::Extractor.new(output_dir: index).extract_changed([added]) }
+          .to raise_error(Woods::SourceReferences::RebuildRequired, /woods:extract/)
+        expect(generation.current.token).to eq(token)
+
+        Woods::Extractor.new(output_dir: index).extract_all
+        Woods::Extractor.new(output_dir: index).extract_changed([added])
+        expect(differences(index, full_extraction)).to be_empty
+      end
+    end
+
+    it 'retargets models nested in a plain namespace module when a job is added to the module file' do
+      write_shadow_fixture
+      namespace = load_written('app/models/shadow_depot.rb', "module ShadowDepot\nend\n")
+      consumers = %w[Slip Manifest].map do |name|
+        load_written("app/models/shadow_depot/#{name.downcase}.rb", <<~RUBY)
+          module ShadowDepot
+            class #{name} < ApplicationRecord
+              self.table_name = 'posts'
+              def self.selected_job = ShadowProbeJob
+              def self.dispatch(id) = ShadowProbeJob.perform_later(id)
+            end
+          end
+        RUBY
+        "ShadowDepot::#{name}"
+      end
+      index = full_extraction
+      load_written(namespace, <<~RUBY)
+        module ShadowDepot
+          class ShadowProbeJob < ApplicationJob
+            def perform(id) = id
+          end
+        end
+      RUBY
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([namespace])
+
+      expect(touched).to include(*consumers)
+      expect(job_dependents(index, 'ShadowProbeJob') & consumers).to be_empty
+      expect(job_dependents(index, 'ShadowDepot::ShadowProbeJob')).to include(*consumers)
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'retargets a model nested in a namespace when a job is nested in the namespace model file' do
+      write_shadow_fixture
+      index = full_extraction
+      changed = load_written('app/models/shadow_ledger.rb', <<~RUBY)
+        class ShadowLedger < ApplicationRecord
+          self.table_name = 'posts'
+
+          class ShadowProbeJob < ::ShadowProbeJob
+          end
+        end
+      RUBY
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([changed])
+
+      expect(touched).to include('ShadowLedger::ShadowProbeJob', 'ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'retargets a service reference when a service is nested in the namespace' do
+      write_shadow_fixture
+      index = full_extraction
+      added = load_written('app/services/shadow_ledger/shadow_audit_service.rb',
+                           "class ShadowLedger::ShadowAuditService\n  def self.call; end\nend\n")
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'adds an edge from an untouched model when a namespaced model makes its short name resolve' do
+      write_shadow_fixture
+      index = full_extraction
+      added = load_written('app/models/shadow_ledger/shadow_tally.rb',
+                           "class ShadowLedger::ShadowTally < ApplicationRecord\n  self.table_name = 'posts'\nend\n")
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowLedger::ShadowTally', 'ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'falls back to the outer job when the nested job is removed' do
+      write_shadow_fixture
+      nested = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+      index = full_extraction
+      delete_file(nested)
+      remove_nested(:ShadowProbeHost, :ShadowProbeJob)
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([nested])
+
+      expect(touched).to include('ShadowProbeHost')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'retargets both scopes when a nested job moves from one namespace to another' do
+      write_shadow_fixture
+      old = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+      index = full_extraction
+      delete_file(old)
+      remove_nested(:ShadowProbeHost, :ShadowProbeJob)
+      fresh = load_written('app/jobs/shadow_ledger/shadow_probe_job.rb', nested_job('ShadowLedger'))
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([old, fresh])
+
+      expect(touched).to include('ShadowProbeHost', 'ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'leaves untouched references alone when the new constant has another name' do
+      write_shadow_fixture
+      index = full_extraction
+      added = load_written('app/jobs/shadow_probe_host/shadow_other_job.rb',
+                           "class ShadowProbeHost::ShadowOtherJob < ApplicationJob\n  def perform; end\nend\n")
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowProbeHost::ShadowOtherJob')
+      expect(touched).not_to include('ShadowProbeHost', 'ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  end
+
   describe 'proven ownership moves out of surviving files (#574)' do
     def ownership_source(split: false)
       nested = split ? '' : 'class Car < OwnershipFleet; end'
