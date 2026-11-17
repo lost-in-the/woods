@@ -115,12 +115,22 @@ RSpec.describe 'Managed watch daemon lifecycle' do
     expect(next_event).to eq([:startup, { state: 'ready', generation: 1, reason: 'reconciled' }])
   end
 
-  it 'does not report unchanged startup ready when no index was produced' do
+  it 'builds a first index before reporting ready, even over a tree with nothing to extract' do
     FileUtils.rm_f(File.join(root, 'app/models/user.rb'))
     start_daemon
     watcher.ready!
     expect(next_event).to eq([:backend_ready, {}])
-    expect(next_event).to eq([:startup, { state: 'degraded', generation: 0, reason: 'no_index' }])
+    expect(next_event).to eq([:startup, { state: 'ready', generation: 1, reason: 'reconciled' }])
+    expect(extractor).to have_received(:extract_all).once
+  end
+
+  it 'does not report startup ready when the first full extraction published nothing' do
+    FileUtils.rm_f(File.join(root, 'app/models/user.rb'))
+    allow(extractor).to receive(:extract_all).and_return({})
+    start_daemon
+    watcher.ready!
+    expect(next_event).to eq([:backend_ready, {}])
+    expect(next_event).to eq([:startup, { state: 'degraded', generation: 0, reason: 'startup_failed' }])
   end
 
   it 'does not mistake a generation marker without a manifest for a usable publication' do
