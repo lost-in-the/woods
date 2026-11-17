@@ -512,6 +512,7 @@ module Woods
       @payload_store = PayloadStore.new(@output_dir)
       @payload_dir = nil
       @payload_generation = nil
+      @payload_pid = nil
       @dependency_graph = DependencyGraph.new
       @results = {}
       @extractors = {}
@@ -1371,11 +1372,15 @@ module Woods
     # incremental run, a failed run, or a run whose lock was taken over. Only
     # a path under the stage prefix is ever removed, and only this run's own.
     #
+    # A child forked during the run inherits this instance and unwinds the
+    # same cleanup. The stage belongs to the process that opened it, so the
+    # child only forgets it.
+    #
     # @return [void]
     def discard_unpromoted_stage
       return unless @payload_dir && @payload_store.stage?(@payload_dir)
 
-      @payload_store.discard_stage(@payload_dir)
+      @payload_store.discard_stage(@payload_dir) if @payload_pid == Process.pid
       @payload_dir = nil
       @payload_generation = nil
     rescue SystemCallError => e
@@ -1486,6 +1491,7 @@ module Woods
       @payload_generation = marker.number + 1
       @writer_lock = index_writer_lock
       @payload_dir = @payload_store.create_stage(@payload_generation, stage_owner)
+      @payload_pid = Process.pid
       seed_payload(marker, rewritten_dirs: rewritten_dirs, strict: strict)
       PublicationSeam.reach(:staged, @output_dir)
     rescue Coordination::LockLostError, Woods::ExtractionError
@@ -1856,12 +1862,17 @@ module Woods
       PayloadStore.name_for(@payload_generation)
     end
 
-    # A name only this run may stage under: the lock token when this process
-    # holds the index writer lock, otherwise a random one.
+    # A name only this run may stage under: a random part unique to the run,
+    # after the lock token when this process holds the index writer lock.
+    #
+    # The token alone is not enough. It names an acquisition, and every run in
+    # the process finds the same held lock, so two runs staging the same
+    # generation would share one directory and {PayloadStore#create_stage}
+    # would empty the first run's work for the second.
     #
     # @return [String]
     def stage_owner
-      @writer_lock&.token || SecureRandom.hex(8)
+      [@writer_lock&.token, SecureRandom.hex(8)].compact.join('-')
     end
 
     # @param published [Integer] the generation just published

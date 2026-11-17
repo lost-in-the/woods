@@ -1179,20 +1179,16 @@ RSpec.describe Woods::MCP::IndexReader do
 
   describe '#reload!' do
     it 'clears cached manifest so next access re-reads from disk' do
-      original = reader.manifest
-      expect(original['total_units']).to eq(9)
+      Dir.mktmpdir('woods-reader-reload') do |copy|
+        FileUtils.cp_r(File.join(fixture_dir, '.'), copy)
+        copied = described_class.new(copy)
+        expect(copied.manifest['total_units']).to eq(9)
 
-      # Swap manifest on disk, reload, and verify fresh data is returned
-      manifest_path = File.join(fixture_dir, 'manifest.json')
-      original_content = File.read(manifest_path)
-      modified = JSON.parse(original_content).merge('total_units' => 999)
+        manifest_path = File.join(copy, 'manifest.json')
+        File.write(manifest_path, JSON.generate(JSON.parse(File.read(manifest_path)).merge('total_units' => 999)))
+        copied.reload!
 
-      begin
-        File.write(manifest_path, JSON.generate(modified))
-        reader.reload!
-        expect(reader.manifest['total_units']).to eq(999)
-      ensure
-        File.write(manifest_path, original_content)
+        expect(copied.manifest['total_units']).to eq(999)
       end
     end
 

@@ -936,18 +936,22 @@ module Woods
 
       # Wind down a retry drain at shutdown.
       #
-      # Bounded exactly like {#stop_heartbeat}: before INF-2 the retry ran on
-      # the heartbeat thread and inherited that thread's join-then-kill, so
-      # this preserves the shutdown timing rather than making a long retry
-      # hold the process open. {#shut_down} sets +@stop_reason+ first, so
-      # {#drain_cycles} ends after the cycle already in flight.
+      # A long retry does not hold the process open: past
+      # {HEARTBEAT_SHUTDOWN_TIMEOUT} the thread is killed. {#shut_down} sets
+      # +@stop_reason+ first, so {#drain_cycles} ends after the cycle already
+      # in flight.
+      #
+      # The kill is joined, as the watcher thread's is. Thread#kill only
+      # schedules the killed cycle's ensure, which carries its batch back into
+      # +@pending+; without the join, {#persist_pending} snapshots the set
+      # before that ensure runs and the owed paths never reach disk.
       #
       # @param thread [Thread, nil]
       # @return [void]
       def stop_retry(thread)
         return unless thread
 
-        thread.join(HEARTBEAT_SHUTDOWN_TIMEOUT) || thread.kill
+        thread.join(HEARTBEAT_SHUTDOWN_TIMEOUT) || thread.kill.join
       end
 
       def heartbeat_tick
