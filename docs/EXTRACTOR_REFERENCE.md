@@ -354,6 +354,9 @@ publish the same values.
 **What it captures:** Every named, non-abstract `ActiveRecord::Base` descendant loaded in the process, except Rails-generated `HABTM_` join classes. A table is not required: a model whose table is missing is still extracted, with `table_exists: false` and empty column metadata. Models a gem or the framework defines are included too (an engine model, and on Rails before 7.1 `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata`); `origin` says which (below). The source_code is the model's actual Ruby source *plus* all included concerns inlined below it as formatted comment blocks. When the table exists, schema information (columns, types, indexes, foreign keys) is prepended as a header comment.
 The indexes and foreign keys are read from the model's own database.
 A section whose read fails says `unknown (could not be read)` instead of being left out.
+A model whose database cannot be reached at all is not extracted.
+The manifest's [`schema_readability`](PUBLISHED_INDEX.md#manifest-schema-readability) records that database as `unreachable`,
+or as `empty` when it holds no tables.
 
 **Key details:**
 - Uses `ActiveRecord::Base.descendants` for discovery (runtime introspection, not static parsing)

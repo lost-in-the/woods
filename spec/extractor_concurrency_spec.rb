@@ -195,7 +195,8 @@ RSpec.describe Woods::Extractor, 'concurrent extraction' do
       Woods.configure { |c| c.concurrent_extraction = true }
       pool = double('pool', size: 3, stat: { busy: 0 })
       allow(pool).to receive(:with_connection) { |&block| block.call }
-      stub_const('ActiveRecord::Base', double('AR', connection_pool: pool))
+      # Every full run asks each model's database whether its schema is readable; no model means no question.
+      stub_const('ActiveRecord::Base', double('AR', connection_pool: pool, descendants: []))
 
       lock = Mutex.new
       live = 0
