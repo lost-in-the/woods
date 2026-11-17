@@ -50,6 +50,14 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
   # Stub the extractor to see exactly one included concern with the given
   # name and source code (bypasses concern file discovery).
+  # Where Ruby says each named method is defined, as `name => [path, line]`.
+  def stub_method_sites(model, sites)
+    allow(model).to receive(:instance_method) do |name|
+      instance_double(UnboundMethod, source_location: sites.fetch(name.to_sym), original_name: name.to_sym,
+                                     super_method: nil)
+    end
+  end
+
   def stub_inlined_concern(name, code, path: nil)
     mod = Module.new
     allow(mod).to receive(:name).and_return(name)
@@ -833,7 +841,10 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       stub_pool_connection(model, double('Connection', indexes: [], foreign_keys: []))
       callback = double('Callback', filter: :set_slug, kind: :before)
       allow(model).to receive(:_save_callbacks).and_return([callback])
-      stub_inlined_concern('Trackable', concern_code)
+      concern_path = '/app/app/models/concerns/trackable.rb'
+      stub_inlined_concern('Trackable', concern_code, path: concern_path)
+      definition_line = concern_code.lines.index { |line| line.include?('def set_slug') } + 1
+      stub_method_sites(model, set_slug: [concern_path, definition_line])
       allow(extractor).to receive(:source_file_for).and_return(model_path)
       allow(File).to receive(:exist?).and_call_original
       allow(File).to receive(:exist?).with(model_path).and_return(true)
@@ -895,6 +906,8 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       def extract_with_concern(concern_path)
         model = stub_audit_log_model
         stub_inlined_concern('Trackable', concern_code, path: concern_path)
+        stub_method_sites(model, set_slug: [concern_path, line_in(concern_code, 'def set_slug')],
+                                 stamp: [model_path, line_in(model_source, 'def stamp')])
         allow(extractor).to receive(:source_file_for).and_return(model_path)
         stub_model_file
 
