@@ -665,6 +665,20 @@ Direct, unaliased selection of a redacted column stays allowed: the output heade
 
 `console_sql` applies a stricter form of the same rule because arbitrary SQL can rename output headers. A protected identifier is accepted only as a direct, unaliased outer `SELECT` column; aliases, aggregates, predicates, CTE shapes, ordering/grouping uses, and an EAV value without its paired key are refused before adapter execution. Use `console_query` when a protected column must participate in a more complex structured query.
 
+Three more `console_sql` rules keep each protected value under its own header:
+
+- A result whose headers name a protected column more than once is refused after execution,
+  before any row is returned. A protected column is a redacted column, or either column of a key/value pair.
+  Names compare case-insensitively.
+  On SQLite a renamed header such as `secret:1` counts as `secret`: SQLite renames a repeated column of the row-cap
+  subquery that way.
+  Select each protected column once.
+- While any redaction is configured, a positional `ORDER BY` or `GROUP BY` (`ORDER BY 2`) is refused when the
+  projection holds `*` or `alias.*`. The wildcard expands to columns the statement does not name.
+  Order or group by column name, or list the columns.
+- A statement with an unterminated block comment (`/*` without `*/`) is refused before the row cap is appended.
+  SQLite would read the cap as part of the comment.
+
 The security correction refuses PostgreSQL Unicode-escaped identifiers in
 `console_sql` before execution. Use ordinary identifiers or standard quoted
 identifiers instead. This restriction does not change the structured query tools.
@@ -799,7 +813,13 @@ end
 
 - The statement is wrapped as a subquery and asks for one row more than the cap. That extra row is never returned. Its arrival sets `completeness.has_more` to `true` (`status: "partial"`, `reason: "result_limit"`).
 - Otherwise `completeness` reads `status: "complete"`, `has_more: false`, with the row count in `total_matches`.
-- MySQL and MariaDB require unique column names in that subquery. A statement whose output repeats a name (`SELECT *` over a join of tables that share `id` or `created_at`, or one column selected twice) is refused with a message naming the cause. Alias the repeated columns or list them explicitly. PostgreSQL and SQLite accept such statements.
+- MySQL and MariaDB require unique column names in that subquery.
+  A statement whose output repeats a name (`SELECT *` over a join of tables that share `id` or `created_at`,
+  or one column selected twice) is refused with a message naming the cause.
+  Alias the repeated columns or list them explicitly.
+  PostgreSQL and SQLite accept such statements, unless the repeated name is a protected column
+  (see [`console_redacted_columns`](#console_redacted_columns)).
+  SQLite renames the repeat `name:1`.
 - `EXPLAIN` is not wrapped and is not capped. It still rejects an explicit `limit`.
 - The tool schema still rejects a `limit` above 10000, whatever the host maximum.
 - The row cap does not bound CPU or I/O. The [statement timeout](#statement-timeout) is unchanged.

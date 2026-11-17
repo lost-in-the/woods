@@ -248,6 +248,7 @@ jobs:
           spec/integration/console_credential_rotation_spec.rb
           spec/integration/session_controller_identity_spec.rb
           spec/integration/multi_database_extraction_spec.rb
+          spec/integration/multi_database_schema_comment_spec.rb
           spec/integration/hook_refresh_spec.rb
           spec/integration/source_input_drift_spec.rb
           spec/integration/source_output_spec.rb

@@ -115,6 +115,11 @@ module Woods
       # {#claim_startup?}.
       CLAIM_FILENAME = ClaimLease::CLAIM
 
+      # Claim path => the daemon in this process that holds it. A claim naming
+      # this process's pid is stale only when no entry here says it is live.
+      CLAIMS_HELD_IN_PROCESS = {} # rubocop:disable Style/MutableConstant -- guarded by the lock below
+      CLAIMS_HELD_IN_PROCESS_LOCK = Mutex.new
+
       # A daemon cycle is milliseconds; a manual full extraction is seconds to
       # minutes. This bounds how long a crashed writer can block the daemon.
       # Defined beside the lock factory ({Coordination::PipelineLock.for_index}).
@@ -946,18 +951,22 @@ module Woods
 
       # Wind down a retry drain at shutdown.
       #
-      # Bounded exactly like {#stop_heartbeat}: before INF-2 the retry ran on
-      # the heartbeat thread and inherited that thread's join-then-kill, so
-      # this preserves the shutdown timing rather than making a long retry
-      # hold the process open. {#shut_down} sets +@stop_reason+ first, so
-      # {#drain_cycles} ends after the cycle already in flight.
+      # A long retry does not hold the process open: past
+      # {HEARTBEAT_SHUTDOWN_TIMEOUT} the thread is killed. {#shut_down} sets
+      # +@stop_reason+ first, so {#drain_cycles} ends after the cycle already
+      # in flight.
+      #
+      # The kill is joined, as the watcher thread's is. Thread#kill only
+      # schedules the killed cycle's ensure, which carries its batch back into
+      # +@pending+; without the join, {#persist_pending} snapshots the set
+      # before that ensure runs and the owed paths never reach disk.
       #
       # @param thread [Thread, nil]
       # @return [void]
       def stop_retry(thread)
         return unless thread
 
-        thread.join(HEARTBEAT_SHUTDOWN_TIMEOUT) || thread.kill
+        thread.join(HEARTBEAT_SHUTDOWN_TIMEOUT) || thread.kill.join
       end
 
       def heartbeat_tick
@@ -1589,6 +1598,8 @@ module Woods
           File.open(claim_path, File::WRONLY | File::CREAT | File::EXCL) { |f| f.write(content) }
         end
         @claimed = true
+        @claim_key = claim_key
+        CLAIMS_HELD_IN_PROCESS_LOCK.synchronize { CLAIMS_HELD_IN_PROCESS[@claim_key] = self }
         true
       rescue Errno::EEXIST
         false
@@ -1635,16 +1646,26 @@ module Woods
       # @return [Boolean] whether the current claim's pid evidence can be
       #   trusted at all and, if so, whether that pid is dead — an unreadable
       #   or already-vanished claim counts as stale too, since it cannot be a
-      #   live daemon's claim
+      #   live daemon's claim. A same-host claim naming this process's own pid
+      #   is stale unless a daemon in this process holds it: a restarted
+      #   container reuses both its hostname and its pids.
       def stale_claim?
         record = JSON.parse(claim_bytes)
         return false if @conservative_claims && !verifiable_managed_claim?(record)
         return false if @claim_lease && !@claim_lease.names_this_lease?(record)
         return true unless same_claim_host?(record['host'])
 
-        !claim_pid_alive?(record['pid'])
+        !claim_owner_alive?(record['pid'])
       rescue JSON::ParserError, SystemCallError, TypeError
         !@conservative_claims
+      end
+
+      # This process's own pid is alive by definition, so for it the evidence
+      # is whether a daemon here holds the claim, not whether the pid exists.
+      def claim_owner_alive?(pid)
+        return claim_held_in_process? if pid == Process.pid
+
+        claim_pid_alive?(pid)
       end
 
       def verifiable_managed_claim?(record)
@@ -1699,7 +1720,23 @@ module Woods
         end
       ensure
         @claim_lease&.close
+        CLAIMS_HELD_IN_PROCESS_LOCK.synchronize do
+          CLAIMS_HELD_IN_PROCESS.delete(@claim_key) if CLAIMS_HELD_IN_PROCESS[@claim_key].equal?(self)
+        end
         @claimed = false
+      end
+
+      # Whether a daemon in this process created the claim at this index and
+      # has not released it.
+      def claim_held_in_process?
+        CLAIMS_HELD_IN_PROCESS_LOCK.synchronize { CLAIMS_HELD_IN_PROCESS.key?(claim_key) }
+      end
+
+      # One key per index however its directory is spelled.
+      def claim_key
+        File.join(File.realpath(@output_dir), CLAIM_FILENAME)
+      rescue SystemCallError
+        File.expand_path(claim_path)
       end
 
       # @return [Boolean] whether the claim on disk still records this process

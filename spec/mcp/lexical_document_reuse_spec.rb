@@ -6,7 +6,9 @@ require 'fileutils'
 require 'json'
 require 'woods'
 require 'woods/filename_utils'
+require 'woods/mcp/bootstrapper'
 require 'woods/mcp/published_lexical_retriever'
+require 'weakref'
 
 # A published lexical snapshot keeps the units it decoded and the documents
 # it built, and a generation seeded from the one before (unchanged unit
@@ -178,7 +180,7 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever, 'document reuse across see
       edit_post(target) { |data| data['source_code'] = 'class Post; newword; end' }
     end
     candidate = described_class.new(index_dir: index_dir, token_cache: cache).warmup!
-    retriever.install_snapshot!(candidate.snapshot)
+    retriever.install_from!(candidate)
     Woods::Generation.new(output_dir: index_dir).bump!(payload: 'payloads/gen-1')
 
     expect(retriever.retrieve('oldword').sources.map { |source| source[:identifier] }).to include('Post')
@@ -195,5 +197,49 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever, 'document reuse across see
     expect(answers(retriever)).to eq(cold_answers)
     expect(cache.stats[:last_build]).to eq(hits: 9, misses: 0)
     expect(units.none? { |key, unit| before_units[key].equal?(unit) }).to be(true)
+  end
+
+  # After a reload the retriever holds exactly the installed corpus's build
+  # state: the corpus it built itself before is released, and the next
+  # generation reuses the installed one.
+  describe 'after an explicit reload' do
+    def reload!
+      Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir, reader: retriever.reader)
+    end
+
+    def served_units
+      retriever.snapshot.last.pipeline.executor.units
+    end
+
+    # Built in its own frame, so no stack slot of the example keeps the index.
+    def weak_built_index
+      WeakRef.new(retriever.instance_variable_get(:@last_index))
+    end
+
+    it 'releases the corpus it built before and keeps answering from the installed one' do
+      publish('gen-1')
+      retriever.warmup!
+      before = weak_built_index
+      reload!
+      3.times { GC.start(full_mark: true, immediate_sweep: true) }
+
+      expect(before.weakref_alive?).to be_falsey
+      expect(retriever.instance_variable_get(:@last_index)).to equal(retriever.snapshot.last.pipeline.executor)
+      expect(answers(retriever)).to eq(cold_answers)
+    end
+
+    it 'reuses the installed corpus when the next seeded generation is built' do
+      publish('gen-1')
+      retriever.warmup!
+      reload!
+      installed = served_units
+      publish('gen-2', from: 'gen-1', except: [post_file]) do |target|
+        edit_post(target) { |data| data['source_code'] = "#{data['source_code']}\n# newword" }
+      end
+
+      expect(answers(retriever)).to eq(cold_answers)
+      kept = units.select { |key, unit| installed[key].equal?(unit) }
+      expect(kept.size).to eq(installed.size - 1)
+    end
   end
 end

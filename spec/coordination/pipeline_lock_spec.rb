@@ -994,4 +994,92 @@ RSpec.describe Woods::Coordination::PipelineLock do
       end
     end
   end
+
+  # A forked child inherits the lock instance, its held flag and its registry
+  # entry, and the lock file still carries the instance's token. None of that
+  # makes the child the holder: ownership stays with the process that
+  # acquired the lock.
+  describe 'ownership across fork', if: Process.respond_to?(:fork) do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+    let(:held) { described_class.for_index(lock_dir) }
+
+    after { held.release }
+
+    # Runs the block in a forked child and returns its JSON-able result.
+    def in_child
+      reader, writer = IO.pipe
+      pid = fork do
+        reader.close
+        writer.write(JSON.generate(yield))
+      rescue StandardError => e
+        writer.write(JSON.generate('error' => "#{e.class}: #{e.message}"))
+      ensure
+        exit!(0)
+      end
+      writer.close
+      JSON.parse(reader.read)
+    ensure
+      reader&.close
+      Process.wait(pid) if pid
+    end
+
+    def fence_result(lock)
+      lock.fenced { 'accepted' }
+    rescue Woods::Coordination::LockLostError
+      'refused'
+    end
+
+    it 'gives the child no registry entry, fence, heartbeat or release' do
+      held.acquire
+
+      child = in_child do
+        observed = { 'registered' => !described_class.held_for_index(lock_dir).nil?,
+                     'owned_dirs' => described_class.owned_index_writer_dirs,
+                     'owns_lock_file' => held.owns_lock_file?, 'locked' => held.locked?,
+                     'fence' => fence_result(held), 'touch' => held.touch }
+        held.release
+        observed.merge('file_kept_after_release' => File.exist?(lock_path))
+      end
+
+      expect(child).to eq('registered' => false, 'owned_dirs' => [], 'owns_lock_file' => false, 'locked' => false,
+                          'fence' => 'refused', 'touch' => false, 'file_kept_after_release' => true)
+      expect(fence_result(held)).to eq('accepted')
+    end
+
+    it 'keeps an independent writer out until the parent releases' do
+      held.acquire
+      in_child do
+        held.release
+        { 'file_kept' => File.exist?(lock_path) }
+      end
+      successor = described_class.for_index(lock_dir)
+
+      expect(successor.acquire).to be false
+
+      held.release
+      expect(successor.acquire).to be true
+    ensure
+      successor&.release
+    end
+
+    # A fork without a block returns into the parent's frames, so a child
+    # that leaves the block normally runs with_lock's own ensure.
+    it 'keeps the lock when a child forked inside with_lock leaves the block' do
+      in_forked_child = false
+      begin
+        held.with_lock do
+          child = fork
+          in_forked_child = child.nil?
+          next if in_forked_child
+
+          Process.wait(child)
+          expect(File.exist?(lock_path)).to be true
+          expect(fence_result(held)).to eq('accepted')
+        end
+      ensure
+        exit!(0) if in_forked_child
+      end
+      expect(File.exist?(lock_path)).to be false
+    end
+  end
 end

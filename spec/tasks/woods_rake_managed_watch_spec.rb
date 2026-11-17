@@ -29,6 +29,10 @@ RSpec.describe 'woods:watch managed child protocol' do
           puts "idle=\#{@idle_timeout.inspect}"
           @lifecycle&.call(:backend_ready)
           @lifecycle&.call(:startup, state: 'ready', generation: 4, reason: 'reconciled')
+          if ENV['TEST_CLAIM']
+            FileUtils.mkdir_p(@output_dir)
+            File.write(File.join(@output_dir, CLAIM_FILENAME), ENV['TEST_CLAIM'])
+          end
           ENV.fetch('TEST_WATCH_REASON', 'stopped').to_sym
         end
       end
@@ -139,5 +143,42 @@ RSpec.describe 'woods:watch managed child protocol' do
     expect(out).not_to include('managed=true')
     expect(events.map { |event| event['event'] }).to eq(%w[task_loaded terminal])
     expect(events.last['reason']).to eq('unsupported_environment')
+  end
+
+  # The raw task has no launcher to explain a stand-down, and the daemon's own
+  # warning goes to the Rails log, so a container log showed only
+  # "Watcher stopped." while a restart policy started it again and again.
+  describe 'a raw task that stands down' do
+    it 'names the claim holder and the manual recovery for a raw claim' do
+      claim = JSON.generate(pid: 4321, host: 'garden-box')
+      _out, err, status, = run_watch(managed: false, TEST_WATCH_REASON: 'already_running', TEST_CLAIM: claim)
+
+      expect(status).to be_success, err
+      expect(err).to include('claimed by pid 4321 on host garden-box').and include('Manual claim recovery')
+    end
+
+    it 'names the recovery command for a managed claim without printing its token' do
+      token = 'c' * 64
+      claim = JSON.generate(pid: 4321, host: 'garden-box', token: token, lease_version: 2, lease_id: 'e' * 32)
+      _out, err, status, = run_watch(managed: false, TEST_WATCH_REASON: 'already_running', TEST_CLAIM: claim)
+
+      expect(status).to be_success, err
+      expect(err).to include('woods-watch --recover-claim')
+      expect(err).not_to include(token)
+    end
+
+    it 'still names the stand-down when no claim is readable' do
+      _out, err, status, = run_watch(managed: false, TEST_WATCH_REASON: 'already_running')
+
+      expect(status).to be_success, err
+      expect(err).to include('another watch daemon already maintains')
+    end
+
+    it 'leaves the advice to the launcher in a managed task' do
+      _out, err, status, = run_watch(TEST_WATCH_REASON: 'already_running', TEST_CLAIM: JSON.generate(pid: 1, host: 'h'))
+
+      expect(status).to be_success, err
+      expect(err).not_to include('Standing down')
+    end
   end
 end
