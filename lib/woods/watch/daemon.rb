@@ -350,6 +350,7 @@ module Woods
       def reconcile_startup
         await_watcher_ready
         @lifecycle&.call(:backend_ready)
+        @boot_snapshot&.boot_finished!
         catch_up unless @stop_reason
         drain_cycles
         @lifecycle_started = true
@@ -771,8 +772,22 @@ module Woods
       end
 
       def startup_covered?(path)
-        eligible = @pending_mutex.synchronize { @startup_paths.include?(path) && !@live_paths.include?(path) }
-        eligible && @boot_snapshot.covers?(path)
+        startup, live = @pending_mutex.synchronize { [@startup_paths.include?(path), @live_paths.include?(path)] }
+        return read_at_boot?(path) if live
+
+        startup && @boot_snapshot.covers?(path)
+      end
+
+      # A live event for a restart input whose bytes are the ones this process
+      # booted with: a schema dump that changed nothing, a stash round trip.
+      # Restarting would boot the same configuration again. Reload inputs never
+      # qualify, since their boot bytes say nothing about what the index holds.
+      def read_at_boot?(path)
+        return false unless @boot_snapshot
+
+        relative = ChangeSet.new(paths: [path], root: @root).relative_paths.first
+        restart_input = @policy.classify(relative) == :restart || loaded_boot_helper?(relative)
+        restart_input && @boot_snapshot.covers?(path)
       end
 
       # A file deleted while nothing was watching leaves no mtime for the scan
@@ -1147,6 +1162,9 @@ module Woods
 
       def run_extraction(change_set, started)
         full = full_extraction?(change_set)
+        refused = refuse_before_full(change_set, full, started)
+        return refused if refused
+
         before = @generation.current.number
         announce_cycle(full, before)
         extractor = @extractor_factory.call
@@ -1199,6 +1217,53 @@ module Woods
         run_extraction(change_set, started)
       end
 
+      # @return [Hash, nil] the outcome when a full run would be wasted or refused
+      def refuse_before_full(change_set, full, started)
+        return unless full
+        return unwritable_marker(change_set, started) unless marker_readable?
+
+        owed = restart_inputs_changed_since_boot
+        require_restart(ChangeSet.new(paths: change_set.absolute_paths | owed, root: @root)) if owed.any?
+      end
+
+      def marker_readable?
+        @generation.current!
+        true
+      rescue Generation::InvalidMarker => e
+        @marker_error = e.message
+        false
+      end
+
+      # The writer refuses to publish over a marker it cannot read (numbering
+      # from 0 would replace a retained generation), so a full run here would
+      # do its source capture only to fail. Say so, and keep the paths.
+      def unwritable_marker(change_set, started)
+        carry_forward(change_set)
+        reason = "#{@marker_error} (#{File.join(@output_dir, Generation::FILENAME)}); not extracting over it. " \
+                 "#{Generation::RESTORE_ADVICE} The next event or heartbeat retries."
+        @logger.error("[Woods] watch: #{reason}")
+        outcome(:extract, :degraded, reason: reason, count: change_set.size, duration_ms: elapsed_ms(started))
+      end
+
+      # Restart inputs changed on disk since this process booted, whether or
+      # not their event has arrived. A watcher delivers a burst in pieces (the
+      # polling thread runs each cycle itself, so the next batch waits for it),
+      # and a full extraction in a process the burst already outdated is thrown
+      # away by the restart that follows. One tree scan costs far less than a
+      # full run, which is the only cycle that pays for it.
+      def restart_inputs_changed_since_boot
+        return [] unless @boot_snapshot
+
+        @boot_snapshot.changed_paths.select do |path|
+          required_action(ChangeSet.new(paths: [path], root: @root)) == :restart
+        end
+      rescue SystemCallError => e
+        # The check only spares a doomed run; without it the run goes ahead
+        # and a restart input's own event still stops the daemon afterwards.
+        @logger.warn("[Woods] watch: could not compare boot inputs before a full extraction — #{e.message}")
+        []
+      end
+
       def full_extraction?(change_set)
         if @startup_full
           @logger.info('[Woods] watch: startup coverage requires full extraction')
@@ -1206,10 +1271,27 @@ module Woods
         end
 
         # Ignorable paths do not make a storm out of a single model edit.
-        actionable = actionable_count(change_set)
-        full = actionable > @full_extraction_threshold
-        log_storm(actionable) if full
+        actionable = actionable_paths(change_set)
+        return false unless actionable.size > @full_extraction_threshold
+
+        full = storm?(actionable)
+        full ? log_storm(actionable.size) : log_captured(actionable.size)
         full
+      end
+
+      # Paths whose bytes the published generation already captured do not
+      # count: a batch delivered after the full run that read it would
+      # otherwise start a second one. They stay in the change set, so a reload
+      # input edited between `reload!` and capture is still re-extracted.
+      def storm?(actionable)
+        scan = catch_up_scan
+        uncaptured = 0
+        actionable.any? do |path|
+          uncaptured += 1 unless scan.captured?(path)
+          uncaptured > @full_extraction_threshold
+        end
+      rescue StandardError
+        true
       end
 
       def finish_extraction(action, change_set, touched, started)
@@ -1222,9 +1304,12 @@ module Woods
         result
       end
 
-      def actionable_count(change_set)
+      def actionable_paths(change_set)
         rules = InputRules.for_index(@output_dir)
-        change_set.relative_paths.count { |path| @policy.classify(path) != :ignore || rules.declared_root_ruby?(path) }
+        change_set.absolute_paths.select do |path|
+          relative = change_set.relativize(path)
+          @policy.classify(relative) != :ignore || rules.declared_root_ruby?(relative)
+        end
       end
 
       # Did the extractor write units without the generation moving?
@@ -1306,6 +1391,11 @@ module Woods
         named = detached_units.first(3).map { |identifier, reason| "#{identifier} (#{reason})" }
         "reconciliation pruned #{detached_units.size} unit(s) whose class still resolves: " \
           "#{named.join('; ')}; restart to restore"
+      end
+
+      def log_captured(actionable)
+        @logger.info("[Woods] watch: #{actionable} actionable paths changed, but the published generation " \
+                     'already captured enough of them to stay incremental')
       end
 
       def log_storm(actionable)

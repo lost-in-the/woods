@@ -273,6 +273,22 @@ module Woods
       Woods::GitEnrichmentSummary.line(Woods::GitEnrichmentSummary.from_manifest(nil))
     end
 
+    # The warning a task prints when the published index was extracted
+    # without a readable database schema.
+    #
+    # @param output_dir [Pathname, String] index directory
+    # @return [String, nil] nil when the schema was read, or the manifest
+    #   predates the record
+    def woods_schema_readability_warning(output_dir)
+      require 'woods/schema_readability'
+      path = woods_payload_dir(output_dir).join('manifest.json')
+      manifest = path.exist? ? JSON.parse(Woods::AtomicFile.read(path)) : nil
+      warning = Woods::SchemaReadability.warning(Woods::SchemaReadability.from_manifest(manifest))
+      "WARNING: #{warning}" if warning
+    rescue JSON::ParserError
+      nil
+    end
+
     # @param output_dir [Pathname, String] index directory
     # @param wait [Numeric, nil] seconds to wait for the lock (default: the
     #   shared writer wait; injectable so a spec need not sit out the window)

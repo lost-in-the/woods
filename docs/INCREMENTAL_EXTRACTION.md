@@ -1193,8 +1193,16 @@ baseline: establish the full baseline before resuming incremental maintenance.
 keeps passing it. It also prints a separate line, `Incremental: ready` or
 `Incremental: needs full extraction (<reason>)`, and `woods_status` reports the
 same as `index.incremental` (`{ready:, status:}`). Reasons include a legacy flat
-layout, a 1.x writer, an unreadable manifest, and a missing, malformed or
-incompatible `source_references.json`. The cache is read through the same
+layout, a 1.x writer, an unreadable manifest, a missing, malformed or
+incompatible `source_references.json`, and a baseline whose full extraction
+could not read the database schema (`schema_readability` in the
+[manifest](PUBLISHED_INDEX.md#manifest-schema-readability)).
+An incremental run over that baseline would keep every model it does not
+re-extract without columns, so `woods:incremental` and `woods:refresh` refuse it
+until a full extraction runs with the database prepared.
+The reverse is decided by the run: over a readable baseline, a run that rewrites
+models, table units or view units while the live database cannot be read
+refuses, and the active generation stays in place. The cache is read through the same
 reader the writer uses. A malformed cache stays reader-valid and reports not
 ready; restoring the bytes reports ready again.
 

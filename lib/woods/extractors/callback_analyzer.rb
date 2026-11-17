@@ -40,7 +40,9 @@ module Woods
       # Values of +analysis_status+. An empty +side_effects+ with ANALYZED
       # means no effects were found; the other two mean none were looked for.
       ANALYZED = 'analyzed'
-      # No method definition to read: a proc, a lambda, or a method the source does not define.
+      # No method definition to read: a proc, a lambda, a method the source
+      # does not define, or one the source defines more than once on the line
+      # Ruby reports when nothing tells which of those definitions ran.
       UNSUPPORTED = 'unsupported'
       # The method was found but its text could not be read.
       SOURCE_UNAVAILABLE = 'source_unavailable'
@@ -76,16 +78,27 @@ module Woods
       # @param source_code [String] Composite model source (with inlined concerns)
       # @param column_names [Array<String>] Model's database column names
       # @param segments [Array<Hash>, nil] where each part of +source_code+
-      #   came from, as `{ start:, length:, file: }` with 1-based lines and a
-      #   file relative to the application root (nil outside it). With
-      #   segments, operation lines are reported in their own file; without,
-      #   they stay lines of +source_code+.
+      #   came from, as `{ start:, length:, file:, path: }` with 1-based lines,
+      #   a file relative to the application root (nil outside it) and the
+      #   absolute +path+ it was read from. With segments, operation lines are
+      #   reported in their own file; without, they stay lines of +source_code+.
+      # @param model [Class, nil] the class the callbacks run on. Given with
+      #   segments, {#analyze} reads the body Ruby dispatches (see
+      #   {#dispatched_nodes}); without, the first definition of the name.
       # @return [Ast::Node, nil] the parsed source, nil when it does not parse
       attr_reader :parsed_root
 
-      def initialize(source_code:, column_names: [], segments: nil)
+      # Node types of a call to the same method in the next ancestor:
+      # +super(...)+ and bare +super+ (Prism), +zsuper+ (the parser gem).
+      SUPER_CALLS = %i[super forwarding_super zsuper].freeze
+
+      # Node types whose children are statements run one after another.
+      STATEMENT_LISTS = %i[program begin class module].freeze
+
+      def initialize(source_code:, column_names: [], segments: nil, model: nil)
         @source_code = source_code
         @segments = segments
+        @model = model
         @column_names = column_names.map(&:to_s)
         @parser = Ast::Parser.new
         @operation_extractor = FlowAnalysis::OperationExtractor.new
@@ -99,6 +112,11 @@ module Woods
       # added :side_effects key and an :analysis_status of ANALYZED,
       # UNSUPPORTED or SOURCE_UNAVAILABLE.
       #
+      # With a model, the bodies read are the ones Ruby runs: the method the
+      # model dispatches to, then each body a +super+ in it reaches. Their
+      # effects are merged, operations in that order. When any of those
+      # bodies has no definition in the source, the callback is UNSUPPORTED.
+      #
       # @param callback_hash [Hash] Callback metadata from ModelExtractor:
       #   { type:, filter:, origin:, kind:, conditions: }. +origin+ (who
       #   wrote the callback) is kept as given; +analysis_status+ says only
@@ -107,25 +125,15 @@ module Woods
       #   :analysis_status keys
       def analyze(callback_hash)
         filter = callback_hash[:filter].to_s
-        method_node = find_method_node(filter)
+        method_nodes = @model && @segments ? dispatched_nodes(filter) : [find_method_node(filter)].compact
 
-        return unanalyzed(callback_hash, UNSUPPORTED) if method_node.nil?
+        return unanalyzed(callback_hash, UNSUPPORTED) if method_nodes.empty?
 
-        method_source = scannable_source(method_source_from_node(method_node))
-        return unanalyzed(callback_hash, SOURCE_UNAVAILABLE) if method_source.nil?
+        method_sources = method_nodes.map { |node| scannable_source(method_source_from_node(node)) }
+        return unanalyzed(callback_hash, SOURCE_UNAVAILABLE) if method_sources.any?(&:nil?)
 
-        nesting = nesting_for(method_node)
-        callback_hash.merge(
-          analysis_status: ANALYZED,
-          side_effects: {
-            columns_written: detect_columns_written(method_source),
-            jobs_enqueued: detect_jobs_enqueued(method_source, nesting),
-            services_called: detect_services_called(method_source, nesting),
-            mailers_triggered: detect_mailers_triggered(method_source, nesting),
-            database_reads: detect_database_reads(method_source),
-            operations: extract_operations(method_node)
-          }
-        )
+        callback_hash.merge(analysis_status: ANALYZED,
+                            side_effects: merged_side_effects(method_nodes.zip(method_sources)))
       end
 
       # Side effects of one method definition, for a caller that already
@@ -179,6 +187,167 @@ module Woods
         @parsed_root.find_all(:def).find do |node|
           node.method_name == method_name
         end
+      end
+
+      # The definitions Ruby runs for +method_name+ on the model: the one it
+      # dispatches to, then each one a +super+ in the previous reaches.
+      # Each is the definition starting on the line its +source_location+
+      # maps to through the segments; nothing is called.
+      #
+      # @param method_name [String]
+      # @return [Array<Ast::Node>] in dispatch order; empty when a body
+      #   cannot be placed in the source
+      def dispatched_nodes(method_name)
+        return [] unless @parsed_root && valid_method_name?(method_name)
+
+        nodes = []
+        method = @model.instance_method(method_name)
+        while method
+          node = dispatched_node(method)
+          return [] if node.nil? || nodes.include?(node)
+
+          nodes << node
+          method = calls_super?(node) ? method.super_method : nil
+        end
+        nodes
+      rescue NameError
+        []
+      end
+
+      # @param method [UnboundMethod]
+      # @return [Ast::Node, nil] the definition of +method+ starting on the
+      #   line its source location maps to. Where the runtime reports how
+      #   Ruby compiled the body, the definition starting at its column, and
+      #   nil when none does or no +def+ compiled it. Otherwise a lone
+      #   definition on that line; of several, only those whose lexical owner
+      #   is spelled as Ruby names +method.owner+ qualify, and of those the
+      #   last, when they are statements of one list (the later one replaced
+      #   the earlier). In any other arrangement, as in exclusive branches of
+      #   an +if+, nil.
+      def dispatched_node(method)
+        line = composite_line(*method.source_location)
+        return nil unless line
+
+        name = method.original_name.to_s
+        candidates = @parsed_root.find_all(:def).select { |node| node.line == line && node.method_name == name }
+        compiled = compiled_body(method)
+        return nil if compiled && !compiled[:def]
+        if compiled && candidates.all?(&:start_byte)
+          return candidates.find { |node| line_column(node) == compiled[:column] }
+        end
+        return candidates.first if candidates.one?
+
+        owned = candidates.select { |node| nesting_for(node).first == method.owner.name }
+        owned.last if owned.one? || one_statement_list?(owned)
+      end
+
+      # How Ruby compiled +method+, read from its instruction sequence.
+      #
+      # @param method [UnboundMethod]
+      # @return [Hash, nil] `{ def: true, column: }` with the byte column, of
+      #   the line its source location names, at which the compiled +def+
+      #   starts; `{ def: false }` for a body no +def+ compiled (the block of
+      #   a +define_method+); nil on a runtime that does not say
+      def compiled_body(method)
+        return nil unless defined?(RubyVM::InstructionSequence) && RubyVM::InstructionSequence.respond_to?(:of)
+
+        compiled = RubyVM::InstructionSequence.of(method)&.to_a
+        return nil unless compiled.is_a?(Array) && compiled[4].is_a?(Hash)
+        return { def: false } unless compiled[9] == :method
+
+        location = compiled[4][:code_location]
+        { def: true, column: location[1] } if location.is_a?(Array) && location[0] == method.source_location&.last
+      rescue StandardError
+        nil
+      end
+
+      # @param node [Ast::Node] a definition with a start byte
+      # @return [Integer] the byte column of its line at which it starts
+      def line_column(node)
+        node.start_byte - line_starts[node.line - 1]
+      end
+
+      # @param nodes [Array<Ast::Node>]
+      # @return [Boolean] true when every node is a statement of one list,
+      #   so each runs, and the later replaces the earlier
+      def one_statement_list?(nodes)
+        parents = nodes.map { |node| parent_of(node) }
+        list = parents.first
+        !list.nil? && STATEMENT_LISTS.include?(list.type) && parents.all? { |parent| parent.equal?(list) }
+      end
+
+      # @param target [Ast::Node] a node of {#parsed_root}
+      # @return [Ast::Node, nil] the node holding +target+ as a child
+      def parent_of(target)
+        pending = [@parsed_root]
+        while (node = pending.pop)
+          children = Array(node.children).grep(Ast::Node)
+          return node if children.any? { |child| child.equal?(target) }
+
+          pending.concat(children)
+        end
+        nil
+      end
+
+      # @param path [String, nil] an absolute source path
+      # @param line [Integer, nil] a line of that file
+      # @return [Integer, nil] the line of the analysis source it maps to
+      def composite_line(path, line)
+        return nil unless path && line
+
+        segment = @segments.find { |part| part[:path] && same_file?(part[:path], path) && line <= part[:length] }
+        segment && (segment[:start] + line - 1)
+      end
+
+      # @return [Boolean] true when both paths name one file
+      def same_file?(one, other)
+        return true if File.expand_path(one) == File.expand_path(other)
+
+        File.basename(one) == File.basename(other) && File.realpath(one) == File.realpath(other)
+      rescue SystemCallError
+        false
+      end
+
+      # Whether a method body calls +super+, outside definitions nested in
+      # it (which do not run with it).
+      #
+      # @param node [Ast::Node]
+      # @return [Boolean]
+      def calls_super?(node)
+        pending = Array(node.children).dup
+        while (child = pending.pop)
+          next unless child.is_a?(Ast::Node)
+          return true if SUPER_CALLS.include?(child.type)
+
+          pending.concat(Array(child.children)) unless %i[def defs].include?(child.type)
+        end
+        false
+      end
+
+      # Side effects of each body Ruby runs, merged: names as a sorted set,
+      # database reads in {DB_READ_METHODS} order, operations body by body.
+      #
+      # @param bodies [Array<Array(Ast::Node, String)>] each node and its scannable source
+      # @return [Hash]
+      def merged_side_effects(bodies)
+        effects = bodies.map do |node, source|
+          nesting = nesting_for(node)
+          {
+            columns_written: detect_columns_written(source),
+            jobs_enqueued: detect_jobs_enqueued(source, nesting),
+            services_called: detect_services_called(source, nesting),
+            mailers_triggered: detect_mailers_triggered(source, nesting),
+            database_reads: detect_database_reads(source),
+            operations: extract_operations(node)
+          }
+        end
+        return effects.first if effects.one?
+
+        merged = %i[columns_written jobs_enqueued services_called mailers_triggered].to_h do |key|
+          [key, effects.flat_map { |effect| effect[key] }.uniq.sort]
+        end
+        merged.merge(database_reads: DB_READ_METHODS & effects.flat_map { |effect| effect[:database_reads] },
+                     operations: effects.flat_map { |effect| effect[:operations] })
       end
 
       # Extract the raw source text of a method from its AST node.
