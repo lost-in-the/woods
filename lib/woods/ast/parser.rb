@@ -127,13 +127,14 @@ module Woods
         when Prism::CaseNode
           convert_prism_case(prism_node, source)
         when Prism::BeginNode
-          children = []
-          children += prism_node.statements.body.map { |c| convert_prism_node(c, source) } if prism_node.statements
-          children << convert_prism_node(prism_node.rescue_clause, source) if prism_node.rescue_clause
-          children << convert_prism_node(prism_node.ensure_clause, source) if prism_node.ensure_clause
-          Node.new(type: :begin, children: children, line: line_for_prism(prism_node))
+          convert_prism_begin(prism_node, source)
         when Prism::RescueNode
-          children = prism_node.statements ? prism_node.statements.body.map { |c| convert_prism_node(c, source) } : []
+          exceptions = prism_node.exceptions.filter_map do |exception|
+            converted = convert_prism_node(exception, source)
+            converted if converted.is_a?(Node)
+          end
+          reference = prism_node.reference ? [convert_prism_node(prism_node.reference, source)].grep(Node) : []
+          children = exceptions + reference + convert_prism_children(prism_node.statements, source)
           Node.new(type: :rescue, children: children, line: line_for_prism(prism_node))
         when Prism::EnsureNode
           children = prism_node.statements ? prism_node.statements.body.map { |c| convert_prism_node(c, source) } : []
@@ -188,9 +189,11 @@ module Woods
           )
         when Prism::BlockNode
           children = prism_node.body ? [convert_prism_node(prism_node.body, source)] : []
+          children += prism_block_defaults(prism_node, source)
           Node.new(type: :block_body, children: children, line: line_for_prism(prism_node))
         when Prism::LambdaNode
           children = prism_node.body ? [convert_prism_node(prism_node.body, source)] : []
+          children += prism_block_defaults(prism_node, source)
           Node.new(type: :lambda, children: children, line: line_for_prism(prism_node))
         when Prism::ReturnNode
           children = if prism_node.arguments
@@ -202,20 +205,37 @@ module Woods
                      end
           Node.new(type: :return, children: children, line: line_for_prism(prism_node))
         when Prism::YieldNode
-          Node.new(type: :yield, children: [], line: line_for_prism(prism_node))
+          Node.new(type: :yield, children: extract_prism_generic_children(prism_node, source),
+                   line: line_for_prism(prism_node))
         when Prism::ArrayNode
           children = prism_node.elements.map { |e| convert_prism_node(e, source) }
           Node.new(type: :array, children: children, line: line_for_prism(prism_node))
         when Prism::HashNode
-          Node.new(type: :hash, children: [], line: line_for_prism(prism_node))
+          Node.new(type: :hash, children: extract_prism_generic_children(prism_node, source),
+                   line: line_for_prism(prism_node))
         when Prism::ParenthesesNode
-          convert_prism_node(prism_node.body, source)
+          if prism_node.body
+            convert_prism_node(prism_node.body, source)
+          else
+            Node.new(type: :begin, children: [], line: line_for_prism(prism_node))
+          end
         when Prism::InterpolatedStringNode
-          Node.new(type: :dstr, children: [], line: line_for_prism(prism_node))
+          Node.new(type: :dstr, children: extract_prism_generic_children(prism_node, source),
+                   line: line_for_prism(prism_node))
         when Prism::SingletonClassNode
           children = prism_node.body ? [convert_prism_node(prism_node.body, source)] : []
+          # `class << expr` evaluates +expr+; `self` carries nothing to walk.
+          unless prism_node.expression.is_a?(Prism::SelfNode)
+            children.unshift(convert_prism_node(prism_node.expression, source))
+          end
           Node.new(type: :sclass, children: children, line: line_for_prism(prism_node),
                    receiver: extract_prism_receiver_text(prism_node.expression, source))
+        when Prism::CallTargetNode
+          # `rescue => record.error` and `record.a, b = ...` call a writer,
+          # as the parser gem's :send target says.
+          Node.new(type: :send, children: [convert_prism_node(prism_node.receiver, source)].grep(Node),
+                   line: line_for_prism(prism_node), receiver: extract_prism_receiver_text(prism_node.receiver, source),
+                   method_name: prism_node.name.to_s, arguments: [])
         when Prism::ConstantWriteNode
           value = prism_node.value ? convert_prism_node(prism_node.value, source) : nil
           Node.new(
@@ -268,7 +288,9 @@ module Woods
       end
 
       def convert_prism_def(prism_node, source)
-        body_children = extract_prism_body_children(prism_node, source)
+        body_children = extract_prism_body_children(prism_node, source) +
+                        prism_parameter_defaults(prism_node.parameters, source) +
+                        prism_definition_receiver(prism_node.receiver, source)
 
         is_class_method = prism_node.respond_to?(:receiver) && prism_node.receiver
         receiver_text = if is_class_method
@@ -307,6 +329,9 @@ module Woods
         # existing consumers; the children are appended *after* the receiver so
         # nothing that reads children[0] as the receiver moves.
         children = [receiver_node].compact + convert_prism_arguments(prism_node, source)
+        # `&expr` sits in the call's block slot, not its arguments; the parser
+        # gem lists it as the last argument.
+        children << convert_prism_node(prism_node.block, source) if prism_node.block.is_a?(Prism::BlockArgumentNode)
 
         # If there's a block, create a :block node wrapping this send
         if prism_node.block.is_a?(Prism::BlockNode)
@@ -324,7 +349,7 @@ module Woods
 
           return Node.new(
             type: :block,
-            children: [send_node, block_body].compact,
+            children: [send_node, block_body].compact + prism_block_defaults(prism_node.block, source),
             line: line_for_prism(prism_node),
             end_line: end_line_for_prism(prism_node.block)
           )
@@ -366,13 +391,18 @@ module Woods
         end
       end
 
-      def convert_prism_constant_path(prism_node, _source)
+      def convert_prism_constant_path(prism_node, source)
         parent_text = prism_node.parent ? extract_const_path_text(prism_node.parent) : ''
         const_name = prism_node.respond_to?(:name) ? prism_node.name.to_s : prism_node.child.name.to_s
+        # A parent that is not itself a constant (`builder::OPTIONS`) is an
+        # expression Ruby evaluates first.
+        parent = prism_node.parent
+        evaluated = parent && !parent.is_a?(Prism::ConstantReadNode) && !parent.is_a?(Prism::ConstantPathNode)
+        children = evaluated ? [convert_prism_node(parent, source)].grep(Node) : []
 
         Node.new(
           type: :const,
-          children: [],
+          children: children,
           line: line_for_prism(prism_node),
           receiver: parent_text,
           method_name: const_name
@@ -430,6 +460,64 @@ module Woods
         Node.new(type: :case, children: children, line: line_for_prism(prism_node))
       end
 
+      # Prism chains `rescue` clauses one inside the next; each becomes a
+      # sibling :rescue child, in source order, ahead of the else and ensure.
+      def convert_prism_begin(prism_node, source)
+        children = convert_prism_children(prism_node.statements, source)
+        rescue_clause = prism_node.rescue_clause
+        while rescue_clause
+          children << convert_prism_node(rescue_clause, source)
+          rescue_clause = prism_rescue_subsequent(rescue_clause)
+        end
+        children << convert_prism_node(prism_node.else_clause, source) if prism_node.else_clause
+        children << convert_prism_node(prism_node.ensure_clause, source) if prism_node.ensure_clause
+        Node.new(type: :begin, children: children, line: line_for_prism(prism_node))
+      end
+
+      # A method's default parameter values, which run when the call leaves
+      # the argument out, as one :parameter_defaults node. It goes after the
+      # body statements so they keep their positions. A default that converts
+      # to a plain value (a string, symbol, number or nil) adds nothing.
+      #
+      # @param parameters [Prism::ParametersNode, nil]
+      # @return [Array<Ast::Node>] one :parameter_defaults node, or none
+      def prism_parameter_defaults(parameters, source)
+        return [] unless parameters
+
+        values = (parameters.optionals + parameters.keywords).filter_map do |parameter|
+          next unless parameter.respond_to?(:value)
+
+          converted = convert_prism_node(parameter.value, source)
+          converted if converted.is_a?(Node)
+        end
+        values.empty? ? [] : [Node.new(type: :parameter_defaults, children: values, line: values.first.line)]
+      end
+
+      # The default parameter values of a block or lambda. Numbered and `it`
+      # parameters have none.
+      #
+      # @param prism_node [Prism::BlockNode, Prism::LambdaNode]
+      # @return [Array<Ast::Node>] one :parameter_defaults node, or none
+      def prism_block_defaults(prism_node, source)
+        parameters = prism_node.parameters
+        return [] unless parameters.is_a?(Prism::BlockParametersNode)
+
+        prism_parameter_defaults(parameters.parameters, source)
+      end
+
+      # `def (expr).name` evaluates +expr+ when the method is defined, not
+      # when it is called, so it is kept apart in a :definition_receiver node
+      # after the body. A `self` receiver carries nothing to walk.
+      #
+      # @param receiver [Prism::Node, nil]
+      # @return [Array<Ast::Node>] one :definition_receiver node, or none
+      def prism_definition_receiver(receiver, source)
+        return [] if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+        converted = convert_prism_node(receiver, source)
+        converted.is_a?(Node) ? [Node.new(type: :definition_receiver, children: [converted], line: converted.line)] : []
+      end
+
       def extract_prism_body_children(prism_node, source)
         return [] unless prism_node.body
 
@@ -464,6 +552,14 @@ module Woods
         elsif node.respond_to?(:subsequent)
           node.subsequent
         end
+      end
+
+      # Portable accessor for the rescue clause after this one. Prism >= 1.0
+      # names it :subsequent and keeps :consequent only as an alias it marks
+      # for removal in its next major version; older versions have
+      # :consequent alone.
+      def prism_rescue_subsequent(node)
+        node.respond_to?(:subsequent) ? node.subsequent : node.consequent
       end
 
       def line_for_prism(node)
@@ -559,7 +655,7 @@ module Woods
                    receiver: extract_parser_receiver_text(expression, source))
         when :def
           body = parser_node.children[2] ? convert_parser_node(parser_node.children[2], source) : nil
-          body_children = parser_body_children(body)
+          body_children = parser_body_children(body) + parser_parameter_defaults(parser_node.children[1], source)
           Node.new(
             type: :def,
             children: body_children,
@@ -574,7 +670,8 @@ module Woods
           )
         when :defs
           body = parser_node.children[3] ? convert_parser_node(parser_node.children[3], source) : nil
-          body_children = parser_body_children(body)
+          body_children = parser_body_children(body) + parser_parameter_defaults(parser_node.children[2], source) +
+                          parser_definition_receiver(parser_node.children[0], source)
           receiver = extract_parser_receiver_text(parser_node.children[0], source)
           Node.new(
             type: :defs,
@@ -616,7 +713,7 @@ module Woods
           body = parser_node.children[2] ? convert_parser_node(parser_node.children[2], source) : nil
           Node.new(
             type: :block,
-            children: [send_child, body].compact,
+            children: [send_child, body].compact + parser_parameter_defaults(parser_node.children[1], source),
             line: parser_node.loc.line,
             end_line: parser_node.loc.expression.last_line
           )
@@ -638,10 +735,13 @@ module Woods
             source: condition_source
           )
         when :const
-          parent = parser_node.children[0] ? extract_parser_const_name(parser_node.children[0]) : nil
+          scope = parser_node.children[0]
+          parent = scope ? extract_parser_const_name(scope) : nil
+          # See convert_prism_constant_path: a non-constant scope is evaluated.
+          evaluated = scope.is_a?(::Parser::AST::Node) && !%i[const cbase].include?(scope.type)
           Node.new(
             type: :const,
-            children: [],
+            children: evaluated ? [convert_parser_node(scope, source)].grep(Node) : [],
             line: parser_node.loc.line,
             receiver: parent,
             method_name: parser_node.children[1].to_s
@@ -680,6 +780,30 @@ module Woods
 
       def parser_body_children(body_node)
         body_node.is_a?(Node) && body_node.type == :begin ? body_node.children : [body_node].compact
+      end
+
+      # The parser gem's counterpart of {#prism_parameter_defaults}.
+      #
+      # @param args_node [::Parser::AST::Node, nil] a definition's :args
+      # @return [Array<Ast::Node>] one :parameter_defaults node, or none
+      def parser_parameter_defaults(args_node, source)
+        return [] unless args_node.is_a?(::Parser::AST::Node)
+
+        values = args_node.children.filter_map do |argument|
+          next unless argument.is_a?(::Parser::AST::Node) && %i[optarg kwoptarg].include?(argument.type)
+
+          converted = convert_parser_node(argument.children[1], source)
+          converted if converted.is_a?(Node)
+        end
+        values.empty? ? [] : [Node.new(type: :parameter_defaults, children: values, line: values.first.line)]
+      end
+
+      # The parser gem's counterpart of {#prism_definition_receiver}.
+      def parser_definition_receiver(receiver, source)
+        return [] if !receiver.is_a?(::Parser::AST::Node) || receiver.type == :self
+
+        converted = convert_parser_node(receiver, source)
+        converted.is_a?(Node) ? [Node.new(type: :definition_receiver, children: [converted], line: converted.line)] : []
       end
 
       def extract_parser_source_span(node, source)

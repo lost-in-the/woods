@@ -81,11 +81,15 @@ module Woods
       # through. A taken-over instance stays registered until it is released:
       # it must still be found, so that {#fenced} can refuse it.
       #
+      # A forked child inherits the registry with the rest of the parent's
+      # memory. An entry another process acquired is never this process's
+      # lock, so it is skipped ({#acquired_in_this_process?}).
+      #
       # @param output_dir [String, Pathname]
       # @return [PipelineLock, nil]
       def self.held_for_index(output_dir)
         key = registry_key(output_dir, INDEX_WRITER_NAME)
-        @held_locks_mutex.synchronize { @held_locks[key]&.last }
+        @held_locks_mutex.synchronize { @held_locks[key]&.reverse_each&.find(&:acquired_in_this_process?) }
       end
 
       # Directories whose index writer lock an instance in this process
@@ -225,7 +229,17 @@ module Woods
       #
       # @return [Boolean]
       def owns_lock_file?
-        @held && lock_ownership == :ours
+        held_here? && lock_ownership == :ours
+      end
+
+      # Whether this process is the one that acquired the lock. A child forked
+      # while the lock is held inherits this instance, its held flag and its
+      # token, and the lock file still carries that token; none of it makes
+      # the child the holder. Every ownership check requires this.
+      #
+      # @return [Boolean]
+      def acquired_in_this_process?
+        !@owner_pid.nil? && @owner_pid == Process.pid
       end
 
       # Run a block only while this instance provably owns the lock, under the
@@ -249,7 +263,7 @@ module Woods
       # @raise [LockLostError] when the lock was taken over, released or lost
       def fenced
         with_path_guard do
-          unless @held && lock_ownership == :ours
+          unless held_here? && lock_ownership == :ours
             raise LockLostError, "Lock '#{@name}' in #{@lock_dir} is no longer held by this writer " \
                                  '(its lease expired and another writer took over)'
           end
@@ -277,12 +291,15 @@ module Woods
       # legitimately taken over, and deleting unconditionally would drop
       # the new holder's lock.
       #
+      # In a forked child the parent's lock is left alone: only this
+      # process's record of it is dropped.
+      #
       # @return [void]
       def release
-        return unless @held
+        return unless held_here?
 
         with_path_guard do
-          next unless @held
+          next unless held_here?
 
           # Clear @held before touching the ownership path so another thread
           # using this instance cannot begin a heartbeat behind this release.
@@ -327,9 +344,9 @@ module Woods
       #
       # @return [Boolean]
       def locked?
-        return false unless @held
+        return false unless held_here?
 
-        with_path_guard { @held && File.exist?(@lock_path) }
+        with_path_guard { held_here? && File.exist?(@lock_path) }
       rescue SystemCallError
         false
       end
@@ -349,10 +366,10 @@ module Woods
       #
       # @return [Boolean] true when the mtime was refreshed
       def touch
-        return false unless @held
+        return false unless held_here?
 
         with_path_guard do
-          next false unless @held && File.exist?(@lock_path)
+          next false unless held_here? && File.exist?(@lock_path)
 
           touch_unlocked?
         end
@@ -370,8 +387,14 @@ module Woods
 
       # @return [void]
       def mark_held
+        @owner_pid = Process.pid
         @held = true
         self.class.register_held(self, registry_key)
+      end
+
+      # @return [Boolean] whether this instance holds the lock in this process
+      def held_here?
+        @held && acquired_in_this_process?
       end
 
       # Remove a lock file this {#acquire} call created but could not finish

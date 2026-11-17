@@ -191,6 +191,56 @@ RSpec.describe Woods::Extractors::MethodEffects do
 
       expect(effects(source)).to be_nil
     end
+
+    it 'reads calls in a hash value, an interpolation and a later rescue branch' do
+      source = <<~RUBY
+        class Ledger
+          def sync
+            payload = { body: Faraday.get(url) }
+            log("sent \#{HTTParty.get(url)}")
+          rescue ArgumentError
+            retry_later
+          rescue TypeError
+            RestClient.post(url, payload)
+          end
+        end
+      RUBY
+
+      expect(effects(source)['sync'][:external_calls]).to eq(%w[Faraday HTTParty RestClient])
+    end
+
+    it 'ignores calls a lambda, a proc or a defined? check holds without running' do
+      source = <<~RUBY
+        class Ledger
+          def hooks
+            cb = -> { Faraday.get(url) }
+            table = { sent: proc { ActiveSupport::Notifications.instrument('ledger.sent') } }
+            defined?(HTTParty.get(url))
+          end
+        end
+      RUBY
+
+      expect(effects(source)).to be_nil
+    end
+
+    it 'does not follow a same-class call that a lambda only holds' do
+      source = <<~RUBY
+        class Ledger
+          def schedule
+            later = -> { settle }
+            queue(later)
+          end
+
+          private
+
+          def settle
+            Faraday.post(url)
+          end
+        end
+      RUBY
+
+      expect(effects(source)).to be_nil
+    end
   end
 
   describe 'visibility' do

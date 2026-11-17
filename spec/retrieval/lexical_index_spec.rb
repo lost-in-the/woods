@@ -348,4 +348,53 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
     expect(index.execute(query: 'oldword').candidates.first.metadata['source_code']).to eq('oldword')
     expect(index.execute(query: 'newword').candidates).to be_empty
   end
+
+  # A query never grows the lexical index: the stem table is filled while the
+  # corpus is tokenized and frozen with the index, so query terms are stemmed
+  # without being kept.
+  describe 'query vocabulary' do
+    let(:novel_queries) do
+      Array.new(50) do |i|
+        Array.new(20) do |j|
+          "quokka#{('a'..'z').to_a.sample(6, random: Random.new((i * 20) + j)).join}s"
+        end.join(' ')
+      end
+    end
+
+    def stem_table(index) = index.instance_variable_get(:@stems)
+
+    it 'keeps the stem table at its corpus size after many queries of novel terms' do
+      add('Widget', source: 'def set_widget_label; end')
+      index = described_class.new(metadata_store: store)
+      size = stem_table(index).size
+
+      novel_queries.each { |query| index.execute(query: query) }
+
+      expect(stem_table(index).size).to eq(size)
+    end
+
+    it 'still matches plural, singular and Unicode query terms against the corpus' do
+      widget = add('Widget', source: 'def set_widget_label; end')
+      street = add('Straße', source: 'ÉCOLE')
+      index = described_class.new(metadata_store: store)
+      novel_queries.first(3).each { |query| index.execute(query: query) }
+
+      expect(index.execute(query: 'widget labels').candidates.map(&:identifier)).to eq([widget])
+      expect(index.execute(query: 'Labels').candidates.first.matched_fields).to include('source_code:label')
+      expect(index.execute(query: 'straße école').candidates.map(&:identifier)).to eq([street])
+    end
+
+    it 'answers concurrent queries without writing the shared stem table' do
+      add('Widget', source: 'def set_widget_label; end')
+      index = described_class.new(metadata_store: store)
+      size = stem_table(index).size
+
+      threads = novel_queries.each_slice(10).map do |queries|
+        Thread.new { queries.map { |query| index.execute(query: query).candidates.size } }
+      end
+
+      expect(threads.map { |thread| thread.join(10)&.value }).to all(eq([0] * 10))
+      expect(stem_table(index).size).to eq(size)
+    end
+  end
 end
