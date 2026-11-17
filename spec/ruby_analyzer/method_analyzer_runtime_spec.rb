@@ -122,6 +122,14 @@ RSpec.describe Woods::RubyAnalyzer::MethodAnalyzer, 'against the Ruby runtime' d
       .to eq('Worker#plain' => nil, 'Worker#maybe' => 'conditional')
   end
 
+  it 'publishes one unit, the body Ruby calls, for a candidate a later definition in its branch overwrites' do
+    source = "class Worker\n  if Feature.on?\n    def pick; Old.call; end\n    def pick; New.call; end\n  end\nend\n"
+    units = described_class.new.analyze(source: source, file_path: '/app/worker.rb')
+
+    expect(units.map { |unit| [unit.identifier, unit.source_code.strip, unit.metadata[:candidate]] })
+      .to eq([['Worker#pick', 'def pick; New.call; end', 'conditional']])
+  end
+
   it 'publishes a definition in a block of the class body only as a block candidate' do
     source = "class Plugin\n  Registry.create do\n    def run\n      Runner.start\n    end\n  end\nend\n"
     unit = described_class.new.analyze(source: source, file_path: '/app/plugin.rb').first

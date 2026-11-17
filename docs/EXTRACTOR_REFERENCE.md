@@ -171,6 +171,7 @@ published `source_code` coordinates, sorted by line.
     branch of a `case` or its `else`, or a `begin`'s `rescue` or `else`.
   - `block`: a block of a call in the body (`included do`, `Plugin.create do`), which may run elsewhere or never.
   - A candidate sits beside what is already held, and a later definite `def` replaces it.
+    A later candidate in the same branch, or in a branch that encloses it, replaces it too.
   - A visibility call on such a path acts on that path's candidates only: those of the branches that enclose it
     or are nested in its own, never another branch's. A bare `private` there lasts to the end of its branch.
   - `module_function :a` makes each alternative of `a` a module function where it stands.

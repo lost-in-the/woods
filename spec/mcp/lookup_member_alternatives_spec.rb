@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'json'
+require 'active_support/concern'
 require 'woods/extracted_unit'
 require 'woods/method_table'
 require 'woods/mcp/lookup_member'
@@ -15,10 +16,10 @@ require 'woods/mcp/renderers/plain_renderer'
 RSpec.describe Woods::MCP::LookupMember, 'over alternative definitions of one method' do
   let(:path) { 'app/models/alternative.rb' }
 
-  def unit_for(source, type: :model, metadata: {})
+  def unit_for(source, type: :model, metadata: {}, identity_lines: source.lines.size)
     unit = Woods::ExtractedUnit.new(type: type, identifier: 'Alternative', file_path: path)
     unit.source_code = source
-    unit.source_identity_lines = source.lines.size
+    unit.source_identity_lines = identity_lines
     Woods::MethodTable.record(unit)
     unit.metadata.merge!(metadata)
     JSON.parse(JSON.generate(unit.to_h))
@@ -172,5 +173,66 @@ RSpec.describe Woods::MCP::LookupMember, 'over alternative definitions of one me
     expect(data['member']).to include('file_line' => 3)
     expect(data['caveats']).to eq(['The definition at line 3 of the published source is under a condition, so ' \
                                    'Ruby may not define pick there.'])
+  end
+
+  # A concern's `class_methods do` body is read as the method table reads
+  # any body: its conditional and wrapped definitions are class methods of
+  # the including class.
+  describe 'in the class_methods block of an inlined concern' do
+    let(:concern) { <<~RUBY }
+      module Choosing
+        extend ActiveSupport::Concern
+        class_methods do
+          def self.memoize(name) = name
+          if FLAG
+            def pick = :first
+          else
+            def pick = :second
+          end
+          memoize def wrapped = :kept
+        end
+      end
+    RUBY
+
+    let(:includer) do
+      framed = concern.lines.map { |line| "  # #{line.rstrip}" }.join("\n")
+      <<~RUBY
+        class Alternative
+        end
+        # ┌─────────────────────────────────────────────────────────────────────┐
+        # │ Included from: #{'Choosing'.ljust(54)}│
+        # └─────────────────────────────────────────────────────────────────────┘
+        #{framed}
+        # ─────────────────────────── End Choosing ───────────────────────────
+      RUBY
+    end
+
+    # The concern line of the class method Ruby gives the includer when
+    # FLAG is +flag+.
+    def includer_line(flag, name)
+      namespace = Module.new
+      namespace.const_set(:FLAG, flag)
+      namespace.module_eval(concern, 'choosing.rb', 1)
+      Class.new.include(namespace::Choosing).method(name).source_location.last
+    end
+
+    it 'lists conditional definitions as candidates of the including class' do
+      expect([includer_line(true, :pick), includer_line(false, :pick)]).to eq([6, 8])
+
+      data = answer(unit_for(includer, identity_lines: 2), 'Alternative.pick')
+
+      expect(data).not_to have_key('member')
+      expect(data['candidates'].map { |candidate| candidate['member'].values_at('file_unit', 'file_line') })
+        .to eq([['Choosing', 6], ['Choosing', 8]])
+      expect(data['statement']).to include('concern Choosing, inlined into model unit Alternative,')
+    end
+
+    it 'answers a definition passed to a call as a class method of the including class' do
+      expect(includer_line(true, :wrapped)).to eq(10)
+
+      data = answer(unit_for(includer, identity_lines: 2), 'Alternative.wrapped')
+
+      expect(data['member']).to include('kind' => 'singleton', 'file_unit' => 'Choosing', 'file_line' => 10)
+    end
   end
 end

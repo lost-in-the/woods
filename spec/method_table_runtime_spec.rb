@@ -462,7 +462,7 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         end
       end
     RUBY
-    'module_function after alternatives' => [<<~RUBY, { true => [3, 8], false => [5, 8] }]
+    'module_function after alternatives' => [<<~RUBY, { true => [3, 8], false => [5, 8] }],
       module Util
         if FLAG
           def x; end
@@ -473,8 +473,22 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         def y; end
       end
     RUBY
+    'later definitions in the same and an enclosing branch' => [<<~RUBY, { true => [7, 8], false => [10] }]
+      class Post
+        if FLAG
+          if FLAG
+            def x; end
+          end
+          def a; end
+          def a; end
+          def x; end
+        else
+          def a; end
+        end
+      end
+    RUBY
   }.each do |label, (source, taken)|
-    it "agrees with Ruby on each branch for #{label}" do
+    it "agrees with Ruby on each branch for #{label}, and lists no definition Ruby holds on no branch" do
       taken.each do |flag, lines|
         namespace = Module.new
         namespace.const_set(:FLAG, flag)
@@ -482,6 +496,7 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
 
         expect(table_facts(source, lines: lines)).to eq(defined_facts(namespace))
       end
+      expect(described_class.call(source).map { |entry| entry['line'] }.uniq.sort).to eq(taken.values.flatten.uniq.sort)
     end
   end
 end

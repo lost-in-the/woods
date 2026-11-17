@@ -249,12 +249,26 @@ module Woods
     # branch, a modifier, a `when` or `in` branch of a `case` and its `else`,
     # or a `rescue` or `else` of a `begin`; `block` for
     # a block of a call in the body, whose receiver decides whether and
-    # where it runs. A candidate sits beside what is already held; a later
-    # definite `def` replaces it. A visibility call on such a path acts on
-    # the candidates of that path only, and a bare `private` there lasts to
-    # the end of its branch.
+    # where it runs. A candidate sits beside what is already held, except
+    # the candidates of its own branch and of branches nested in it, which
+    # it replaces; a later definite `def` replaces it. A visibility call on
+    # such a path acts on the candidates of that path only, and a bare
+    # `private` there lasts to the end of its branch.
     module Wrappers
       private
+
+      # Add a definition, replacing what it overwrites in Ruby. A candidate
+      # replaces only the candidates of its own branch and of branches nested
+      # in it: whenever it runs, Ruby has run those first.
+      def place(entry)
+        return @entries = Marks.replace(@entries, entry) unless entry.key?(CANDIDATE)
+
+        path = entry[Marks::PATH]
+        covered, others = @entries.partition do |held|
+          held.key?(CANDIDATE) && held[Marks::PATH].first(path.size) == path
+        end
+        @entries = others + Marks.replace(covered, entry)
+      end
 
       # The bodies of an `if` or `unless`, its `elsif` and `else` included.
       #
@@ -404,12 +418,6 @@ module Woods
         Array(statements).each do |statement|
           statement_entries(statement, owner, scope, state).each { |entry| place(entry) }
         end
-      end
-
-      # Add a definition, replacing what it overwrites in Ruby. A candidate
-      # replaces nothing.
-      def place(entry)
-        @entries = entry.key?(CANDIDATE) ? @entries + [entry] : Marks.replace(@entries, entry)
       end
 
       def body_statements(node)

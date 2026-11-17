@@ -363,13 +363,12 @@ module Woods
       # methods of the including unit; for a concern unit's own body
       # ({.own_lines}), class methods it gives to its includers and does not
       # respond to itself. Read by a Prism walk of each decoded block
-      # ({Woods::MethodTable.named_blocks}). Only a definition written
-      # directly in that block (or as `private def`) counts; a block that does
-      # not parse contributes nothing, so its singletons are not members.
+      # ({Woods::MethodTable.named_blocks}). A definition in a branch, a
+      # block or a call argument in that block counts, as the method table
+      # reads it; a block that does not parse contributes nothing, so its
+      # singletons are not members.
       # `module ClassMethods` is not read: its methods are not answered.
       module ConcernClassMethods
-        VISIBILITY = %i[private protected public].freeze
-
         module_function
 
         # @param source [String, nil] the unit's published source
@@ -428,14 +427,15 @@ module Woods
             node.block.is_a?(Prism::BlockNode)
         end
 
+        # A `def` without a receiver at any depth: in a branch, a block, or
+        # an argument of a call (`private def x`, `memoize def x`). A nested
+        # class, module or `class << self`, and a method body, are left out:
+        # their definitions are another object's, or run only when called.
         def definition_lines(node)
           case node
           when Prism::DefNode then node.receiver ? [] : [node.location.start_line]
-          when Prism::CallNode
-            return [] unless node.receiver.nil? && VISIBILITY.include?(node.name)
-
-            node.arguments&.arguments.to_a.flat_map { |argument| definition_lines(argument) }
-          else []
+          when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then []
+          else node.compact_child_nodes.flat_map { |child| definition_lines(child) }
           end
         end
 

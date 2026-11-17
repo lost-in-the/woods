@@ -296,6 +296,10 @@ RSpec.describe Woods::MethodTable do
       described_class.call(source).map { |entry| entry.values_at('name', 'kind', 'owner', 'candidate') }
     end
 
+    def candidates_by_line(source)
+      described_class.call(source).map { |entry| entry.values_at('name', 'line', 'candidate') }
+    end
+
     it 'lists a definition under if, unless, elsif, else or a modifier as a conditional candidate' do
       source = <<~RUBY
         class Post
@@ -381,6 +385,47 @@ RSpec.describe Woods::MethodTable do
       RUBY
 
       expect(table(source).map { |name, _, line| [name, line] }).to eq([['a', 2], ['a', 4], ['a', 6], ['b', 11]])
+    end
+
+    # Whenever the later `def` runs, Ruby has run the earlier one first.
+    it 'replaces a candidate that a later definition in the same branch, or in an enclosing one, overwrites' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            def a; :old; end
+            def a; :new; end
+            if Feature.beta?
+              def x; end
+            end
+            def x; end
+          end
+          included do
+            def y; end
+            def y; end
+          end
+        end
+      RUBY
+
+      expect(candidates_by_line(source)).to eq([['a', 4, 'conditional'], ['x', 8, 'conditional'], ['y', 12, 'block']])
+    end
+
+    # A nested branch may not run, and a sibling branch runs instead.
+    it 'keeps a candidate beside a later one in a nested or a sibling branch' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            def x; end
+            if Feature.beta?
+              def x; end
+            end
+          else
+            def x; end
+          end
+        end
+      RUBY
+
+      expect(candidates_by_line(source)).to eq([['x', 3, 'conditional'], ['x', 5, 'conditional'],
+                                                ['x', 8, 'conditional']])
     end
 
     it 'leaves a visibility section inside a branch to that branch' do
