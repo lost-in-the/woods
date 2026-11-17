@@ -32,7 +32,7 @@ RSpec.describe Woods::GitSourceFilter do
   def git_spawns
     count = 0
     allow(Open3).to receive(:capture3).and_wrap_original do |original, *args, **options|
-      count += 1 if args.first == 'git'
+      count += 1 if args.first(2).include?('git')
       original.call(*args, **options)
     end
     yield

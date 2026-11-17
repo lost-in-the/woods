@@ -28,7 +28,7 @@ Ctrl-C to stop.
 | `WOODS_OUTPUT` | `tmp/woods` | Index directory |
 | `WOODS_WATCH_DEBOUNCE` | `0.4` | Seconds of quiet before a batch is considered settled |
 | `WOODS_WATCH_FULL_THRESHOLD` | `50` | Actionable changed-file count above which a full extraction replaces incremental |
-| `WOODS_WATCH_POLL` | unset | `1` forces the polling backend, set this inside a container watching a bind mount |
+| `WOODS_WATCH_POLL` | unset | `1` forces the polling backend; `0` lets a detected container use `listen`. Unset, a detected container polls; see [watcher backends](#watcher-backends) |
 | `WOODS_WATCH_POLL_INTERVAL` | `1.0` | Positive, finite seconds of sleep between polling scans; does not select the polling backend |
 | `WOODS_WATCH_IDLE_TIMEOUT` | unset | Seconds of quiet after which a dormant daemon exits |
 | `WOODS_WATCH_CATCH_UP` | `1` | `0` skips the startup reconciliation |
@@ -360,6 +360,25 @@ exit `75` over the same files. Live restart triggers still stop the daemon,
 including edits during startup extraction. Their paths survive shutdown even
 when the preceding extraction has advanced the generation watermark.
 
+Changes already on disk when a full extraction starts cost that one full extraction, however the watcher splits them.
+Under polling, each batch arrives only after the previous cycle finished.
+Before any full extraction starts, the daemon compares the restart inputs on disk with its boot snapshot.
+If one changed since the boot, the daemon restarts at once and carries the batch.
+A full run there would only be repeated after the restart.
+A restart input changed after a full extraction has started still costs a restart and a second full run.
+
+Once the boot has finished, a restart input rewritten with the bytes the boot read is not a change.
+Examples: `db:prepare` dumping an unchanged `db/schema.rb`, a stash round trip, a checkout of the same content.
+None of them restarts the daemon or causes an extraction on its own.
+The boot snapshot keeps a digest of each restart input and each `config/**/*.rb` file for this.
+An input that changed while the environment booted always requires a restart, even if its bytes were restored.
+The boot read it at an unknown moment in between.
+Files read before the snapshot existed are the exception, since nothing during the boot reads them again.
+These are the Gemfile, its lockfile and gemspecs, `.ruby-version`, and config Ruby already loaded.
+So `bundle check` in another container, which moves the lockfile's timestamps but not its bytes, costs nothing.
+Reload inputs, including `config/routes.rb`, are still judged by inode, size and timestamps.
+Their boot bytes say nothing about what the index last extracted.
+
 The same escalation happens when the app *can't* reload at all, a boot with
 `config.enable_reloading = false`. Extracting against constants that no longer
 match their source would be worse than saying so.
@@ -545,10 +564,18 @@ An older index without this capture boundary, or one with invalid/mismatched
 metadata or a dangling payload pointer, receives a full reconciliation under
 the same reload/restart rules. A successful full publication records the new
 boundary even when no incremental units would change, so the migration does
-not repeat on every startup. With no generation at all, every file is uncovered
-and the normal storm threshold applies. On older installed versions that still
+not repeat on every startup. On older installed versions that still
 use the marker mtime, recover by completing a full extraction against settled
 source before restarting watch.
+
+With no generation published at all, the startup run is one full extraction, whatever the file count.
+An incremental run refuses without a baseline, so before Woods 2.2 a small application never got a first index.
+Its watcher stayed `degraded` at generation 0.
+An application with nothing to extract still gets an empty, valid first generation, as `woods:extract` would publish.
+A `generation.json` that exists but cannot be read is not "no generation".
+The writer refuses to publish over it, so the watcher does not start a full extraction.
+It stays `degraded` and names the file.
+See [generation.json is unreadable](TROUBLESHOOTING.md#generationjson-is-unreadable) for what to do.
 
 **The built-in watcher establishes detection before reconciliation runs.**
 Polling signals readiness after its baseline scan; native watching signals after
@@ -608,19 +635,27 @@ A branch switch or rebase touches hundreds of files at once. Above
 extraction and risk interleaving with a still-settling tree, so the daemon
 falls back to a full run and logs that it did.
 
+A path whose bytes the published generation already captured does not count towards the threshold.
+Under polling, the rest of a branch switch can arrive after the full run that already read it.
+That batch is re-extracted incrementally instead of starting a second full run.
+The check compares the published `source_inputs.json` digests within the 30-second startup budget.
+A path it cannot prove unchanged counts.
+
 ## Watcher backends
 
 | Backend | When | Trade-off |
 |---|---|---|
-| `listen` gem | Used automatically when the host has it | Native FS events; low latency, no idle CPU |
-| Polling | Fallback; no dependency | Costs a scan per interval, but works across container bind mounts |
+| `listen` gem | Used when the bundle has it, outside a detected container | Native FS events; low latency, no idle CPU |
+| Polling | Default in a detected container, and whenever `listen` is absent; no dependency | Costs a scan per interval, but works across container bind mounts |
 
-The fallback is not a consolation prize. Native FS events **do not propagate
-reliably across container bind mounts**, `listen` documents this, and macOS
-Docker VMs are the usual casualty. Since extraction typically runs inside a dev
-container with the source bind-mounted, a host in that position should force
-polling rather than trust a watcher that may sit silent while files change
-under it:
+The fallback is not a consolation prize.
+Native FS events **do not propagate reliably across container bind mounts**, `listen` documents this,
+and macOS Docker VMs are the usual casualty.
+So the watcher polls by default when it detects a container (`/.dockerenv` or `/run/.containerenv`).
+Its startup line in the Rails log names the choice:
+`[Woods] watch: polling every 1.0s` or `[Woods] watch: using native FS events (listen)`.
+`WOODS_WATCH_POLL=0` keeps `listen` in a container whose runtime does propagate events.
+Force polling when no container is detected and edits do not reach the watcher:
 
 ```bash
 WOODS_WATCH_POLL=1 WOODS_WATCH_POLL_INTERVAL=2.5 bundle exec rake woods:watch
@@ -980,7 +1015,14 @@ tools, and disjoint-by-construction is what makes this design safe.
 
 ### Seeding a new worktree
 
-A new worktree needs an index before its daemon has anything to maintain. Instead of a cold full extraction, `woods:seed` copies another checkout's published generation and runs an incremental update for the difference, falling back to a full extraction when the copy cannot be trusted. It builds in a sibling directory and publishes by renaming `generation.json` last, so the daemon and every reader see either no index or the finished one. It does not run while a daemon is alive on the target directory. Details and the verification rules are in [MCP worktree setup](MCP_WORKTREE_SETUP.md#seed-a-new-worktrees-index).
+A new worktree's daemon builds the first index itself when it starts and finds none.
+Instead of building it from scratch, `woods:seed` copies another checkout's published generation
+and runs an incremental update for the difference,
+falling back to a full extraction when the copy cannot be trusted.
+It builds in a sibling directory and publishes by renaming `generation.json` last,
+so the daemon and every reader see either no index or the finished one.
+It does not run while a daemon is alive on the target directory.
+Details and the verification rules are in [MCP worktree setup](MCP_WORKTREE_SETUP.md#seed-a-new-worktrees-index).
 
 ### Within one worktree, writers serialize
 

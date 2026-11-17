@@ -98,7 +98,7 @@ module Woods
     #
     # @return [String] stripped output, or empty string on any failure
     def rev_parse(*args)
-      out, _err, status = Open3.capture3(*git_argv('rev-parse', *args))
+      out, _err, status = Open3.capture3(GitCommand::CHILD_ENV, *git_argv('rev-parse', *args))
       status.success? ? out.strip : ''
     rescue StandardError
       ''

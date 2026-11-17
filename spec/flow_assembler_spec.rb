@@ -416,6 +416,333 @@ RSpec.describe Woods::FlowAssembler do
       end
     end
 
+    # Ruby dispatches the body `action_sources` records, which is not always
+    # the first local definition of that name.
+    describe 'an action whose recorded body is not the first local definition' do
+      let(:receiver_source) do
+        <<~RUBY
+          class ReportsController < ApplicationController
+            include IncludedReport
+            prepend ReplacedReport
+
+            def show
+              LocalShow.run!
+            end
+
+            def create
+              ShadowedCreate.run!
+            end
+
+            def update
+              LocalUpdate.run!
+            end
+
+            def destroy
+              FirstDestroy.run!
+            end
+
+            def destroy
+              SecondDestroy.run!
+            end
+            def summary; FirstSummary.run!; end; def summary; SecondSummary.run!; end
+            def preview; LocalPreview.run!; end; module Extra; def preview; ExtraPreview.run!; end; end
+            def twice; LocalTwice.run!; end
+            def compact; LocalCompact.run!; end
+            def gated; LocalGated.run!; end
+            def locked; LocalLocked.run!; end
+            if on? then def flip; FirstFlip.run!; end else def flip; SecondFlip.run!; end end
+          end
+        RUBY
+      end
+
+      def write_receiver(sources)
+        write_unit('ReportsController', source_code: receiver_source, metadata: {
+                     'actions' => %w[create destroy show update],
+                     'action_sources' => sources,
+                     'filters' => [{ 'kind' => 'before', 'filter' => 'load_report' }]
+                   })
+      end
+
+      # +next_hop+ is the `super_source` the extractor records: omitted for an
+      # index written before it was recorded.
+      def source(owner, line, defined_in = owner, **next_hop)
+        entry = { 'owner' => owner, 'defined_in' => defined_in, 'line' => line }
+        next_hop.key?(:super_source) ? entry.merge('super_source' => next_hop[:super_source]) : entry
+      end
+
+      before do
+        write_unit('ReplacedReport', type: 'concern', source_code: <<~RUBY)
+          module ReplacedReport
+            def create
+              ReplacedCreate.run!
+            end
+
+            def update
+              PrependedUpdate.run!
+              super
+              AfterSuper.run!
+            end
+
+            def archive
+              ReplacedArchive.run!
+              super
+            end
+
+            def index
+              OuterIndex.run!
+              super
+            end
+            def export; FirstExport.run!; end; def export; SecondExport.run!; end
+            def twice
+              super
+              Between.run!
+              super
+            end
+            def compact; super; AfterCompact.run!; end
+            def gated
+              if Gate.open?
+                super
+                AfterGated.run!
+              end
+            end
+            def locked
+              Report.transaction do
+                super
+                AfterLocked.run!
+              end
+            end
+          end
+        RUBY
+        write_unit('InnerReport', type: 'concern', source_code: <<~RUBY)
+          module InnerReport
+            def update
+              InnerUpdate.run!
+            end
+
+            def index
+              InnerIndex.run!
+              super
+            end
+          end
+        RUBY
+        write_unit('BaseReportsController', source_code: <<~RUBY)
+          class BaseReportsController < ApplicationController
+            def archive
+              BaseArchive.run!
+            end
+          end
+        RUBY
+        write_unit('IncludedReport', type: 'concern', source_code: <<~RUBY)
+          module IncludedReport
+            def show
+              IncludedShow.run!
+            end
+          end
+        RUBY
+        stub_graph_defaults
+      end
+
+      def targets_for(entry_point)
+        described_class.new(graph: graph, extracted_dir: extracted_dir).assemble(entry_point)
+                       .steps[0][:operations].map { |op| op[:target] || op[:method] }
+      end
+
+      it 'reads a prepended override, not the local definition it shadows' do
+        write_receiver('create' => source('ReplacedReport', 2))
+
+        expect(targets_for('ReportsController#create')).to eq(%w[load_report ReplacedCreate])
+      end
+
+      it 'continues a prepended override that calls super into the local definition, at the super call' do
+        local = source('ReportsController', 13)
+        write_receiver('update' => source('ReplacedReport', 6, super_source: local))
+
+        expect(targets_for('ReportsController#update')).to eq(%w[load_report PrependedUpdate LocalUpdate AfterSuper])
+      end
+
+      it 'continues into the other prepended module that super reaches, not the local definition' do
+        inner = source('InnerReport', 2)
+        write_receiver('update' => source('ReplacedReport', 6, super_source: inner))
+
+        expect(targets_for('ReportsController#update')).to eq(%w[load_report PrependedUpdate InnerUpdate AfterSuper])
+      end
+
+      it 'follows the one recorded hop, and marks the super call of the body it reaches' do
+        inner = source('InnerReport', 6)
+        write_receiver('index' => source('ReplacedReport', 17, super_source: inner))
+
+        expect(targets_for('ReportsController#index')).to eq(%w[load_report OuterIndex InnerIndex super])
+      end
+
+      it 'continues into a base controller when the controller does not define the action' do
+        base = source('BaseReportsController', 2)
+        write_receiver('archive' => source('ReplacedReport', 12, super_source: base))
+
+        expect(targets_for('ReportsController#archive')).to eq(%w[load_report ReplacedArchive BaseArchive])
+      end
+
+      # Each operation as its target, and each container as its type with
+      # the shape of the operations it holds.
+      def shape_for(entry_point)
+        shape = lambda do |operations|
+          operations.map do |op|
+            held = Woods::FlowAnalysis::OperationExtractor::NESTED_KEYS.filter_map { |key| op[key] }
+            held.empty? ? op[:target] || op[:method] : [op[:type].to_s, *held.map(&shape)]
+          end
+        end
+        shape.call(described_class.new(graph: graph, extracted_dir: extracted_dir)
+                                  .assemble(entry_point).steps[0][:operations])
+      end
+
+      # Ruby runs the next definition at every `super` call, in statement
+      # order, inside whatever branch or block holds the call.
+      it 'continues at each of two super calls, in order around the operation between them' do
+        write_receiver('twice' => source('ReplacedReport', 22, super_source: source('ReportsController', 26)))
+
+        expect(targets_for('ReportsController#twice')).to eq(%w[load_report LocalTwice Between LocalTwice])
+      end
+
+      it 'marks each of two super calls when the index records no next definition' do
+        write_receiver('twice' => source('ReplacedReport', 22))
+
+        expect(targets_for('ReportsController#twice')).to eq(%w[load_report super Between super])
+      end
+
+      it 'continues before an operation that follows super on the same line' do
+        write_receiver('compact' => source('ReplacedReport', 27, super_source: source('ReportsController', 27)))
+
+        expect(targets_for('ReportsController#compact')).to eq(%w[load_report LocalCompact AfterCompact])
+      end
+
+      it 'continues inside the branch that calls super' do
+        write_receiver('gated' => source('ReplacedReport', 28, super_source: source('ReportsController', 28)))
+
+        expect(shape_for('ReportsController#gated'))
+          .to eq(['load_report', 'Gate', ['conditional', %w[LocalGated AfterGated], []]])
+      end
+
+      it 'marks an unfollowed super inside the branch that calls it' do
+        write_receiver('gated' => source('ReplacedReport', 28))
+
+        expect(shape_for('ReportsController#gated'))
+          .to eq(['load_report', 'Gate', ['conditional', %w[super AfterGated], []]])
+      end
+
+      it 'continues inside the transaction block that calls super' do
+        write_receiver('locked' => source('ReplacedReport', 34, super_source: source('ReportsController', 29)))
+
+        expect(shape_for('ReportsController#locked'))
+          .to eq(['load_report', ['transaction', %w[LocalLocked AfterLocked]]])
+      end
+
+      it 'stops at super and marks it when the index records no next definition' do
+        write_receiver('update' => source('ReplacedReport', 6))
+
+        expect(targets_for('ReportsController#update')).to eq(%w[load_report PrependedUpdate super AfterSuper])
+      end
+
+      it 'stops at super and marks it when no indexed unit holds the next definition' do
+        write_receiver('update' => source('ReplacedReport', 6, super_source: source('GemReports', 4, nil)))
+
+        expect(targets_for('ReportsController#update')).to eq(%w[load_report PrependedUpdate super AfterSuper])
+      end
+
+      it 'marks the unfollowed super as a call the flow does not resolve' do
+        write_receiver('update' => source('ReplacedReport', 6, super_source: nil))
+        operations = described_class.new(graph: graph, extracted_dir: extracted_dir)
+                                    .assemble('ReportsController#update').steps[0][:operations]
+
+        expect(operations).to include(a_hash_including(type: :dynamic_dispatch, target: nil, method: 'super', line: 8,
+                                                       file: 'app/concerns/replacedreport.rb'))
+      end
+
+      # The byte column the compiled definition starts at tells apart
+      # definitions in exclusive branches of one line.
+      describe 'with the recorded column of the compiled definition' do
+        let(:flip_line) { receiver_source.lines[29] }
+
+        def flip(column)
+          write_receiver('flip' => source('ReportsController', 30).merge('column' => column))
+          targets_for('ReportsController#flip')
+        end
+
+        it 'reads the definition that starts at the column, first branch or second' do
+          expect(flip(flip_line.index('def flip'))).to eq(%w[load_report FirstFlip])
+          expect(flip(flip_line.rindex('def flip'))).to eq(%w[load_report SecondFlip])
+        end
+
+        it 'reads no body when no definition starts at the column, even a lone one' do
+          expect(flip(0)).to eq(%w[load_report])
+          write_receiver('show' => source('ReportsController', 5).merge('column' => 0))
+
+          expect(targets_for('ReportsController#show')).to eq(%w[load_report])
+        end
+
+        it 'reads no body when no def compiled it' do
+          expect(flip(nil)).to eq(%w[load_report])
+        end
+
+        it 'continues a super call into the definition at the recorded column' do
+          local = source('ReportsController', 26).merge('column' => 2)
+          write_receiver('twice' => source('ReplacedReport', 22, super_source: local).merge('column' => 2))
+
+          expect(targets_for('ReportsController#twice')).to eq(%w[load_report LocalTwice Between LocalTwice])
+        end
+      end
+
+      it 'reads no body for definitions in exclusive branches of the line when no column was recorded' do
+        write_receiver('flip' => source('ReportsController', 30))
+
+        expect(targets_for('ReportsController#flip')).to eq(%w[load_report])
+      end
+
+      it 'reads the later of two local definitions, on the line Ruby recorded' do
+        write_receiver('destroy' => source('ReportsController', 21))
+
+        expect(targets_for('ReportsController#destroy')).to eq(%w[load_report SecondDestroy])
+      end
+
+      # Ruby keeps the last definition of a name in one owner, even on one line,
+      # where source_location cannot tell the two apart.
+      it 'reads the later of two definitions on the recorded line in the controller' do
+        write_receiver('summary' => source('ReportsController', 24))
+
+        expect(targets_for('ReportsController#summary')).to eq(%w[load_report SecondSummary])
+      end
+
+      it 'reads the later of two definitions on the recorded line in a prepended concern' do
+        write_receiver('export' => source('ReplacedReport', 21))
+
+        expect(targets_for('ReportsController#export')).to eq(%w[load_report SecondExport])
+      end
+
+      it 'reads the recorded owner’s definition when another owner defines the name later on that line' do
+        write_receiver('preview' => source('ReportsController', 25))
+
+        expect(targets_for('ReportsController#preview')).to eq(%w[load_report LocalPreview])
+      end
+
+      it 'keeps the local definition when it wins over an included concern' do
+        write_receiver('show' => source('ReportsController', 5))
+
+        expect(targets_for('ReportsController#show')).to eq(%w[load_report LocalShow])
+      end
+
+      it 'reads no body, not the shadowed local one, when no indexed unit holds the recorded body' do
+        write_receiver('create' => source('ReplacedReport', 2, nil))
+
+        expect(targets_for('ReportsController#create')).to eq(%w[load_report])
+      end
+
+      it 'reports the recorded body at its own file and line' do
+        write_receiver('create' => source('ReplacedReport', 2))
+        operations = described_class.new(graph: graph, extracted_dir: extracted_dir)
+                                    .assemble('ReportsController#create').steps[0][:operations]
+
+        expect(operations.last).to include(target: 'ReplacedCreate', line: 3, file: 'app/concerns/replacedreport.rb')
+      end
+    end
+
     it 'extracts route information from metadata' do
       write_unit('PostsController',
                  type: 'controller',

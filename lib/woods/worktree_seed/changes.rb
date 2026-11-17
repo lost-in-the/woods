@@ -43,6 +43,7 @@ module Woods
 
       def untracked
         out, _err, status = Open3.capture3(
+          GitCommand::CHILD_ENV,
           *GitCommand.argv(@root, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z')
         )
         raise Unverifiable, 'cannot list untracked files' unless status.success?
