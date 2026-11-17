@@ -152,6 +152,37 @@ RSpec.describe Woods::Resilience::IndexValidator do
       end
     end
 
+    context 'with the schema readability the extraction recorded' do
+      before do
+        write_json('dependency_graph.json', %w[nodes edges reverse file_map type_index].to_h { |key| [key, {}] })
+      end
+
+      def manifest_with(state, databases = [])
+        { 'counts' => {}, 'schema_readability' => { 'version' => 1, 'state' => state, 'databases' => databases } }
+      end
+
+      it 'warns without failing when the schema could not be read' do
+        write_json('manifest.json', manifest_with('unreadable', [{ 'name' => 'primary', 'state' => 'unreachable' }]))
+
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report).to be_valid
+        expect(report.warnings).to eq([Woods::SchemaReadability.warning(
+          Woods::SchemaReadability.from_manifest(manifest_with('unreadable', [{ 'name' => 'primary',
+                                                                                'state' => 'unreachable' }]))
+        )])
+        expect(report.warnings.first).to include('primary: could not connect')
+      end
+
+      %w[readable not_applicable].each do |state|
+        it "adds no warning when the schema is #{state}" do
+          write_json('manifest.json', manifest_with(state))
+
+          expect(described_class.new(index_dir: tmp_dir).validate.warnings).to be_empty
+        end
+      end
+    end
+
     context 'with malformed manifest structure' do
       [[], nil, { 'counts' => [] }, { 'counts' => nil }].each do |manifest|
         it "reports #{manifest.inspect} through ValidationReport without raising" do

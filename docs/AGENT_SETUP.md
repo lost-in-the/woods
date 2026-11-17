@@ -42,7 +42,9 @@ If the worktree contains unrelated changes, preserve them. Do not overwrite an e
 
 ## 2. Choose the installation path
 
-Use structural-only setup when the user wants code navigation, runtime Rails structure, dependencies, flows, or blast-radius analysis. Fifteen tools register in the normal packaged launch without an embedding provider.
+Use structural-only setup when the user wants code navigation, runtime Rails structure, dependencies, flows,
+or blast-radius analysis.
+Sixteen tools register in the normal packaged launch without an embedding provider.
 
 If the user wants ranked discovery through `codebase_retrieve`, offer [explicit lexical mode](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) over the published index without a provider or embeddings. Check that the installed version supports it, set `WOODS_RETRIEVAL_MODE=lexical` in the MCP process environment, restart that server, and verify `woods_status.retriever.mode`. Keep structural-only setup as the default unless this mode is requested.
 
@@ -115,7 +117,29 @@ Fix one root cause at a time. Do not suppress an application boot error to make 
 
 ## 6. Configure the Index MCP client
 
-Prefer a project-scoped configuration so the executable, bundle, and index all belong to the same repository:
+Prefer a project-scoped configuration so the executable, bundle, and index all belong to the same repository.
+For Claude Code, let [`woods-agent-config setup --scope project`](#managed-claude-code-configuration) write it.
+From Woods `2.2.0` the entry it writes names no absolute path, so the team commits `.mcp.json` once
+and every checkout and worktree uses it unchanged:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
+    }
+  }
+}
+```
+
+The `sh` line changes into `CLAUDE_PROJECT_DIR`, which Claude Code sets in the server's environment to the
+project root. `--checkout` then serves that checkout's `tmp/woods`, and `--await-index` starts the server before
+the first index exists. See [entry forms](#entry-forms).
+
+Before Woods `2.2.0`, for another client, or for a per-machine setup, name the application root explicitly.
+This form names one machine's path: do not commit it.
 
 ```json
 {
@@ -129,7 +153,12 @@ Prefer a project-scoped configuration so the executable, bundle, and index all b
 }
 ```
 
-For Docker, extraction runs inside the Rails container. If Woods is installed only there, configure the client to launch `docker compose exec -T app bundle exec woods-mcp /app/tmp/woods` with the host application root as `cwd`. Use a host-side `bundle exec woods-mcp-start` only after verifying the host has a supported Ruby, the application bundle, and a host-visible index. In either mode, supply the path visible to the server process.
+For Docker, extraction runs inside the Rails container. If Woods is installed only there, `woods-agent-config` with
+`--mode compose` writes the relative container entry; otherwise configure the client to launch
+`docker compose exec -T app bundle exec woods-mcp /app/tmp/woods` with the host application root as `cwd`.
+Use a host-side `bundle exec woods-mcp-start` only after verifying the host has a supported Ruby,
+the application bundle, and a host-visible index.
+In either mode, supply the path visible to the server process.
 
 Reconnect the client and call `woods_status`. Confirm a current generation and non-zero unit counts before claiming setup works.
 
@@ -166,6 +195,58 @@ preview and apply, and never use a symlink as the plan file itself.
 |---|---|
 | `--scope project` | `<root>/.mcp.json`, explicitly selected `<root>/CLAUDE.md` and/or `AGENTS.md`, `<root>/.woods-agent-config.json` ownership receipt |
 | `--scope user` | `~/.claude.json`, explicitly selected `~/.claude/CLAUDE.md`, application-specific receipt in `~/.claude/` |
+
+#### Entry forms
+
+From Woods `2.2.0`, `--entry-form relative|absolute` chooses what the MCP entry names:
+
+| Form | Entry | Default for |
+|---|---|---|
+| `relative` | `sh` running `bundle exec woods-mcp-start --checkout --await-index`, no absolute path, no `cwd`, no `BUNDLE_GEMFILE` | a new project-scope installation inside a git checkout |
+| `absolute` | this machine's Gemfile and index path (and Compose project directory) | user scope; a root outside any git checkout; an installation written before `2.2.0` |
+
+- The plan summary names `entry_form`, and the receipt records it under `intent`.
+- An existing installation keeps its form until asked. A receipt that records no form counts as absolute.
+- `setup --entry-form relative` over an absolute installation refuses and points at an explicit update.
+  `update --entry-form relative --plan FILE` migrates it; review the diff, then apply.
+- User scope is always absolute: `--entry-form relative` is refused there.
+- A root outside any git checkout keeps the absolute form, and the summary's `entry_form_note` says why.
+- Bundler finds the Gemfile by walking up from the directory the server starts in, so the relative form needs no
+  `BUNDLE_GEMFILE`. A relative `BUNDLE_GEMFILE` would break from a subdirectory.
+- Compose (`--mode compose --service app --container-root /app`): the relative entry runs
+  `docker compose exec -T app … --client-root "$PWD"` from the project directory, without `--project-directory`
+  or `-w`. See [the Docker process and path rule](MCP_SERVERS.md#docker-process-and-path-rule) for the
+  client root, the per-developer `WOODS_MCP_CLIENT_ROOT_MAP` it passes through, and pinning the Compose project
+  name for worktrees.
+- Preflight runs the relative form's launch checks too: the installed Woods must accept
+  `--checkout --await-index`, and a git checkout must contain the root where the server runs.
+
+- For an application below its checkout root, the entry also changes into the application directory from the
+  checkout root (`git rev-parse --show-toplevel`), since Bundler looks for the Gemfile up from the working directory,
+  never down. A `CLAUDE_PROJECT_DIR` at the checkout root or at the application both work.
+- The relative entry needs `sh` on the machine that runs the client. Without one, use `--entry-form absolute`.
+- For Compose, the service's `working_dir` must be the application root inside the container. The plan's `notes`
+  say so, with the pinned Compose project name a linked worktree needs.
+  The preflight runs the same `docker compose exec` as the entry, with no `-w`.
+  Setup refuses a service whose working directory does not resolve the `--container-root` application, and names
+  the service's working directory and the container root.
+
+Commit `.mcp.json`. The receipt `.woods-agent-config.json` records this machine's root and target paths:
+keep it out of version control. The tool does not edit `.gitignore`; the plan's `notes` name the lines to add.
+Apply also keeps a lock file beside each file it manages (`.woods-agent-config.json.lock`, `.mcp.json.woods.lock`,
+`CLAUDE.md.woods.lock`, `AGENTS.md.woods.lock`).
+They are kept on purpose: apply serializes on them, and removing one while another apply holds it would let two
+run at once.
+These two `.gitignore` lines cover the receipt, its lock and recovery journal, and every lock:
+
+```gitignore
+.woods-agent-config.json*
+*.woods.lock
+```
+Run setup in one checkout and commit the entry. In any other checkout, or on a teammate's machine, setup finds the
+committed relative entry, identical to what it would write, and adopts it: it writes only that checkout's own
+receipt, and the result says `"adopted": true`. A different unowned entry, or an identical absolute one, is still
+refused, and a receipt that records another root is still a mismatch.
 
 With `CLAUDE_CONFIG_DIR`, user scope uses that directory's `.claude.json`,
 `CLAUDE.md`, and receipt instead. Instruction edits are opt-in with
