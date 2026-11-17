@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'fileutils'
+require 'tmpdir'
 require 'woods/extractors/callback_analyzer'
 
 RSpec.describe Woods::Extractors::CallbackAnalyzer do
@@ -220,6 +222,16 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       analyzer = build_analyzer(source)
       result = analyzer.analyze(make_callback(filter: 'enqueue_billing'))
       expect(result[:side_effects][:jobs_enqueued]).to eq(['Billing::SyncJob'])
+    end
+
+    it 'lists no enqueue operation for a lambda the callback only builds' do
+      source = "class Order\n  def notify\n    hook = -> { NotifyJob.perform_later(id) }\n    register(hook)\n  end\n" \
+               "end\n"
+
+      result = described_class.new(source_code: source).analyze(make_callback(filter: 'notify'))
+      ops = result[:side_effects][:operations]
+
+      expect(ops.map { |op| [op[:type], op[:target], op[:method]] }).to eq([[:call, nil, 'register']])
     end
 
     it 'reports nested operations in the file and line their segment came from' do
@@ -749,6 +761,341 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
 
       expect(effects[:services_called]).to eq(['Billing::TallyService'])
       expect(effects[:mailers_triggered]).to eq(['Billing::ReceiptMailer'])
+    end
+  end
+
+  # Classes loaded from real files, so Ruby itself answers which body a
+  # callback runs; each form compares the analysis with calling it.
+  describe 'given the model, the body Ruby dispatches' do
+    let(:dir) { Dir.mktmpdir('callback_dispatch') }
+    let(:columns) { %w[a b c d] }
+
+    before do
+      stub_const('DispatchForms', Module.new)
+      stub_const('DispatchForms::Record', Class.new { attr_accessor :a, :b, :c, :d })
+    end
+
+    after { FileUtils.remove_entry(dir) }
+
+    # @param model [String] the class under DispatchForms
+    # @param files [Array<Array(String, String)>] name and code, in load order
+    # @param composite [Array<String>] the names the analysis source joins, model file first
+    def analyzer_for(model, files, composite:)
+      paths = files.to_h do |name, code|
+        path = File.join(dir, name)
+        File.write(path, code)
+        load(path)
+        [name, path]
+      end
+      start = 1
+      segments = composite.map do |name|
+        length = File.read(paths[name]).count("\n")
+        segment = { start: start, length: length, file: name, path: paths[name] }
+        start += length + 2
+        segment
+      end
+      described_class.new(source_code: composite.map { |name| File.read(paths[name]) }.join("\n\n"),
+                          column_names: columns, segments: segments, model: DispatchForms.const_get(model))
+    end
+
+    def written_by_ruby(model, filter = :stamp)
+      record = DispatchForms.const_get(model).new
+      record.send(filter)
+      columns.select { |column| record.public_send(column) }
+    end
+
+    def analysis(analyzer, filter = 'stamp')
+      analyzer.analyze(make_callback(filter: filter))
+    end
+
+    def stamping(name, column, body_extra = '')
+      "def #{name}\n      self.#{column} = '#{column}'\n#{body_extra}    end\n"
+    end
+
+    it 'analyzes the later of two definitions in one class, the one Ruby runs' do
+      code = "module DispatchForms\n  class Redefined < Record\n    #{stamping('stamp', 'a')}\n    " \
+             "#{stamping('stamp', 'b')}  end\nend\n"
+      result = analysis(analyzer_for('Redefined', [['redefined.rb', code]], composite: ['redefined.rb']))
+
+      expect(written_by_ruby('Redefined')).to eq(['b'])
+      expect(result).to include(analysis_status: 'analyzed')
+      expect(result[:side_effects][:columns_written]).to eq(['b'])
+      expect(result[:side_effects][:operations].map { |op| op[:line] }).to all(eq(8))
+    end
+
+    it 'analyzes the body of a prepended module that overrides the method' do
+      concern = "module DispatchForms\n  module Replacement\n    #{stamping('stamp', 'b')}  end\nend\n"
+      model = "module DispatchForms\n  class Prepended < Record\n    prepend Replacement\n\n    " \
+              "#{stamping('stamp', 'a')}  end\nend\n"
+      result = analysis(analyzer_for('Prepended', [['replacement.rb', concern], ['prepended.rb', model]],
+                                     composite: ['prepended.rb', 'replacement.rb']))
+
+      expect(written_by_ruby('Prepended')).to eq(['b'])
+      expect(result[:side_effects][:columns_written]).to eq(['b'])
+      expect(result[:side_effects][:operations].map { |op| op[:file] }.uniq).to eq(['replacement.rb'])
+    end
+
+    it 'analyzes a prepended body and the body its super reaches, in dispatch order' do
+      concern = "module DispatchForms\n  module Chained\n    #{stamping('stamp', 'b', "      super\n")}  end\nend\n"
+      model = "module DispatchForms\n  class WithSuper < Record\n    prepend Chained\n\n    " \
+              "#{stamping('stamp', 'a')}  end\nend\n"
+      result = analysis(analyzer_for('WithSuper', [['chained.rb', concern], ['with_super.rb', model]],
+                                     composite: ['with_super.rb', 'chained.rb']))
+
+      expect(written_by_ruby('WithSuper')).to eq(%w[a b])
+      expect(result[:side_effects][:columns_written]).to eq(%w[a b])
+      expect(result[:side_effects][:operations].map { |op| op[:file] }.uniq).to eq(['chained.rb', 'with_super.rb'])
+    end
+
+    it 'reports unsupported when super reaches a body the analysis source does not hold' do
+      parent = "module DispatchForms\n  class Parent < Record\n    #{stamping('stamp', 'a')}  end\nend\n"
+      child = "module DispatchForms\n  class Child < Parent\n    #{stamping('stamp', 'b', "      super\n")}  end\nend\n"
+      result = analysis(analyzer_for('Child', [['parent.rb', parent], ['child.rb', child]],
+                                     composite: ['child.rb']))
+
+      expect(written_by_ruby('Child')).to eq(%w[a b])
+      expect(result[:analysis_status]).to eq('unsupported')
+    end
+
+    it 'analyzes the model’s method, not a same-named one in a class earlier in the file' do
+      code = "module DispatchForms\n  class Helper\n    #{stamping('stamp', 'c')}  end\n\n  " \
+             "class Sibling < Record\n    #{stamping('stamp', 'd')}  end\nend\n"
+      result = analysis(analyzer_for('Sibling', [['sibling.rb', code]], composite: ['sibling.rb']))
+
+      expect(written_by_ruby('Sibling')).to eq(['d'])
+      expect(result[:side_effects][:columns_written]).to eq(['d'])
+    end
+
+    it 'analyzes the method of the concern included last when two define it' do
+      first = "module DispatchForms\n  module FirstStamp\n    #{stamping('stamp', 'a')}  end\nend\n"
+      second = "module DispatchForms\n  module SecondStamp\n    #{stamping('stamp', 'b')}  end\nend\n"
+      model = "module DispatchForms\n  class TwoConcerns < Record\n    " \
+              "include FirstStamp\n    include SecondStamp\n  end\nend\n"
+      files = [['first.rb', first], ['second.rb', second], ['two.rb', model]]
+      result = analysis(analyzer_for('TwoConcerns', files, composite: ['two.rb', 'first.rb', 'second.rb']))
+
+      expect(written_by_ruby('TwoConcerns')).to eq(['b'])
+      expect(result[:side_effects][:columns_written]).to eq(['b'])
+    end
+
+    it 'analyzes the model’s method, not a same-named one in a nested class' do
+      code = "module DispatchForms\n  class Nested < Record\n    class Helper\n      " \
+             "def stamp\n        self.c = 1\n      end\n    end\n\n    #{stamping('stamp', 'd')}  end\nend\n"
+      result = analysis(analyzer_for('Nested', [['nested.rb', code]], composite: ['nested.rb']))
+
+      expect(written_by_ruby('Nested')).to eq(['d'])
+      expect(result[:side_effects][:columns_written]).to eq(['d'])
+    end
+
+    it 'analyzes an STI child’s override of its parent’s method' do
+      parent = "module DispatchForms\n  class StiParent < Record\n    #{stamping('stamp', 'a')}  end\nend\n"
+      child = "module DispatchForms\n  class StiChild < StiParent\n    #{stamping('stamp', 'b')}  end\nend\n"
+      result = analysis(analyzer_for('StiChild', [['parent.rb', parent], ['child.rb', child]],
+                                     composite: ['child.rb']))
+
+      expect(written_by_ruby('StiChild')).to eq(['b'])
+      expect(result[:side_effects][:columns_written]).to eq(['b'])
+    end
+
+    it 'reports an STI child that inherits the method unsupported' do
+      parent = "module DispatchForms\n  class StiBase < Record\n    #{stamping('stamp', 'a')}  end\nend\n"
+      child = "module DispatchForms\n  class StiHeir < StiBase\n  end\nend\n"
+      result = analysis(analyzer_for('StiHeir', [['parent.rb', parent], ['heir.rb', child]],
+                                     composite: ['heir.rb']))
+
+      expect(written_by_ruby('StiHeir')).to eq(['a'])
+      expect(result[:analysis_status]).to eq('unsupported')
+    end
+
+    it 'reports unsupported when Ruby runs a definition outside the analysis source, never a name match' do
+      model = "module DispatchForms\n  class Reopened < Record\n    #{stamping('stamp', 'a')}  end\nend\n"
+      patch = "module DispatchForms\n  class Reopened\n    #{stamping('stamp', 'b')}  end\nend\n"
+      result = analysis(analyzer_for('Reopened', [['reopened.rb', model], ['patch.rb', patch]],
+                                     composite: ['reopened.rb']))
+
+      expect(written_by_ruby('Reopened')).to eq(['b'])
+      expect(result[:analysis_status]).to eq('unsupported')
+    end
+
+    it 'analyzes the definition an alias names' do
+      code = "module DispatchForms\n  class Aliased < Record\n    #{stamping('stamp', 'c')}\n    " \
+             "alias_method :mark, :stamp\n  end\nend\n"
+      result = analysis(analyzer_for('Aliased', [['aliased.rb', code]], composite: ['aliased.rb']), 'mark')
+
+      expect(written_by_ruby('Aliased', :mark)).to eq(['c'])
+      expect(result[:side_effects][:columns_written]).to eq(['c'])
+    end
+
+    # Two class bodies on one physical line: the line alone cannot say
+    # which definition Ruby dispatches to; the column Ruby compiled it at can.
+    describe 'two owners defining the method on one line' do
+      let(:code) do
+        "module DispatchForms\n  " \
+          "class Left < Record; def stamp; self.a = 'a'; end; end; " \
+          "class Right < Record; def stamp; self.b = 'b'; end; end\nend\n"
+      end
+
+      it 'analyzes the earlier owner’s definition when Ruby dispatches to it' do
+        result = analysis(analyzer_for('Left', [['one_line.rb', code]], composite: ['one_line.rb']))
+
+        expect(written_by_ruby('Left')).to eq(['a'])
+        expect(result[:side_effects][:columns_written]).to eq(['a'])
+      end
+
+      it 'analyzes the later owner’s definition when Ruby dispatches to it' do
+        result = analysis(analyzer_for('Right', [['one_line.rb', code]], composite: ['one_line.rb']))
+
+        expect(written_by_ruby('Right')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      it 'analyzes the later of two definitions one owner makes on one line' do
+        twice = "module DispatchForms\n  class Twice < Record; def stamp; self.a = 'a'; end; " \
+                "def stamp; self.b = 'b'; end; end\nend\n"
+        result = analysis(analyzer_for('Twice', [['twice.rb', twice]], composite: ['twice.rb']))
+
+        expect(written_by_ruby('Twice')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      # `class Elsewhere::Up` names a constant the source never declares, so
+      # its first segment may come from another file: no owner can be read.
+      it 'analyzes the definition Ruby compiled when neither owner can be named from the source' do
+        stub_const('DispatchElsewhere', Module.new)
+        result = analysis(analyzer_for('DispatchElsewhere::Up', [['elsewhere.rb', unnamed_owners]],
+                                       composite: ['elsewhere.rb']))
+
+        expect(written_by_ruby('DispatchElsewhere::Up')).to eq(['c'])
+        expect(result[:side_effects][:columns_written]).to eq(['c'])
+      end
+    end
+
+    def unnamed_owners
+      "module DispatchForms\n  " \
+        "class DispatchElsewhere::Up < Record; def stamp; self.c = 'c'; end; end; " \
+        "class DispatchElsewhere::Down < Record; def stamp; self.d = 'd'; end; end\nend\n"
+    end
+
+    # One line of the Branches class body, with A and B standing for a
+    # definition of stamp writing a and one writing b.
+    def branches(template)
+      line = template.sub('A', "def stamp; self.a = 'a'; end").sub('B', "def stamp; self.b = 'b'; end")
+      code = "module DispatchForms\n  class Branches < Record; #{line}; end\nend\n"
+      analysis(analyzer_for('Branches', [['branches.rb', code]], composite: ['branches.rb']))
+    end
+
+    # Each form defines stamp twice on one line, where only one definition
+    # runs; the condition picks which. Expected: what Ruby writes when the
+    # condition is true, then when it is false.
+    exclusive_forms = {
+      'if and else' => ['if FLIP then A else B end', %w[a b]],
+      'a ternary' => ['FLIP ? (A) : (B)', %w[a b]],
+      'case and when' => ['case FLIP when true then A else B end', %w[a b]],
+      '&& and ||' => ['FLIP && (A) || (B)', %w[a b]],
+      'a modifier if' => ['A; B if FLIP', %w[b a]],
+      'begin and rescue' => ["begin; raise 'skip' unless FLIP; A; rescue; B; end", %w[a b]]
+    }
+
+    describe 'same-line definitions only one of which runs' do
+      exclusive_forms.each do |form, (template, written)|
+        [true, false].zip(written).each do |flip, column|
+          it "analyzes the body Ruby installs from #{form} when the condition is #{flip}" do
+            stub_const('DispatchForms::FLIP', flip)
+            result = branches(template)
+
+            expect(written_by_ruby('Branches')).to eq([column])
+            expect(result).to include(analysis_status: 'analyzed')
+            expect(result[:side_effects][:columns_written]).to eq([column])
+          end
+        end
+      end
+
+      it 'analyzes the later definition when an ensure clause redefines the method' do
+        result = branches('begin; A; ensure; B; end')
+
+        expect(written_by_ruby('Branches')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      # The string's def reports this file and line, so the def beside it
+      # is the only candidate there.
+      it 'reports unsupported when Ruby installs a body the parsed source lacks, never its neighbour' do
+        result = branches("A; class_eval(\"def stamp; self.b = 'b'; end\", __FILE__, __LINE__)")
+
+        expect(written_by_ruby('Branches')).to eq(['b'])
+        expect(result[:analysis_status]).to eq('unsupported')
+      end
+
+      it 'reports a define_method body unsupported, never a same-named def on its line' do
+        result = branches("A; define_method(:stamp) { self.b = 'b' }")
+
+        expect(written_by_ruby('Branches')).to eq(['b'])
+        expect(result[:analysis_status]).to eq('unsupported')
+      end
+    end
+
+    # Without the position Ruby compiled a body at, only a plain sequence
+    # of definitions says which one stays: the last.
+    describe 'without a compiled position from the runtime' do
+      before { allow(RubyVM::InstructionSequence).to receive(:of).and_return(nil) }
+
+      it 'analyzes the later of two definitions one statement list makes on one line' do
+        twice = "module DispatchForms\n  class Twice < Record; def stamp; self.a = 'a'; end; " \
+                "def stamp; self.b = 'b'; end; end\nend\n"
+        result = analysis(analyzer_for('Twice', [['twice.rb', twice]], composite: ['twice.rb']))
+
+        expect(written_by_ruby('Twice')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      it 'tells two owners on one line apart by their names' do
+        code = "module DispatchForms\n  " \
+               "class Left < Record; def stamp; self.a = 'a'; end; end; " \
+               "class Right < Record; def stamp; self.b = 'b'; end; end\nend\n"
+        result = analysis(analyzer_for('Right', [['one_line.rb', code]], composite: ['one_line.rb']))
+
+        expect(written_by_ruby('Right')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      exclusive_forms.each do |form, (template, written)|
+        [true, false].zip(written).each do |flip, column|
+          it "reports #{form} unsupported when the condition is #{flip}" do
+            stub_const('DispatchForms::FLIP', flip)
+            result = branches(template)
+
+            expect(written_by_ruby('Branches')).to eq([column])
+            expect(result[:analysis_status]).to eq('unsupported')
+          end
+        end
+      end
+
+      it 'reports unsupported when neither definition’s owner can be named from the source' do
+        stub_const('DispatchElsewhere', Module.new)
+        result = analysis(analyzer_for('DispatchElsewhere::Up', [['elsewhere.rb', unnamed_owners]],
+                                       composite: ['elsewhere.rb']))
+
+        expect(written_by_ruby('DispatchElsewhere::Up')).to eq(['c'])
+        expect(result[:analysis_status]).to eq('unsupported')
+      end
+    end
+
+    it 'places a method defined in a differently named file without resolving real paths' do
+      code = "module DispatchForms\n  class Elsewhere < Record\n  end\nend\n"
+      patch = "module DispatchForms\n  class Elsewhere\n    #{stamping('stamp', 'a')}  end\nend\n"
+      analyzer = analyzer_for('Elsewhere', [['elsewhere.rb', code], ['other_file.rb', patch]],
+                              composite: ['elsewhere.rb'])
+      allow(File).to receive(:realpath).and_call_original
+
+      expect(analysis(analyzer)[:analysis_status]).to eq('unsupported')
+      expect(File).not_to have_received(:realpath)
+    end
+
+    it 'reports a method Ruby does not define unsupported' do
+      code = "module DispatchForms\n  class Bare < Record\n  end\nend\n"
+
+      expect(analysis(analyzer_for('Bare', [['bare.rb', code]], composite: ['bare.rb']))[:analysis_status])
+        .to eq('unsupported')
     end
   end
 end

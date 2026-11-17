@@ -35,6 +35,150 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
             [[:async, 'ExportJob', 'perform_later', ['1']], [:async, 'ExportJob', 'perform_later', ['2']]]
           )
         end
+
+        def async_ops(body, params: nil)
+          signature = params ? "call(#{params})" : 'call'
+          extract_method_ops("def #{signature}\n#{body}\nend\n", 'call')
+            .select { |op| op[:type] == :async }.map { |op| "#{op[:target]}.#{op[:method]}" }
+        end
+
+        {
+          'a hash value' => 'x = { job: HashJob.perform_later }',
+          'a string interpolation' => "x = \"a\#{StrJob.perform_later}\"",
+          'a heredoc interpolation' => "x = <<~TXT\n  a \#{DocJob.perform_later}\nTXT",
+          'a yield argument' => 'yield YieldJob.perform_later',
+          'a later rescue branch' => "Work.call\nrescue ArgumentError\nA.call\nrescue TypeError\nLateJob.perform_later",
+          'the else of a rescue' => "Work.call\nrescue ArgumentError\nA.call\nelse\nElseJob.perform_later"
+        }.each do |form, body|
+          it "extracts an enqueue in #{form}" do
+            expect(async_ops(body)).to eq(["#{body[/\w+Job/]}.perform_later"])
+          end
+        end
+
+        it 'extracts an enqueue in a default parameter value ahead of the body' do
+          operations = extract_method_ops("def call(job: DefJob.perform_later)\n  Body.run\nend\n", 'call')
+
+          expect(operations.map { |op| [op[:type], op[:target], op[:method]] }).to eq(
+            [[:async, 'DefJob', 'perform_later'], [:call, 'Body', 'run']]
+          )
+        end
+
+        {
+          'a lambda in a hash value' => 'x = { cb: -> { HashJob.perform_later } }',
+          'a stabby lambda' => 'cb = -> { LamJob.perform_later }',
+          'a lambda block' => 'cb = lambda { LamJob.perform_later }',
+          'a proc block' => 'cb = proc { ProcJob.perform_later }',
+          'a Proc.new block' => 'cb = Proc.new { ProcJob.perform_later }',
+          'a defined? operand' => 'x = defined?(DefJob.perform_later)',
+          'a lambda default parameter value' => ['Body.run', 'cb: -> { LamJob.perform_later }']
+        }.each do |form, (body, params)|
+          it "extracts no enqueue from #{form}, which does not run where it is written" do
+            expect(async_ops(body, params: params)).to eq([])
+          end
+        end
+
+        it 'leaves the receiver of a singleton definition out of its operations' do
+          method_node = parser.parse("def (Registry.build).hook\n  Body.run\nend\n").find_first(:defs)
+
+          expect(extractor.extract(method_node).map { |op| [op[:target], op[:method]] }).to eq([%w[Body run]])
+        end
+
+        describe 'a method defined inside the analyzed method' do
+          def flow(body)
+            extract_method_ops("def call\n#{body}\nend\n", 'call').map { |op| [op[:type], op[:target], op[:method]] }
+          end
+
+          {
+            'its default parameter values' => "def inner(job = InnerJob.perform_later)\nend",
+            'its body' => "def inner\n  InnerJob.perform_later\nend",
+            'the defaults and body of a nested def self.x' => "def self.inner(job = InnerJob.perform_later)\n  " \
+                                                              "InnerJob.perform_later\nend",
+            'the defaults of a nested lambda' => 'hook = ->(job = InnerJob.perform_later) { job }'
+          }.each do |form, nested|
+            it "leaves #{form} out of the enclosing flow, which runs none of it" do
+              expect(flow("#{nested}\nBody.run")).to eq([[:call, 'Body', 'run']])
+            end
+          end
+
+          it 'keeps the receiver expression of a nested singleton definition, which runs when it is defined' do
+            expect(flow("def (Hooks.build).inner(job = InnerJob.perform_later)\nend"))
+              .to eq([[:call, 'Hooks', 'build']])
+          end
+
+          it 'reports the nested method defaults when that method is analyzed' do
+            source = "def call\n  def inner(job = InnerJob.perform_later)\n    Body.run\n  end\nend\n"
+            inner = parser.parse(source).find_all(:def).find { |node| node.method_name == 'inner' }
+
+            expect(extractor.extract(inner).map { |op| [op[:type], op[:target], op[:method]] })
+              .to eq([[:async, 'InnerJob', 'perform_later'], [:call, 'Body', 'run']])
+          end
+
+          it 'still lists every method of a whole source' do
+            root = parser.parse("class Ledger\n  def a\n    First.run\n  end\n\n  " \
+                                "def b(job = SecondJob.perform_later)\n    Third.run\n  end\nend\n")
+
+            expect(extractor.extract(root).map { |op| [op[:type], op[:target], op[:method]] }).to eq(
+              [[:call, 'First', 'run'], [:async, 'SecondJob', 'perform_later'], [:call, 'Third', 'run']]
+            )
+          end
+        end
+
+        it 'still extracts an enqueue in a block body' do
+          expect(async_ops('items.each { EachJob.perform_later }')).to eq(['EachJob.perform_later'])
+        end
+
+        describe 'an enqueue in an expression a call evaluates' do
+          {
+            'a keyword argument' => 'Audit.record(job: KwJob.perform_later)',
+            'an array in a keyword argument' => 'Audit.record(jobs: [KwArrJob.perform_later])',
+            'an array argument' => 'Audit.record([ArrJob.perform_later])',
+            'a parenthesized argument' => 'Audit.record((ParJob.perform_later))',
+            'a splatted array argument' => 'Audit.record(*[SplatJob.perform_later])',
+            'a ternary argument' => 'Audit.record(flag ? TernJob.perform_later : nil)',
+            'an || argument' => 'Audit.record(nil || OrJob.perform_later)',
+            'a hash-literal argument' => 'Audit.record({ job: HashJob.perform_later })',
+            'an interpolated argument' => "Audit.record(\"id \#{InterpJob.perform_later}\")",
+            'a render hash' => 'render json: { id: RenderJob.perform_later.job_id }',
+            'the receiver chain of an argument' => 'Audit.record(ChainJob.perform_later.job_id)',
+            'the receiver chain of a statement' => 'id = StmtJob.perform_later.job_id',
+            'a block nested in an argument' => 'Audit.record(items.map { MapJob.perform_later })'
+          }.each do |form, body|
+            it "is an async operation in #{form}" do
+              expect(async_ops(body)).to eq(["#{body[/\w+Job/]}.perform_later"])
+            end
+          end
+
+          {
+            'a lambda argument' => 'Audit.record(-> { LamJob.perform_later })',
+            'a lambda keyword argument' => 'Audit.record(callback: -> { LamJob.perform_later })',
+            'a lambda block-pass' => 'Audit.record(&-> { LamJob.perform_later })',
+            'a lambda block argument' => 'Audit.record(lambda { LamJob.perform_later })',
+            'a lambda in an array argument' => 'Audit.record([-> { LamJob.perform_later }])',
+            'a proc argument' => 'Audit.record(proc { ProcJob.perform_later })',
+            'a Proc.new keyword argument' => 'Audit.record(callback: Proc.new { ProcJob.perform_later })',
+            'a proc block-pass' => 'Audit.record(&proc { ProcJob.perform_later })',
+            'a defined? argument' => 'Audit.record(defined?(DefJob.perform_later))'
+          }.each do |form, body|
+            it "is no operation in #{form}" do
+              expect(async_ops(body)).to eq([])
+            end
+          end
+
+          it 'counts an enqueue in the block the call is given once' do
+            expect(async_ops('Audit.record { BlockJob.perform_later }')).to eq(['BlockJob.perform_later'])
+          end
+
+          it 'counts a configured enqueue once' do
+            expect(async_ops('SetJob.set(wait: 1).perform_later(id)')).to eq(['SetJob.set.perform_later'])
+          end
+
+          it 'adds no operation for an ordinary call in a receiver chain or an argument' do
+            operations = extract_method_ops("def call\n  Ledger.where(id: Scope.ids).update_all(x: 1)\nend\n", 'call')
+
+            expect(operations.map { |op| [op[:type], op[:target], op[:method]] })
+              .to eq([[:call, 'Ledger.where', 'update_all']])
+          end
+        end
       end
     end
 
@@ -558,6 +702,87 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
       expect(methods).not_to include('present?')
       expect(methods).not_to include('to_s')
       expect(methods).to include('call')
+    end
+
+    # Ruby makes a `super` call after its arguments and before the block it
+    # passes runs, at that point of the body, in whatever holds the call.
+    describe 'super calls' do
+      let(:source) do
+        <<~RUBY
+          def update
+            super(BeforeJob.perform_later); AfterJob.perform_later
+            if Gate.open?
+              super
+            end
+            Report.transaction do
+              super do
+                YieldedJob.perform_later
+              end
+            end
+          end
+        RUBY
+      end
+
+      def shape(operations)
+        operations.map do |op|
+          held = described_class::NESTED_KEYS.filter_map { |key| op[key] }
+          held.empty? ? (op[:target] || op[:type]).to_s : [op[:type].to_s, *held.map { |ops| shape(ops) }]
+        end
+      end
+
+      [true, false].each do |prism|
+        context "with #{prism ? 'Prism' : 'the alternate parser adapter'}" do
+          before { allow(parser).to receive(:prism_available?).and_return(prism) }
+
+          it 'marks each call where Ruby makes it when asked' do
+            method_node = method_extractor.extract_method(source, 'update')
+
+            expect(shape(described_class.new(super_calls: true).extract(method_node))).to eq(
+              ['BeforeJob', 'super_call', 'AfterJob', 'Gate', ['conditional', ['super_call'], []],
+               ['transaction', %w[super_call YieldedJob]]]
+            )
+          end
+
+          it 'records no operation for a super call by default' do
+            expect(shape(extract_method_ops(source, 'update'))).to eq(
+              ['BeforeJob', 'AfterJob', 'Gate', ['transaction', ['YieldedJob']]]
+            )
+          end
+
+          # A call's receiver and arguments run before the call, so a `super`
+          # among them is made first; one in a conditional expression only on
+          # that branch.
+          it 'marks a super call that is a receiver or argument of another call, before that call' do
+            method_node = method_extractor.extract_method(<<~RUBY, 'show')
+              def show
+                Log.write(super)
+                Log.write(value: super)
+                handed = Wrapper.wrap(super)
+                super.merge(1).then { AfterJob.perform_later }
+                Log.write(ready? ? super : nil)
+                Audit.record(super())
+              end
+            RUBY
+
+            expect(shape(described_class.new(super_calls: true).extract(method_node))).to eq(
+              ['super_call', 'Log', 'super_call', 'Log', 'super_call', 'Wrapper', 'super_call', 'AfterJob',
+               ['conditional', ['super_call'], []], 'Log', 'super_call', 'Audit']
+            )
+          end
+
+          it 'marks a super call inside an interpolated argument, and none in a lambda argument' do
+            method_node = method_extractor.extract_method(<<~'RUBY', 'show')
+              def show
+                Log.write("value: #{super}")
+                Log.write(-> { super })
+              end
+            RUBY
+
+            expect(shape(described_class.new(super_calls: true).extract(method_node)))
+              .to eq(%w[super_call Log Log])
+          end
+        end
+      end
     end
 
     it 'returns empty array for nil input' do

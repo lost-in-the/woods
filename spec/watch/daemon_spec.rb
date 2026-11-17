@@ -640,8 +640,10 @@ RSpec.describe Woods::Watch::Daemon do
     it 'stops the watcher and reports a restart when boot state changes' do
       fake_watcher.queue(['config/initializers/redis.rb'])
       fake_watcher.queue(['config/locales/en.yml'])
+      daemon = build(watcher: fake_watcher)
+      touch('config/initializers/redis.rb')
 
-      expect(build(watcher: fake_watcher).run).to eq(:restart_required)
+      expect(daemon.run).to eq(:restart_required)
       expect(fake_watcher.stopped).to be(true)
       # The second batch must not be processed after a restart is demanded.
       expect(extractor).not_to have_received(:extract_changed)
@@ -769,6 +771,7 @@ RSpec.describe Woods::Watch::Daemon do
     end
 
     it 'reconciles changes that predate startup' do
+      publish_generation('full')
       touch('app/services/before_the_daemon.rb')
 
       build(watcher: fake_watcher, catch_up: true).run
@@ -1078,6 +1081,7 @@ RSpec.describe Woods::Watch::Daemon do
     end
 
     it 'processes a path the watcher delivers while catch-up is still running' do
+      publish_generation('full')
       touch('app/services/predates_daemon.rb')
       live_watcher = LiveWatcher.new
       catch_up_entered = Queue.new
@@ -1213,6 +1217,94 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  # A host callback that forks on the thread running #run leaves a child that
+  # unwinds the same run: its cycle publishes status, and its shutdown
+  # persists pending paths, publishes `stopped` and releases the claim. The
+  # extractor during start-up catch-up is such a callback. Every one of those
+  # writes belongs to the process that claimed the index.
+  describe 'a child forked on the thread running #run', if: Process.respond_to?(:fork) do
+    let(:lock) do
+      instance_double(Woods::Coordination::PipelineLock, acquire: true, release: true, touch: true, stale_timeout: 600)
+    end
+
+    def claim_file
+      File.join(output_dir, described_class::CLAIM_FILENAME)
+    end
+
+    def pending_file
+      File.join(output_dir, 'watch_pending.json')
+    end
+
+    # Forks inside the catch-up extraction. The parent records what the
+    # child left behind and then publishes; the child does what +in_child+
+    # says and then unwinds the rest of the run on its own.
+    def fork_during_catch_up(in_child, &parent)
+      hook = lambda do
+        child = fork
+        next in_child.call if child.nil?
+
+        Process.wait(child)
+        parent.call
+        publish_generation('incremental') && ['Thing']
+      end
+      allow(extractor).to receive(:extract_changed) { hook.call }
+      allow(extractor).to receive(:extract_all) { hook.call && {} }
+    end
+
+    def run_once_in_parent(daemon)
+      parent = Process.pid
+      daemon.run
+    ensure
+      exit!(0) unless Process.pid == parent
+    end
+
+    { 'returns normally' => :return, 'raises' => :raise, 'calls exit!' => :exit! }.each do |exit_kind, mode|
+      it "leaves the claim, status and pending paths to the parent when the child #{exit_kind}" do
+        touch('config/locales/en.yml')
+        seen = {}
+        leave = lambda do
+          exit!(0) if mode == :exit!
+          raise 'the child failed' if mode == :raise
+
+          ['Thing']
+        end
+        fork_during_catch_up(leave) do
+          seen.merge!(claim: File.exist?(claim_file), state: status['state'], pid: status['pid'],
+                      pending: File.exist?(pending_file))
+        end
+
+        result = run_once_in_parent(build(watcher: FakeWatcher.new, lock: lock, catch_up: true,
+                                          conservative_claims: true))
+
+        expect(seen).to eq(claim: true, state: 'running', pid: Process.pid, pending: false)
+        expect(result).to eq(:stopped)
+        expect(File.exist?(claim_file)).to be(false)
+        expect(status).to include('state' => 'stopped', 'pid' => Process.pid)
+        expect(JSON.parse(File.read(pending_file))).to eq([])
+      end
+    end
+
+    it 'does not let the child believe it owns the claim, and a daemon there stands down' do
+      touch('config/locales/en.yml')
+      daemon = build(watcher: FakeWatcher.new, lock: lock, catch_up: true, conservative_claims: true)
+      reader, writer = IO.pipe
+      report = lambda do
+        writer.write(JSON.generate(owns_claim: daemon.send(:own_claim?),
+                                   second_daemon: build(watcher: FakeWatcher.new, conservative_claims: true).run))
+        exit!(0)
+      end
+      seen = nil
+      fork_during_catch_up(report) do
+        writer.close
+        seen = JSON.parse(reader.read)
+      end
+
+      run_once_in_parent(daemon)
+
+      expect(seen).to eq('owns_claim' => false, 'second_daemon' => 'already_running')
+    end
+  end
+
   # Carried paths survived within a run but were dropped at shutdown, and the
   # mtime watermark does not cover them: if another writer bumps the generation
   # after the daemon carried a path forward, the watermark is newer than that
@@ -1264,7 +1356,12 @@ RSpec.describe Woods::Watch::Daemon do
     # nothing left to write and clobbered the durable file with []. #process
     # now guards the drained batch with its own ensure, independent of what
     # killed the thread running it.
+    #
+    # The kill goes through the daemon's own stop path, never a kill and join
+    # written here: Thread#kill only schedules that ensure, so a join in the
+    # example would supply the wait the daemon itself has to make.
     it 'survives the thread that drained it being killed mid-cycle' do
+      stub_const('Woods::Watch::Daemon::HEARTBEAT_SHUTDOWN_TIMEOUT', 0.05)
       entered = Queue.new
       release = Queue.new
       allow(extractor).to receive(:extract_changed) do |paths|
@@ -1279,9 +1376,7 @@ RSpec.describe Woods::Watch::Daemon do
       worker = Thread.new { daemon.send(:process, [relative]) }
       Timeout.timeout(5) { entered.pop } # wait until the batch is mid-extraction
 
-      worker.kill
-      raise 'worker thread did not exit after #kill' unless worker.join(5)
-
+      daemon.send(:stop_retry, worker)
       daemon.send(:persist_pending)
 
       expect(JSON.parse(File.read(pending_file)))
@@ -1305,6 +1400,98 @@ RSpec.describe Woods::Watch::Daemon do
 
       expect(JSON.parse(File.read(pending_file)))
         .to include(File.join(root, relative))
+    end
+
+    it 'persists paths recovered by retry cleanup after a forced stop, before releasing the claim' do
+      relative = touch('config/locales/en.yml')
+      daemon = build
+      steps = []
+      retry_thread = double('retry thread')
+      allow(retry_thread).to receive(:join).with(described_class::HEARTBEAT_SHUTDOWN_TIMEOUT).and_return(nil)
+      allow(retry_thread).to receive(:kill).and_return(retry_thread)
+      allow(retry_thread).to receive(:join).with(no_args) do
+        daemon.send(:carry_forward, Woods::ChangeSet.new(paths: [relative], root: root))
+        steps << :retry_cleanup
+        retry_thread
+      end
+      %i[persist_pending release_claim].each do |step|
+        allow(daemon).to receive(step).and_wrap_original do |original|
+          steps << step
+          original.call
+        end
+      end
+      daemon.instance_variable_set(:@retry_thread, retry_thread)
+
+      daemon.send(:shut_down, nil, nil)
+
+      expect(steps).to eq(%i[retry_cleanup persist_pending release_claim])
+      expect(JSON.parse(File.read(pending_file)))
+        .to include(File.join(root, relative))
+    end
+
+    # The whole loop: a cycle contends for the writer lock and carries its
+    # path, the heartbeat retries it, and the daemon is stopped while that
+    # retried extraction is still running. Nothing here kills or joins a
+    # thread itself; the extraction never returns, so only the daemon's own
+    # shutdown can end it.
+    def stop_during_retry(relative)
+      extracting = Queue.new
+      live_watcher = LiveWatcher.new
+      daemon = daemon_with_endless_retry(live_watcher, extracting)
+
+      runner = Thread.new { daemon.run }
+      live_watcher.wait_until_started
+      live_watcher.on_change.call([File.join(root, relative)])
+      worker = Timeout.timeout(5) { extracting.pop }
+      expect(worker).to equal(daemon.instance_variable_get(:@retry_thread))
+
+      daemon.stop
+      expect(Timeout.timeout(5) { runner.value }).to eq(:stopped)
+    ensure
+      daemon&.stop
+      worker&.kill
+    end
+
+    # The first acquire contends, so the cycle carries its path; the
+    # heartbeat's retry then takes the lock and extracts until killed.
+    # +extracting+ receives the thread running that extraction.
+    def daemon_with_endless_retry(watcher, extracting)
+      stub_const('Woods::Watch::Daemon::HEARTBEAT_SHUTDOWN_TIMEOUT', 0.05)
+      blocking = instance_spy('Woods::Extractor')
+      allow(blocking).to receive(:extract_changed) do
+        extracting << Thread.current
+        sleep
+      end
+      lock = instance_double(Woods::Coordination::PipelineLock, release: true, touch: true, stale_timeout: 600)
+      allow(lock).to receive(:acquire).and_return(false, true)
+      build(watcher: watcher, lock: lock, extractor_factory: -> { blocking }).tap do |daemon|
+        allow(daemon).to receive(:heartbeat_tick).and_return(0.01)
+      end
+    end
+
+    it 'keeps the path of a retried extraction the stop interrupted' do
+      relative = touch('config/locales/en.yml')
+
+      stop_during_retry(relative)
+
+      expect(JSON.parse(File.read(pending_file))).to eq([File.join(root, relative)])
+    end
+
+    # The interrupted state that matters: the contending writer published
+    # after the save, so the published source manifest already records the
+    # file's current digest and start-up catch-up reads it as unchanged. The
+    # pending file is the only record that the edit was never extracted.
+    it 'extracts that path at the next startup even when its digest matches the published index' do
+      relative = touch('config/locales/en.yml')
+      publish_generation('full')
+      expect(build.send(:catch_up_scan).paths).not_to include(File.join(root, relative))
+
+      stop_during_retry(relative)
+      build(watcher: FakeWatcher.new, catch_up: true).run
+
+      expect(extractor).to have_received(:extract_changed) do |paths|
+        expect(paths).to include(File.join(root, relative))
+      end
     end
   end
 

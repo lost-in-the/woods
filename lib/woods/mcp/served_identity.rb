@@ -26,6 +26,24 @@ module Woods
       # Environment override for a root mismatch, equivalent to `--allow-mismatch`.
       ALLOW_ENV = 'WOODS_MCP_ALLOW_MISMATCH'
 
+      # The directory the client session runs in, equivalent to
+      # `--client-root`. When set, the launch compares the index with this
+      # checkout instead of the launcher's own directory.
+      CLIENT_ROOT_ENV = 'WOODS_MCP_CLIENT_ROOT'
+
+      # Bind mounts between the client's file system and this process's,
+      # equivalent to repeated `--client-root-map HOST=CONTAINER`: entries of
+      # absolute `host_prefix=container_prefix`, separated by `:`. A client
+      # root is read here through the entry with the longest host prefix
+      # that contains it; under none, its checkout is not mounted here.
+      CLIENT_ROOT_MAP_ENV = 'WOODS_MCP_CLIENT_ROOT_MAP'
+
+      # Separates entries of {CLIENT_ROOT_MAP_ENV}.
+      MAP_SEPARATOR = ':'
+
+      # Raised for a client root map entry that is not two absolute prefixes.
+      class InvalidClientRootMap < ArgumentError; end
+
       # Manifest bytes read at most; a manifest is a few kilobytes.
       MAX_MANIFEST_BYTES = 1_048_576
 
@@ -36,7 +54,66 @@ module Woods
         # @param env [Hash]
         # @return [Boolean]
         def allow_mismatch?(env = ENV)
-          %w[1 true yes].include?(env.fetch(ALLOW_ENV, '').to_s.strip.downcase)
+          env_flag?(ALLOW_ENV, env)
+        end
+
+        # @param name [String] a launch flag's environment variable
+        # @param env [Hash]
+        # @return [Boolean] true for 1, true or yes
+        def env_flag?(name, env = ENV)
+          %w[1 true yes].include?(env.fetch(name, '').to_s.strip.downcase)
+        end
+
+        # The client of this launch: the client root {CLIENT_ROOT_ENV}
+        # declares, read through {CLIENT_ROOT_MAP_ENV} when a map is set, else
+        # the launcher's own directory.
+        #
+        # @param env [Hash]
+        # @param pwd [String]
+        # @return [Hash] keywords for {#initialize}: `cwd:` and, for a declared
+        #   client root, `declared_client_root:` and `client_root_map:`
+        def launch_client(env = ENV, pwd: Dir.pwd)
+          declared = env[CLIENT_ROOT_ENV].to_s.strip
+          return { cwd: pwd } if declared.empty?
+
+          map = parse_client_root_map(env[CLIENT_ROOT_MAP_ENV])
+          { cwd: declared, declared_client_root: declared, client_root_map: map }
+        rescue InvalidClientRootMap => e
+          { cwd: nil, declared_client_root: declared, client_root_map_error: e.message }
+        end
+
+        # @param value [String, nil] {CLIENT_ROOT_MAP_ENV} entries
+        # @return [Array<Array(String, String)>] normalized host and container
+        #   prefixes, in the order given
+        # @raise [InvalidClientRootMap]
+        def parse_client_root_map(value)
+          value.to_s.split(MAP_SEPARATOR).reject { |entry| entry.strip.empty? }.map do |entry|
+            host, container, extra = entry.strip.split('=', 3)
+            unless extra.nil? && absolute?(host) && absolute?(container)
+              raise InvalidClientRootMap, "#{entry.strip.inspect} is not HOST_PREFIX=CONTAINER_PREFIX with two " \
+                                          'absolute paths'
+            end
+
+            [normalize_prefix(host), normalize_prefix(container)]
+          end
+        end
+
+        # The path this process reads +path+ at: the entry whose host prefix
+        # contains it in whole path segments, the longest when several do.
+        # The host side is never resolved on this file system.
+        #
+        # @param path [String] an absolute client path
+        # @param map [Array<Array(String, String)>]
+        # @return [Array(String, Array(String, String)), nil] the derived path
+        #   and the entry used, or nil under no host prefix
+        def map_client_root(path, map)
+          path = normalize_prefix(path)
+          entry = map.select { |host, _| within_prefix?(path, host) }.max_by { |host, _| host.length }
+          return unless entry
+
+          host, container = entry
+          rest = path.delete_prefix(host).delete_prefix('/')
+          [rest.empty? ? container : File.join(container, rest), entry]
         end
 
         # Read once: the marker, then the manifest of the payload that marker
@@ -44,16 +121,17 @@ module Woods
         # generation's number with another's manifest.
         #
         # @param index_dir [String, Pathname]
-        # @param cwd [String] the launcher's working directory
+        # @param cwd [String, nil] the client's directory; nil means this
+        #   launch's client ({.launch_client})
         # @param build [BuildIdentity] this reader's build
         # @param manifest [Hash, nil] a manifest to describe instead (specs);
         #   a pinned reader's caller uses {.pinned}
         # @return [ServedIdentity]
-        def read(index_dir, cwd: Dir.pwd, build: BuildIdentity.current, manifest: nil)
+        def read(index_dir, cwd: nil, build: BuildIdentity.current, manifest: nil)
           generation = Woods::Generation.new(output_dir: index_dir)
           marker = current_marker(generation)
           manifest ||= read_manifest(generation, marker) if marker
-          new(index_dir: index_dir, marker: marker, manifest: manifest, cwd: cwd, build: build)
+          new(index_dir: index_dir, marker: marker, manifest: manifest, build: build, **client_for(cwd))
         end
 
         # The identity of what a pinned reader serves: its loaded generation's
@@ -62,12 +140,12 @@ module Woods
         # @param index_dir [String, Pathname]
         # @param reader [#loaded_marker]
         # @param manifest [Hash, nil] the manifest the caller read inside the pin
-        # @param cwd [String]
+        # @param cwd [String, nil] as for {.read}
         # @param build [BuildIdentity]
         # @return [ServedIdentity]
-        def pinned(index_dir, reader:, manifest:, cwd: Dir.pwd, build: BuildIdentity.current)
+        def pinned(index_dir, reader:, manifest:, cwd: nil, build: BuildIdentity.current)
           marker = reader.loaded_marker || Woods::Generation::UNPUBLISHED
-          new(index_dir: index_dir, marker: marker, manifest: manifest, cwd: cwd, build: build)
+          new(index_dir: index_dir, marker: marker, manifest: manifest, build: build, **client_for(cwd))
         end
 
         # The checkout containing +path+: the nearest ancestor holding a
@@ -128,6 +206,24 @@ module Woods
 
         private
 
+        def client_for(cwd)
+          cwd ? { cwd: cwd } : launch_client
+        end
+
+        def absolute?(path)
+          path.is_a?(String) && path.start_with?('/')
+        end
+
+        # Lexical only: collapses repeated and trailing slashes and dot
+        # segments, follows no symlink.
+        def normalize_prefix(path)
+          File.expand_path(path.sub(%r{\A/+}, '/'))
+        end
+
+        def within_prefix?(path, prefix)
+          prefix == '/' || path == prefix || path.start_with?("#{prefix}/")
+        end
+
         # Git metadata bytes as stripped UTF-8, independent of the locale.
         def text(bytes)
           bytes.to_s.dup.force_encoding(Encoding::UTF_8).scrub('').strip
@@ -164,15 +260,34 @@ module Woods
       # @param index_dir [String, Pathname]
       # @param marker [Woods::Generation::Marker]
       # @param manifest [Hash, nil]
-      # @param cwd [String]
+      # @param cwd [String] the directory the client checkout is resolved from
       # @param build [BuildIdentity]
-      def initialize(index_dir:, marker:, manifest:, cwd:, build:)
+      # @param declared_client_root [String, nil] the client root a launch
+      #   declared, as the client names it
+      # @param client_root_map [Array<Array(String, String)>] bind mounts
+      #   between the client's file system and this one; empty when the client
+      #   root is read here as given
+      # @param client_root_map_error [String, nil] why the map was refused
+      def initialize(index_dir:, marker:, manifest:, cwd:, build:, declared_client_root: nil, client_root_map: [],
+                     client_root_map_error: nil)
         @index_dir = index_dir.to_s
         @marker = marker || Woods::Generation::UNPUBLISHED
         @manifest = manifest.is_a?(Hash) ? manifest : {}
-        @cwd = cwd
         @build = build
+        @declared_client_root = declared_client_root
+        @client_root_map_error = client_root_map_error
+        mapped = !declared_client_root.nil? && !client_root_map.empty?
+        @mapped_client_root, @client_root_map_entry =
+          (self.class.map_client_root(declared_client_root, client_root_map) if mapped)
+        @client_root_unmapped = mapped && @mapped_client_root.nil?
+        # A map entry claims the mount holds the session's checkout; a derived
+        # path missing here shows the claim does not hold for this session.
+        @client_root_mapped_missing = !@mapped_client_root.nil? && !File.exist?(@mapped_client_root)
+        @cwd = @mapped_client_root || (@client_root_unmapped ? nil : cwd)
       end
+
+      # @return [String, nil] the client root the launch declared
+      attr_reader :declared_client_root
 
       # @return [String, nil] the checkout the index recorded as its source
       def recorded_root
@@ -192,7 +307,7 @@ module Woods
       def recorded_checkout
         return @recorded_checkout if defined?(@recorded_checkout)
 
-        @recorded_checkout = self.class.checkout_root(recorded_root) || self.class.checkout_root(@index_dir)
+        @recorded_checkout = self.class.checkout_root(recorded_root) || self.class.checkout_root(index_location)
       end
 
       # @return [String, nil] `recorded_root` or `index_location`
@@ -253,12 +368,14 @@ module Woods
       def client_matches
         case match_reason
         when 'same_checkout' then true
-        when 'different_checkout' then false
+        when 'different_checkout', 'client_root_unmapped', 'client_root_mapped_missing' then false
         end
       end
 
-      # @return [String] same_checkout, different_checkout, root_not_recorded,
-      #   client_outside_checkout or recorded_root_unreachable
+      # @return [String] same_checkout, different_checkout, client_root_unmapped,
+      #   client_root_mapped_missing, root_not_recorded,
+      #   recorded_root_unreachable, client_outside_checkout or
+      #   client_root_unresolved
       def match_reason
         @match_reason ||= compute_match_reason
       end
@@ -279,27 +396,33 @@ module Woods
           woods_version: string(@manifest['woods_version']), woods_revision: compatibility.writer_revision,
           woods_revision_dirty: compatibility.writer_dirty,
           client_matches: client_matches, client_match_reason: match_reason,
-          client_root: client_root, client_branch: client_branch, branch_matches: branch_matches,
+          client_root: client_root, client_root_declared: @declared_client_root,
+          client_root_map_entry: @client_root_map_entry&.join('='), client_root_mapped_to: @mapped_client_root,
+          client_branch: client_branch, branch_matches: branch_matches,
           mismatch_allowed: client_matches == false ? self.class.allow_mismatch? : nil,
-          build: compatibility.to_h
+          warnings: warnings, build: compatibility.to_h
         }
       end
 
-      # The line `initialize` instructions lead with.
+      # The line `initialize` instructions lead with. A declared client root
+      # that matches names the checkout as the client knows it (a host path),
+      # beside the path this process reads it at.
       #
       # @return [String]
       def summary
-        "Serving the index of #{root_name || 'an unrecorded checkout'}" \
-          "#{" (#{recorded_checkout || recorded_root})" if recorded_checkout || recorded_root}, " \
+        "Serving the index of #{served_name || 'an unrecorded checkout'}" \
+          "#{" (#{served_location})" if served_location}, " \
           "branch #{branch || 'unknown or detached'}, " \
           "generation #{generation || 'none'}#{", updated #{generation_updated_at}" if generation_updated_at}, " \
           "written by #{writer_label}."
       end
 
-      # @return [Array<String>] mismatch and build warnings, most severe first
+      # @return [Array<String>] mismatch, unknown-checkout and build warnings,
+      #   most severe first
       def warnings
         list = []
         list << root_warning if client_matches == false
+        list << unknown_checkout_warning if client_matches.nil?
         list << branch_warning if branch_matches == false
         list << compatibility.message if compatibility.mismatch?
         list
@@ -307,6 +430,19 @@ module Woods
 
       # @return [String] why `woods-mcp-start` refuses
       def refusal_message
+        if @client_root_mapped_missing
+          return "The client root #{@declared_client_root} maps to #{@mapped_client_root} through " \
+                 "#{@client_root_map_entry.join('=')}, but that path does not exist here: the mount does not hold " \
+                 "the session's checkout, so this index cannot be its own. Fix the map, or pass --allow-mismatch " \
+                 "(#{ALLOW_ENV}=1) to serve this index anyway."
+        end
+        if @client_root_unmapped
+          return "The client root #{@declared_client_root} is under no --client-root-map prefix " \
+                 "(#{CLIENT_ROOT_MAP_ENV}): no mount covers it, so the session's checkout is not visible to this " \
+                 'server and this index cannot be its own. Map the mount that holds it, or pass --allow-mismatch ' \
+                 "(#{ALLOW_ENV}=1) to serve this index anyway."
+        end
+
         "This index was written for the checkout at #{recorded_checkout}, but the server was launched in " \
           "#{client_root}. Point the server at this checkout's own index, or pass --allow-mismatch " \
           "(#{ALLOW_ENV}=1) to serve it anyway."
@@ -325,8 +461,95 @@ module Woods
       end
 
       def root_warning
+        if @client_root_unmapped || @client_root_mapped_missing
+          why = if @client_root_unmapped
+                  'is under no --client-root-map prefix'
+                else
+                  "maps to #{@mapped_client_root}, which does not exist here"
+                end
+          return "The client root #{@declared_client_root} #{why}; answers are for " \
+                 "#{recorded_checkout || @index_dir}, not the session's checkout."
+        end
+
         "This index describes #{recorded_checkout}, not the launch checkout #{client_root}; answers are for that " \
           'checkout.'
+      end
+
+      # One line for either side, or both, that cannot be determined.
+      def unknown_checkout_warning
+        if recorded_checkout && !@declared_client_root
+          return "The launch directory #{@cwd} is not inside a git checkout, so this index was not compared with " \
+                 "the client's checkout (pass --client-root to compare them)."
+        end
+
+        sides = []
+        sides << unknown_index_side unless recorded_checkout
+        sides << unknown_client_side unless client_root
+        "Cannot tell whether this index belongs to the client's checkout: #{sides.join('; ')}"
+      end
+
+      def unknown_index_side
+        unless recorded_root
+          return "the index's checkout is unknown: it records no root, and the index directory #{@index_dir} " \
+                 'is not inside a git checkout'
+        end
+
+        "the index's checkout is unknown: it records root #{recorded_root}, and neither that nor the index " \
+          "directory #{@index_dir} is inside a git checkout reachable here"
+      end
+
+      def unknown_client_side
+        unless @declared_client_root
+          return "the client's checkout is unknown: the launch directory #{@cwd} is not inside a git checkout " \
+                 "(pass --client-root with the session's checkout)"
+        end
+
+        if @client_root_map_error
+          return "the client's checkout is unknown: #{CLIENT_ROOT_MAP_ENV} is malformed (#{@client_root_map_error})"
+        end
+        if @mapped_client_root
+          return "the client's checkout is unknown: the client root #{@declared_client_root}, mapped to " \
+                 "#{@mapped_client_root} through #{@client_root_map_entry.join('=')}, is not inside a git checkout here"
+        end
+
+        "the client's checkout is unknown: the client root #{@declared_client_root} does not resolve to a git " \
+          'checkout here (pass --client-root-map with the mount that makes it visible)'
+      end
+
+      # A client root read through a --client-root-map entry that matched: the
+      # index's checkout is the one the client names by that host path.
+      def mapped_match?
+        @mapped_client_root && client_matches == true
+      end
+
+      def served_name
+        mapped_match? ? File.basename(host_checkout) : root_name
+      end
+
+      def served_location
+        return "#{host_checkout}, mapped to #{recorded_checkout}" if mapped_match?
+
+        recorded_checkout || recorded_root
+      end
+
+      # The client's checkout as the client names it: the declared client root
+      # less the path from the checkout down to the session's directory.
+      def host_checkout
+        below = Pathname.new(File.realpath(@mapped_client_root)).relative_path_from(Pathname.new(client_root)).to_s
+        return @declared_client_root if below == '.'
+
+        host = Pathname.new(self.class.send(:normalize_prefix, @declared_client_root))
+        below.split('/').size.times { host = host.dirname }
+        host.to_s
+      rescue SystemCallError, ArgumentError
+        @declared_client_root
+      end
+
+      # The index directory, or its nearest existing ancestor while no index
+      # has been written there yet.
+      def index_location
+        Pathname.new(File.expand_path(@index_dir)).ascend { |dir| return dir.to_s if dir.directory? }
+        nil
       end
 
       def branch_warning
@@ -334,10 +557,15 @@ module Woods
       end
 
       def compute_match_reason
+        # Before the index side: whatever this index is, it cannot be the
+        # session's when no mount covers the session's checkout.
+        return 'client_root_unmapped' if @client_root_unmapped
+        return 'client_root_mapped_missing' if @client_root_mapped_missing
+
         unless recorded_checkout
           return recorded_root ? 'recorded_root_unreachable' : 'root_not_recorded'
         end
-        return 'client_outside_checkout' unless client_root
+        return @declared_client_root ? 'client_root_unresolved' : 'client_outside_checkout' unless client_root
 
         # Compare checkouts, not paths: a worktree nested inside another
         # checkout is still its own checkout.

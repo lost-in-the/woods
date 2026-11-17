@@ -7,6 +7,9 @@ module Woods
     class Installation
       # Restricts automatic edits to explicit, verified startup arrangements.
       class Options
+        # The task the wrapper runs unless setup selects another.
+        DEFAULT_CHILD_COMMAND = %w[bin/rails woods:watch].freeze
+
         attr_reader :root, :mode, :operation, :child_command, :manager_command, :procfile
 
         # @param root [String] application root
@@ -15,7 +18,7 @@ module Woods
           @root = File.realpath(root)
           @mode = options.fetch(:mode, nil)
           @operation = options.fetch(:operation, 'setup')
-          @child_command = argv(options.fetch(:child_command, %w[bin/rails woods:watch]))
+          @child_command = argv(options.fetch(:child_command, DEFAULT_CHILD_COMMAND))
           @manager_command = options[:manager_command] && argv(options[:manager_command])
           @procfile = options.fetch(:procfile, 'Procfile.dev')
           @environment = options.fetch(:environment, ENV)
@@ -43,6 +46,18 @@ module Woods
           { 'mode' => mode, 'child_command' => child_command,
             'manager_command' => mode == 'procfile' ? manager_command : nil,
             'procfile' => mode == 'procfile' ? procfile : nil }
+        end
+
+        # The generator command that updates this selection. `--operation
+        # update` refuses without `--mode`, and procfile mode also needs its
+        # Procfile and Foreman command.
+        #
+        # @return [String] shell-quoted command line
+        def update_command
+          words = %w[bin/rails generate woods:watch --operation update --mode] << mode
+          words += ['--procfile', procfile, '--manager-command', Shellwords.join(manager_command)] if mode == 'procfile'
+          words += ['--child-command', Shellwords.join(child_command)] unless child_command == DEFAULT_CHILD_COMMAND
+          Shellwords.join(words)
         end
 
         # @return [String] truthful startup handoff, separate from validation evidence

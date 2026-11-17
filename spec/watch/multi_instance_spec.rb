@@ -35,7 +35,7 @@ RSpec.describe 'Watch daemon multi-instance operation' do
         Woods::Generation.new(output_dir: output_dir).bump!(reason: 'incremental')
         [marker]
       end
-      allow(stub).to receive(:extract_all).and_return({})
+      allow(stub).to receive(:extract_all) { Woods::Generation.new(output_dir: output_dir).bump!(reason: 'full') && {} }
     end
   end
 

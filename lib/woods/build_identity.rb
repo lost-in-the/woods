@@ -2,6 +2,7 @@
 
 require 'open3'
 require_relative 'version'
+require_relative 'git_command'
 require_relative 'build_comparison'
 
 module Woods
@@ -20,16 +21,18 @@ module Woods
   # a revision is asked for, and a released gem never does.
   #
   # Loaded without the rest of the library by `woods-mcp-start`, so it
-  # requires nothing beyond the standard library and the version constant.
+  # requires nothing beyond the standard library, the version constant and
+  # the dependency-free GitCommand.
   class BuildIdentity
     # The directory this file's gem was loaded from.
     GEM_ROOT = File.expand_path('../..', __dir__)
 
     # Clear repository overrides an extraction may carry (WOODS_GIT_DIR is
     # mapped onto these), so `git -C <gem root>` asks the gem's own
-    # repository, never the application's.
+    # repository, never the application's. A path gem's checkout is one a
+    # developer works in, so the status read skips its index lock too.
     GIT_ENV = { 'GIT_DIR' => nil, 'GIT_WORK_TREE' => nil, 'GIT_INDEX_FILE' => nil,
-                'GIT_COMMON_DIR' => nil, 'GIT_OBJECT_DIRECTORY' => nil }.freeze
+                'GIT_COMMON_DIR' => nil, 'GIT_OBJECT_DIRECTORY' => nil }.merge(GitCommand::CHILD_ENV).freeze
 
     # Paths whose uncommitted changes make a checkout build dirty.
     BUILD_PATHS = %w[lib exe woods.gemspec].freeze

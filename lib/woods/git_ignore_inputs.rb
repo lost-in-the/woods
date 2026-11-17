@@ -35,7 +35,8 @@ module Woods
     # @param root [String] application root
     # @return [GitIgnoreInputs, nil] nil when Git cannot name them
     def self.resolve(root)
-      out, _err, status = Open3.capture3(*GitCommand.argv(root, 'rev-parse', '--git-path', 'index',
+      out, _err, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                         *GitCommand.argv(root, 'rev-parse', '--git-path', 'index',
                                                           '--git-path', 'info/exclude', '--git-path', 'config',
                                                           '--git-path', 'config.worktree'))
       return unless status.success?
@@ -123,7 +124,8 @@ module Woods
     def excludes_file(config)
       return @excludes_file if @excludes_config == config
 
-      out, _err, status = Open3.capture3(*GitCommand.argv(@root, 'config', '--path', '--get', 'core.excludesFile'))
+      out, _err, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                         *GitCommand.argv(@root, 'config', '--path', '--get', 'core.excludesFile'))
       @excludes_config = config
       @excludes_file = status.success? ? File.expand_path(out.chomp, @root) : xdg_file('ignore')
     rescue SystemCallError

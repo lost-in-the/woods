@@ -105,6 +105,57 @@ RSpec.describe Woods::GemMapper do
     end
   end
 
+  # A child forked inside the publish block inherits the stage and the lock
+  # and unwinds publish's stage cleanup and with_lock's release. Both belong
+  # to the parent, which must still promote and publish.
+  describe 'a child forked while the self-map is staged', if: Process.respond_to?(:fork) do
+    { 'returns normally' => :return, 'raises' => :raise, 'calls exit!' => :exit! }.each do |exit_kind, mode|
+      it "leaves the parent's stage and lock alone when the child #{exit_kind}, and the parent still publishes" do
+        Dir.mktmpdir('woods_self_map_fork') do |out|
+          lock_path = File.join(out, "#{Woods::GemMapPublication::LOCK_NAME}.lock")
+          seen = publish_with_child(Woods::GemMapPublication.new(out), mode) do |stage|
+            { stage_kept: File.file?(File.join(stage, 'parent.json')), lock_kept: File.exist?(lock_path) }
+          end
+
+          expect(seen).to eq(stage_kept: true, lock_kept: true)
+          expect(Woods::Generation.new(output_dir: out).current.number).to eq(1)
+          expect(File.file?(File.join(out, Woods::PayloadStore.name_for(1), 'parent.json'))).to be(true)
+          expect(Dir.children(File.join(out, 'payloads')).grep(/\A\.stage-/)).to be_empty
+          expect(File.exist?(lock_path)).to be(false)
+        end
+      end
+    end
+
+    # Forks inside the publish block. The child leaves as +mode+ says and is
+    # stopped before RSpec's cleanup; the parent yields the stage once the
+    # child is gone and returns what the block saw.
+    def publish_with_child(publication, mode)
+      seen = nil
+      in_child = false
+      publication.with_lock do
+        publication.publish do |stage|
+          File.write(File.join(stage, 'parent.json'), '{}')
+          child = fork
+          in_child = child.nil?
+          next leave_publish(mode) if in_child
+
+          Process.wait(child)
+          seen = yield stage
+        end
+      end
+      seen
+    rescue StandardError
+      raise unless in_child
+    ensure
+      exit!(0) if in_child
+    end
+
+    def leave_publish(mode)
+      exit!(0) if mode == :exit!
+      raise 'the child failed' if mode == :raise
+    end
+  end
+
   # Two self-map writers are ordinary (`bin/woods-self-mcp` refreshes in the
   # background). One whose lock is taken over before it publishes must change
   # nothing its successor owns.

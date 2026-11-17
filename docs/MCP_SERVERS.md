@@ -70,6 +70,114 @@ see [automatic maintenance](AUTOMATIC_MAINTENANCE.md).
 manifest; `server.version` identifies the running MCP reader. Missing writer
 provenance is `null`. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).
 
+### Launch for the current checkout (`--checkout`)
+
+`woods-mcp-start --checkout` takes no index path.
+It serves the index of the checkout it is started in.
+That is the nearest directory above the working directory that holds `.git`,
+so a linked worktree is its own checkout and never serves the main checkout's index.
+The index is `tmp/woods` in that checkout, or `WOODS_OUTPUT` resolved against the checkout root.
+`WOODS_MCP_CHECKOUT=1` is the same switch.
+
+- Outside any checkout it exits 1 and says to pass the index directory as a path instead.
+- An index path as well (an argument or `WOODS_DIR`) is a usage error.
+- A `WOODS_OUTPUT` outside the checkout is a usage error.
+
+With no absolute path, the configuration can be committed,
+provided the client starts project servers in the project directory:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "command": "bundle",
+      "args": ["exec", "woods-mcp-start", "--checkout", "--await-index"]
+    }
+  }
+}
+```
+
+`spec/mcp/await_index_cli_spec.rb` runs this launch (`bundle exec woods-mcp-start --checkout --await-index`)
+in a checkout with no index yet, then publishes an index while it runs.
+That a given client starts a project server in the project directory without a `cwd` was not verified.
+Check your client's documentation, or keep `cwd`.
+`--await-index` is optional: see [starting before the index exists](#starting-before-the-index-exists---await-index).
+
+### Starting before the index exists (`--await-index`)
+
+By default a missing index is a failed launch.
+The server exits 1 before `initialize`, and the client shows no Woods tools.
+With `--await-index` (or `WOODS_MCP_AWAIT_INDEX=1`, on `woods-mcp-start` or `woods-mcp`),
+a directory with no published index, or no directory at all, is not an error:
+
+- The server completes the handshake and registers the same tools, in the same order, as over an index.
+- The instructions say that no index was published when the server started.
+- `woods_status` reports `ready: false` and `index.state: "awaiting_index"`,
+  with `watching` (the index directory), `awaiting_since` and `bootstrap`.
+- Every other tool answers a non-error, retryable result.
+  `structuredContent.data.status` is `building`, `retryable` is `true` and `retry_after_seconds` is set.
+  It carries no results, so it never passes for an empty answer.
+- A resource read is refused with `error_code: "index_building"`.
+
+When a generation is published, the next call serves it, with no restart.
+The reader adopts the first generation as it adopts any new one.
+A `generation.json` that names a payload not yet on disk still reads as `building`.
+A `generation.json` that exists but is malformed, or names a payload outside the index directory
+or one that is not a directory, is damage, as it is to a strict launch.
+`woods_status` reports `index.state: "unusable_publication"`,
+and every other tool answers the non-retryable `corrupt_artifact` error.
+After the first generation, damage to a later one is reported the same way, never as `building`.
+
+**Each generation is checked against the client's checkout.**
+A strict launch refuses another checkout's index before the server starts.
+An awaiting server cannot, since nothing is recorded yet.
+So it runs the same check on every call, with the same inputs and the same override.
+The check reads the generation the call is pinned to, so the generation judged is the one the call reads,
+even when another is published meanwhile.
+It follows the reader, not the `root` argument: a call routed with a `root` that resolves to the launch index
+is judged too, while a route to another worktree's own index is not.
+`reload` judges the generation it adopted before its answer describes it.
+When a generation records another checkout and the mismatch is not allowed:
+
+- every tool but `woods_status` answers a non-retryable error, `error_code: "index_checkout_mismatch"`,
+  whose text names both checkouts and the override;
+- a resource read is refused with the same `error_code`;
+- `woods_status` reports `ready: false` and a `refusal` (`error_code`, `retryable: false`, `message`).
+
+A later generation that records the client's checkout is served again.
+`--allow-mismatch` (`WOODS_MCP_ALLOW_MISMATCH=1`) serves it with the usual warning.
+
+`bootstrap` is what `<index dir>/.bootstrap.json` says, if a launcher that started the first extraction wrote one.
+The file is untrusted.
+The server opens it without following a symlink and without blocking, and reads it only if it is a regular file.
+It reads at most 4 KiB and reports only `started_at`, `command` and `state`,
+each as a string of at most 256 characters, with `readable: true`.
+An oversized or malformed file is `readable: false` with `reason` `too_large` or `malformed`.
+A symlink, a FIFO or any other kind of file is no report (`bootstrap: null`).
+Woods itself never writes this file, and `--await-index` starts no extraction.
+
+**Restart to add what startup could not wire.**
+Startup chooses the snapshot store and the semantic retriever once.
+When the first extraction makes either possible, `woods_status` lists it under `restart_recommended`:
+
+| `feature` | When | `reason` |
+|---|---|---|
+| `snapshots` | `woods.sqlite3` now exists, or `WOODS_SNAPSHOTS=true` and the index directory now exists | snapshot tools become available after a restart |
+| `semantic_retrieval` | an embedding config (`woods.json`) that a restarted server would accept now exists, and no retriever was wired at startup | semantic retrieval becomes available after a restart |
+
+A restarted server registers the snapshot tools and builds the semantic retriever as any server does.
+`WOODS_RETRIEVAL_MODE=lexical` needs no restart: it reads the first generation as it appears.
+
+Other limits of a server started before its index:
+
+- It does no cache warm-up (`hydration.warmup` is `none`); caches fill on first use.
+- No request creates the index directory, `WOODS_SNAPSHOTS=true` included.
+- A call with `root` is refused (`no_repository`) while the index directory does not exist.
+- `woods-mcp-http` does not take the flag.
+- `woods-mcp --await-index` needs an index path (an argument, `WOODS_DIR` or `WOODS_OUTPUT`): with none it exits 1
+  instead of waiting in the current directory. `woods-mcp-start --checkout` serves the current checkout.
+- A file given as the index directory is refused at startup, with or without the flag.
+
 You can launch the server directly when the client already handles preflight:
 
 ```bash
@@ -108,6 +216,76 @@ Extraction runs inside the Rails container. When Woods is installed only in that
 
 Compose resolves the project from `cwd`; `-T` disables its pseudo-TTY while stdin remains connected to MCP. This server uses the container path and does not require Ruby or Woods on the host.
 
+**A shared container serves the checkout it mounts.**
+Inside the container the launcher's directory and the index's recorded root are the same path,
+so the identity check passes for a session in any other worktree.
+Pass the session's own directory with `--client-root`, and describe the bind mount with `--client-root-map`
+(or `WOODS_MCP_CLIENT_ROOT_MAP`). The committed entry below passes each developer's exported map through, so it
+holds no host path; for the mount below a developer exports
+`WOODS_MCP_CLIENT_ROOT_MAP=/host/src/shop-worktrees=/worktrees`.
+The server reads the client root through the mount and compares that checkout with the index:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+    }
+  }
+}
+```
+
+**Recommended mount: the directory that holds every worktree.**
+Mount the worktrees' parent (here `/host/src/shop-worktrees` at `/worktrees`),
+and run the container in its checkout under that mount (`working_dir: /worktrees/shop`; for an application below
+the checkout root, its directory there).
+The map is a fact about the mount, so it is the same for every session:
+
+| Session directory | Read in the container as | Result |
+|---|---|---|
+| `/host/src/shop-worktrees/shop` | `/worktrees/shop` | served, no warning |
+| `/host/src/shop-worktrees/shop-topic` | `/worktrees/shop-topic` | refused: another checkout |
+| `/host/elsewhere` | (no entry covers it) | refused: no mount covers it |
+| `/host/src/shop-worktrees/not-mounted-yet` | `/worktrees/not-mounted-yet`, missing | refused: mapped path does not exist here |
+
+**A single-checkout map is valid, and refuses other worktrees by design.**
+With `--client-root-map /host/src/shop=/app`, a session in `shop` is served
+and a session in `shop-topic` is refused: no mount covers it, so its checkout is not visible here.
+
+How the map works:
+
+- `HOST_PREFIX=CONTAINER_PREFIX`, both absolute.
+  Repeat the flag, or separate entries with `:` in `WOODS_MCP_CLIENT_ROOT_MAP`.
+- Prefixes match whole path segments: `/host/wt-a` covers `/host/wt-a/app` but not `/host/wt-ab`.
+- The longest matching prefix wins, and trailing slashes are ignored.
+- The host side is never resolved on the container's file system: it does not exist there.
+- Prefixes compare case-sensitively, as container file systems do.
+  On macOS, whose default file system ignores case, `/host/Src` does not match a `/host/src` entry:
+  write the entry with the case your shell reports for the session's directory.
+- A mapped path that does not exist in the container is refused like an unmapped one:
+  the mount does not hold that session's checkout.
+  A mapped path that exists but is not inside a git checkout is a warning.
+- `--client-root-map` needs `--client-root`, and `--client-root` may be given once.
+  A `WOODS_MCP_CLIENT_ROOT_MAP` exported for every launch is ignored, with one warning, by a launch that gives no
+  client root.
+- A malformed entry is a usage error at startup.
+- A refusal takes the same override as any other mismatch: `--allow-mismatch` (`WOODS_MCP_ALLOW_MISMATCH=1`).
+
+Without a map, the client root is read as given.
+`--client-root` alone suits a launcher on the same machine as the session.
+A client root that does not exist here, with no map, cannot be determined:
+the server starts, and the instructions and `woods_status` carry one warning that names it.
+`--client-root` must be an absolute path as the client sees it (`WOODS_MCP_CLIENT_ROOT` is the same setting).
+`--checkout` needs the checkout's `.git` entry inside the container; without one, pass the index path instead.
+
+Run by hand inside a `docker run` container with a checkout mounted and no index yet:
+`woods-mcp-start --checkout --await-index --client-root <a host path>` answered `initialize` with the warning,
+`woods_status` with `awaiting_index` and `client_match_reason: "client_root_unresolved"`, and `lookup` with `building`.
+Not run: this `docker compose exec` command line, the compose mount itself, and how a given client expands `$PWD`.
+`spec/mcp/served_identity_spec.rb` covers the launcher for each row above, for the single-checkout map,
+and for segment boundaries, the longest prefix, trailing slashes and malformed entries.
+
 A host-side `bundle exec woods-mcp-start` is also valid, but only when the application bundle is installed on the host and the output is host-visible:
 
 ```text
@@ -137,18 +315,20 @@ Included in Woods `2.1.1`: both stdio servers run the SDK transport through `Woo
 With several checkouts of one repository, a server's name does not say which
 index it serves. The Index Server says so itself:
 
-- **At connect.** `instructions` lead with one line naming the checkout
+- **At connect.** `instructions` lead with any warnings, each prefixed `WARNING:`,
+  then one line naming the checkout
   (directory name and path), the branch the index was extracted on, the
   generation number and its `updated_at`, and the Woods version (and git
-  revision, for a git-loaded build) that wrote the index. Mismatch warnings
-  follow it, each prefixed `WARNING:`. The identity is read once, at startup;
-  the generation can advance while connected.
+  revision, for a git-loaded build) that wrote the index.
+  At the 2,048-byte cap the warnings are kept whole and the other lines are shortened first.
+  The identity is read once, at startup; the generation can advance while connected.
 - **In `woods_status`.** The report leads with `identity`: `root` (recorded
   application root), `repository_root` and `root_name` (the checkout),
   `root_source`, `branch`, `git_sha`, `generation`, `generation_updated_at`,
   `woods_version`, `woods_revision`, `woods_revision_dirty`, then
-  `client_matches`, `client_match_reason`, `client_root`, `client_branch`,
-  `branch_matches`, `mismatch_allowed` and `build` (writer versus reader).
+  `client_matches`, `client_match_reason`, `client_root`, `client_root_declared`,
+  `client_root_mapped_to`, `client_branch`, `branch_matches`, `mismatch_allowed`,
+  `warnings` (the same lines the instructions carry) and `build` (writer versus reader).
   For a call routed with [`root`](MCP_WORKTREE_SETUP.md#one-server-several-worktrees-root),
   the client is that worktree.
 
@@ -159,16 +339,33 @@ a container and read through a bind mount). A checkout is the nearest directory
 holding `.git`, so an application in a subdirectory belongs to the repository
 above it and a worktree nested inside another checkout is its own. The client
 is the checkout containing the launcher's working directory.
+A launcher given `--client-root` (or `WOODS_MCP_CLIENT_ROOT`) uses the checkout containing that directory instead,
+read through the longest matching `--client-root-map` entry when a map is given.
+`client_root_declared`, `client_root_map_entry` and `client_root_mapped_to` report the host path, the entry used
+and the derived path. A matching mapped root names the checkout in the instructions by the host path, for example
+`Serving the index of shop-topic (/host/shop-topic, mapped to /worktrees/shop-topic)`.
+A client root under no entry of a map is a mismatch (`client_match_reason: "client_root_unmapped"`), refused like
+any other, and so is a mapped path missing here (`client_root_mapped_missing`).
+See [the Docker process and path rule](#docker-process-and-path-rule) for why a shared container needs it.
 
 `client_matches` is `true` or `false` when both checkouts are known, and `null`
 when either is not (`client_match_reason` says which: `root_not_recorded`,
-`recorded_root_unreachable`, `client_outside_checkout`).
+`recorded_root_unreachable`, `client_outside_checkout`, `client_root_unresolved`). `client_root_unmapped` and
+`client_root_mapped_missing` are mismatches, so `client_matches` is `false` there.
+
+**An unknown checkout warns.** When either checkout cannot be determined, the server starts,
+and the instructions and `woods_status.identity.warnings` carry one `WARNING:` line.
+It says which side is unknown and why: an index that records no reachable checkout,
+a launch directory outside any checkout, or a client root that does not resolve from the server's process.
+Earlier releases started silently in these cases.
 
 **Root mismatch refuses.** `woods-mcp-start` exits 1 when `client_matches` is
 `false`, naming both checkouts. Pass `--allow-mismatch`, or set
 `WOODS_MCP_ALLOW_MISMATCH=1`, to serve another checkout's index on purpose: the
 launcher then connects with a warning on stderr, and the instructions and
-`woods_status` carry the warning. `woods-mcp` itself never refuses; it reports.
+`woods_status` carry the warning. `woods-mcp` itself never refuses at startup; it reports.
+Started with `--await-index`, it refuses each later generation that records another checkout
+(see [starting before the index exists](#starting-before-the-index-exists---await-index)).
 
 **Branch differences warn.** A branch that differs from the client checkout's is
 a warning, not a refusal: detached HEADs and one worktree per branch are
@@ -298,7 +495,8 @@ response is flushed. On the HTTP transport the warm-up starts as the
 
 The self-map server (`bin/woods-self-mcp`) is the same Index Server, so a
 launch that finds a built map answers `initialize` at once too. A first
-launch still builds the map before the server starts: the Index Server
+launch still builds the map before the server starts: without
+[`--await-index`](#starting-before-the-index-exists---await-index), the Index Server
 cannot boot against a directory that holds no published generation yet.
 
 ### Tools (32 — 16 registered in the packaged default)
