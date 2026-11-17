@@ -653,10 +653,11 @@ writers stopped.
 
 ### Writer stages and lock takeover
 
-Each writer builds its payload in a private stage, `payloads/.stage-<n>-<token>`,
-named with the token of the writer lock it holds. A stage is not a generation:
-readers, pins and retention only consider `gen-<n>`. Ignore stages, and never
-read or copy one.
+Each run builds its payload in a private stage, `payloads/.stage-<n>-<token>-<run>`,
+named with the token of the writer lock it holds and a part unique to the run.
+Two runs in one process that hold the same lock therefore never share a stage.
+A stage is not a generation: readers, pins and retention only consider `gen-<n>`.
+Ignore stages, and never read or copy one.
 
 Moving the stage to `gen-<n>`, replacing `generation.json` and retention all run
 while the writer proves it still owns `extraction.lock`, under the same guard

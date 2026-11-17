@@ -128,15 +128,27 @@ RSpec.describe 'Console SQL against real database dialects', :live_backends do
     end
   end
 
-  it 'masks every copy of a protected column repeated through the row cap on PostgreSQL' do
+  # PostgreSQL keeps repeated names through the row cap, so the refusal is
+  # the redactor's header-identity rule, not a database error.
+  it 'refuses a protected column repeated through the row cap on PostgreSQL' do
     with_policy_server('WOODS_PG_URL') do |server|
       users = WoodsConsoleOutputPolicyContract::TABLES[0]
       result = WoodsConsoleOutputPolicyContract.assert_request!(
-        server, 'console_sql', { sql: "SELECT a.secret, a.secret FROM #{users} a" }
+        server, 'console_sql', { sql: "SELECT a.secret, a.secret FROM #{users} a" }, refused: true
+      )
+      expect(result.to_json).to include('protected column more than once')
+    end
+  end
+
+  it 'masks a single protected column beside a repeated ordinary column on PostgreSQL' do
+    with_policy_server('WOODS_PG_URL') do |server|
+      users = WoodsConsoleOutputPolicyContract::TABLES[0]
+      result = WoodsConsoleOutputPolicyContract.assert_request!(
+        server, 'console_sql', { sql: "SELECT a.secret, a.name, a.name FROM #{users} a" }
       )
       payload = JSON.parse(result.fetch('content').first.fetch('text'))
-      expect(payload.fetch('columns')).to eq(%w[secret secret])
-      expect(payload.fetch('rows')).to all(eq(['[REDACTED]', '[REDACTED]']))
+      expect(payload.fetch('columns')).to eq(%w[secret name name])
+      expect(payload.fetch('rows')).to contain_exactly(%w[[REDACTED] ordinary ordinary], %w[[REDACTED] second second])
     end
   end
 end

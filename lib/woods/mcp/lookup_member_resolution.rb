@@ -447,7 +447,7 @@ module Woods
             parsed = Woods::ParseCache.parse(source)
             return identifier if parsed.errors.any?
 
-            top = declarations(parsed.value.statements, nil, [])
+            top = declarations(parsed.value.statements, [], [], DeclarationName.new)
             return identifier if top.any? { |(_, inner)| inner.include?(identifier) }
 
             suffixes = top.map(&:first).select { |name| identifier.end_with?("::#{name}") }
@@ -455,16 +455,16 @@ module Woods
           end
 
           # [top-level declaration name, every qualified name declared in it]
-          def declarations(node, owner, found)
+          def declarations(node, nesting, found, names)
             ConcernClassMethods.statements(node).each do |statement|
               next unless statement.is_a?(Prism::ModuleNode) || statement.is_a?(Prism::ClassNode)
 
-              inner = MethodTable::Names.qualified(owner, statement.constant_path)
+              inner = MethodTable::Names.declared(names, nesting, statement.constant_path)
               next unless inner
 
-              found << [inner, []] if owner.nil?
+              found << [inner, []] if nesting.empty?
               found.last[1] << inner
-              declarations(statement.body, inner, found)
+              declarations(statement.body, [*nesting, inner], found, names)
             end
             found
           end
@@ -1003,15 +1003,15 @@ module Woods
 
           # The body of the class or module named +identifier+, and the
           # qualified names of the lexical scopes around and including it.
-          def body_of(node, scopes, identifier)
+          def body_of(node, scopes, identifier, names = DeclarationName.new)
             ConcernClassMethods.statements(node).each do |statement|
               next unless statement.is_a?(Prism::ModuleNode) || statement.is_a?(Prism::ClassNode)
 
-              inner = MethodTable::Names.qualified(scopes.first, statement.constant_path)
+              inner = MethodTable::Names.declared(names, scopes.reverse, statement.constant_path)
               next unless inner
               return [statement.body, [inner, *scopes]] if inner == identifier
 
-              found = body_of(statement.body, [inner, *scopes], identifier)
+              found = body_of(statement.body, [inner, *scopes], identifier, names)
               return found if found.first
             end
             [nil, scopes]

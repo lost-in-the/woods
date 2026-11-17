@@ -2,6 +2,7 @@
 
 require 'prism'
 require_relative 'parse_cache'
+require_relative 'declaration_name'
 require_relative 'file_lines'
 
 module Woods
@@ -226,6 +227,8 @@ module Woods
 
       def initialize
         @entries = []
+        @names = DeclarationName.new
+        @nesting = []
       end
 
       # @param root [Prism::Node]
@@ -280,10 +283,19 @@ module Woods
           own = node.expression.is_a?(Prism::SelfNode) && scope == 'instance'
           visit_body(node.body, owner, scope: 'singleton') if own
         else
-          inner = Names.qualified(owner, node.constant_path)
-          visit_body(node.body, inner, scope: 'instance') if inner
+          inner = Names.declared(@names, @nesting, node.constant_path)
+          inside(inner) { visit_body(node.body, inner, scope: 'instance') } if inner
         end
         []
+      end
+
+      # Visit a class or module body with its qualified name as the
+      # innermost lexical scope.
+      def inside(name)
+        @nesting.push(name)
+        yield
+      ensure
+        @nesting.pop
       end
 
       def call_entries(node, owner, scope, state)
@@ -437,12 +449,17 @@ module Woods
     module Names
       module_function
 
-      def qualified(owner, path)
+      # The qualified name of the module or class a declaration at +path+
+      # makes inside +nesting+, as Ruby's constant lookup names it, or nil
+      # for a path with a part that is not a constant.
+      #
+      # @param names [Woods::DeclarationName] the declarations read so far
+      # @param nesting [Array<String>] enclosing qualified names, outermost first
+      # @param path [Prism::Node] the declaration's constant path
+      # @return [String, nil]
+      def declared(names, nesting, path)
         name = constant_name(path)
-        return nil unless name
-        return name.delete_prefix('::') if name.start_with?('::')
-
-        owner ? "#{owner}::#{name}" : name
+        name && names.declare(name, nesting)
       end
 
       def constant_name(node)

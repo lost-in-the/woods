@@ -438,6 +438,16 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(identifiers).to include('Domain::Container::Parser', 'Domain::Container::Renderer')
   end
 
+  it 'names compact declarations inside their namespace modules as the constants Zeitwerk loads' do
+    constants = [Ledger::PostingService, Ledger::Reports::Summary, Ledger::Total]
+    published = units_in(:services).select { |unit| unit['file_path'].include?('app/services/ledger/') }
+
+    expect(published.map { |unit| unit['identifier'] }).to match_array(constants.map(&:name))
+    published.each do |unit|
+      expect(unit.dig('metadata', 'methods').map { |entry| entry['owner'] }).to eq([unit['identifier']])
+    end
+  end
+
   it 'resolves the Post -> Comment association as a dependency edge' do
     post_unit = find_unit(:models, 'Post')
     expect(post_unit).not_to be_nil

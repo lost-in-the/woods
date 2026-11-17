@@ -177,6 +177,7 @@ lib/
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
 │   ├── published_index.rb              # Read-only reader over one published generation (RuboCop cops, gate scripts)
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
+│   ├── declaration_name.rb             # Qualified name of each class/module declaration, by Ruby's lexical lookup
 │   ├── retriever.rb                     # Retriever orchestrator (strategy dispatch + type-rank reporting)
 │   ├── diagrams.rb                      # Mermaid per unit on demand (neighbourhood/schema/lifecycle/impact), cached per generation; diagrams/ holds the builders
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps

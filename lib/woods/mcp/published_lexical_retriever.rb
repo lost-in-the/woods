@@ -105,8 +105,29 @@ module Woods
         raise Retriever::StoreError, "lexical index read failed: #{e.class}: #{e.message}"
       end
 
-      def install_snapshot!(snapshot)
-        @snapshot_mutex.synchronize { @snapshot = snapshot }
+      # Serve +candidate+'s built generation, taking its whole build state
+      # with it: the snapshot, the index and retriever it built, and the
+      # decoded units the next generation reuses. The corpus this retriever
+      # built before is then released, and the next build reuses the
+      # installed one.
+      #
+      # @param candidate [PublishedLexicalRetriever] a warmed retriever over the same index
+      # @return [void]
+      def install_from!(candidate)
+        snapshot, index, retriever, reuse = candidate.build_state
+        @snapshot_mutex.synchronize do
+          @snapshot = snapshot
+          @last_index = index
+          @last_retriever = retriever
+          @reuse = reuse
+        end
+      end
+
+      protected
+
+      # @return [Array] snapshot, last index, last retriever and reuse table
+      def build_state
+        @snapshot_mutex.synchronize { [@snapshot, @last_index, @last_retriever, @reuse] }
       end
 
       private
