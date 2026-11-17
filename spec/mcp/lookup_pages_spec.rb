@@ -255,7 +255,7 @@ RSpec.describe Woods::MCP::LookupPages do
       end
 
       def configure_limit(chars)
-        stub_const('ENV', ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => chars.to_s))
+        replace_env(ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => chars.to_s))
       end
 
       def call_over_the_wire(format, arguments)
@@ -321,13 +321,13 @@ RSpec.describe Woods::MCP::LookupPages do
     end
 
     it 'pages by default at the configured limit' do
-      stub_const('ENV', ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => '4000'))
+      replace_env(ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => '4000'))
 
       expect(lookup.meta.dig(:lookup_page, :last_char)).to be <= 4000
     end
 
     it 'does not page when the configured limit is 0' do
-      stub_const('ENV', ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => '0'))
+      replace_env(ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => '0'))
 
       expect(text(lookup)).not_to include('lookup page')
     end

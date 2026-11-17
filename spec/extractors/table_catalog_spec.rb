@@ -139,6 +139,125 @@ RSpec.describe Woods::Extractors::TableCatalog do
     end
   end
 
+  describe '.schema_readability' do
+    def listing_pool(name, data_sources, replica: false)
+      connection = double("Connection(#{name})", data_sources: data_sources)
+      pool = double("Pool(#{name})", db_config: double('DbConfig', name: name, replica?: replica))
+      allow(pool).to receive(:with_connection).and_yield(connection)
+      pool
+    end
+
+    def failing_pool(name, error)
+      pool = double("Pool(#{name})", db_config: double('DbConfig', name: name, replica?: false))
+      allow(pool).to receive(:with_connection).and_raise(error)
+      pool
+    end
+
+    def states(classes)
+      described_class.schema_readability(connection_classes: classes).map { |db| db.slice(:name, :state) }
+    end
+
+    it 'reads a database that lists a table its models read' do
+      primary = listing_pool('primary', %w[widgets schema_migrations])
+
+      expect(states([model_double('Widget', 'widgets', primary)]))
+        .to eq([{ name: 'primary', state: 'readable' }])
+    end
+
+    it 'keeps a database readable when one model table is absent beside a table that exists' do
+      primary = listing_pool('primary', %w[widgets])
+      classes = [model_double('Widget', 'widgets', primary), model_double('Gadget', 'gadgets', primary)]
+
+      expect(states(classes)).to eq([{ name: 'primary', state: 'readable' }])
+    end
+
+    it 'reports a database that holds only the Rails bookkeeping tables as empty' do
+      primary = listing_pool('primary', %w[schema_migrations ar_internal_metadata])
+
+      expect(states([model_double('Widget', 'widgets', primary)]))
+        .to eq([{ name: 'primary', state: 'empty' }])
+    end
+
+    it 'counts a view as something the database holds' do
+      primary = listing_pool('primary', %w[widget_totals])
+
+      expect(states([model_double('WidgetTotal', 'widget_totals', primary)]).first[:state]).to eq('readable')
+    end
+
+    it 'reports a database whose listing raises as unreachable, with the error for the log' do
+      primary = failing_pool('primary', StandardError.new('connection refused'))
+
+      result = described_class.schema_readability(connection_classes: [model_double('Widget', 'widgets', primary)])
+
+      expect(result.map { |db| db.slice(:name, :state) }).to eq([{ name: 'primary', state: 'unreachable' }])
+      expect(result.first[:error]).to eq('StandardError: connection refused')
+    end
+
+    it 'reports a model with no connection pool as unreachable' do
+      widget = model_double('Widget', 'widgets', nil)
+      allow(widget).to receive(:connection_pool).and_raise(StandardError, 'No connection pool')
+
+      expect(states([widget])).to eq([{ name: nil, state: 'unreachable' }])
+    end
+
+    it 'reports each database on its own when one of two is unreachable' do
+      primary = listing_pool('primary', %w[widgets])
+      billing = failing_pool('billing', StandardError.new('database not found'))
+      classes = [model_double('Widget', 'widgets', primary), model_double('Invoice', 'invoices', billing)]
+
+      expect(states(classes)).to eq([{ name: 'billing', state: 'unreachable' },
+                                     { name: 'primary', state: 'readable' }])
+    end
+
+    it 'merges the pools on one database, reporting the worst of them' do
+      readable = listing_pool('primary', %w[widgets])
+      failing = failing_pool('primary', StandardError.new('database not found'))
+      classes = [model_double('Widget', 'widgets', readable), model_double('Gadget', 'gadgets', failing)]
+
+      expect(states(classes)).to eq([{ name: 'primary', state: 'unreachable' }])
+    end
+
+    it 'never asks a replica pool' do
+      replica = failing_pool('primary_replica', StandardError.new('connection refused'))
+      allow(replica.db_config).to receive(:replica?).and_return(true)
+
+      expect(states([model_double('Copy', 'widgets', replica)])).to eq([])
+      expect(replica).not_to have_received(:with_connection)
+    end
+
+    it 'reports a writable pool no concrete model reads as unreachable when its listing raises' do
+      primary = listing_pool('primary', %w[widgets])
+      reporting = failing_pool('reporting', StandardError.new('database not found'))
+      classes = [model_double('Widget', 'widgets', primary),
+                 model_double('ReportingRecord', 'reporting_records', reporting, abstract: true)]
+
+      expect(states(classes)).to eq([{ name: 'primary', state: 'readable' },
+                                     { name: 'reporting', state: 'unreachable' }])
+    end
+
+    it 'counts a reachable database no concrete model reads as readable, even with no tables' do
+      reporting = listing_pool('reporting', %w[schema_migrations])
+      classes = [model_double('ReportingRecord', 'reporting_records', reporting, abstract: true),
+                 model_double('Widget::HABTM_Gadgets', 'gadgets_widgets', reporting),
+                 model_double(nil, 'widgets', reporting)]
+
+      expect(states(classes)).to eq([{ name: 'reporting', state: 'readable' }])
+    end
+
+    it "asks only for reachability of a database that only the framework's own models read" do
+      empty = listing_pool('primary', %w[schema_migrations])
+      bookkeeping = model_double('ActiveRecord::SchemaMigration', 'schema_migrations', empty)
+      allow(Woods::Extractors::SourceOrigin).to receive(:constant_origin).and_call_original
+      allow(Woods::Extractors::SourceOrigin).to receive(:constant_origin).with(bookkeeping).and_return('framework')
+
+      expect(states([bookkeeping])).to eq([{ name: 'primary', state: 'readable' }])
+    end
+
+    it 'records nothing without Active Record classes' do
+      expect(described_class.schema_readability(connection_classes: [])).to eq([])
+    end
+  end
+
   describe '.new' do
     it 'serves declared tables without a runtime, for extractors under test' do
       catalog = described_class.new([described_class::Table.new(name: 'widgets', models: ['Widget'])])

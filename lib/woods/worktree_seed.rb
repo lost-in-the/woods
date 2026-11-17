@@ -5,6 +5,7 @@ require 'json'
 require 'open3'
 require 'pathname'
 require_relative 'atomic_file'
+require_relative 'coordination/pipeline_lock'
 require_relative 'generation'
 require_relative 'git_command'
 require_relative 'git_provenance'
@@ -13,6 +14,7 @@ require_relative 'rake_helpers'
 require_relative 'source_inputs/private_key'
 require_relative 'source_path_encoding'
 require_relative 'worktree_seed/changes'
+require_relative 'worktree_seed/portable_reason'
 require_relative 'worktree_seed/verification'
 
 module Woods
@@ -47,11 +49,12 @@ module Woods
   # The change set is `git diff <seed sha>` against the working tree (committed
   # and uncommitted tracked changes) plus untracked files. Ignored files are not
   # part of it.
-  class WorktreeSeed
+  class WorktreeSeed # rubocop:disable Metrics/ClassLength
     # @!attribute [r] mode
     #   @return [Symbol] `:seeded`, `:full` (fell back), or `:skipped`
     # @!attribute [r] reason
-    #   @return [String, nil] why the run did not seed, for `:full` and `:skipped`
+    #   @return [String, nil] why the run did not seed, for `:full` and `:skipped`;
+    #     a `:full` reason names no host path
     # @!attribute [r] changed
     #   @return [Array<String>, nil] paths the incremental run was given
     Result = Struct.new(:mode, :reason, :changed, keyword_init: true)
@@ -72,7 +75,7 @@ module Woods
       return Result.new(mode: :skipped, reason: "#{@output} already has a published index") if published?(@output)
 
       seeded = seed
-      seeded.is_a?(Result) ? seeded : full_extraction(seeded)
+      seeded.is_a?(Result) ? seeded : full_extraction(PortableReason.new(@root).call(seeded))
     end
 
     private
@@ -98,18 +101,37 @@ module Woods
       raise Unverifiable, 'the seed is the target index' if @source.expand_path == @output.expand_path
 
       baseline = Verification.new(source: @source, root: @root).call
-      staging = Pathname.new("#{@output}.seed-#{Process.pid}")
+      @staging_pid = Process.pid
+      staging = Pathname.new("#{@output}.seed-#{@staging_pid}")
       begin
         build_staging(staging, baseline)
         changed = Changes.new(root: @root, index: staging).since(baseline.fetch('git_sha'))
         run_incremental(staging, changed)
+        return left_to_parent if forked_from_seed?
+
         promote(staging)
         Result.new(mode: :seeded, changed: changed)
       ensure
-        FileUtils.rm_rf(staging)
+        FileUtils.rm_rf(staging) unless forked_from_seed?
       end
     rescue Unverifiable, Woods::ExtractionError, SystemCallError, IOError, JSON::ParserError => e
-      e.message
+      forked_from_seed? ? left_to_parent : e.message
+    end
+
+    # Whether this process is a fork of the one building the seed. The
+    # incremental run executes application code in process, and a child forked
+    # there unwinds the rest of the seed. Promoting the staging directory,
+    # falling back to a full extraction and removing the staging directory
+    # all belong to the process that built it.
+    #
+    # @return [Boolean]
+    def forked_from_seed?
+      !@staging_pid.nil? && @staging_pid != Process.pid
+    end
+
+    # @return [Result] the child's answer: the seed is the parent's to finish
+    def left_to_parent
+      Result.new(mode: :skipped, reason: "the seed is being built by process #{@staging_pid}")
     end
 
     def full_extraction(reason)
@@ -157,10 +179,20 @@ module Woods
       AtomicFile.write(path, original.include?("\n") ? JSON.pretty_generate(updated) : JSON.generate(updated))
     end
 
+    # The staging directory is an index of its own. The target's lock, which
+    # `woods:seed` holds, does not cover it, and the extractor refuses to
+    # publish there under that lock. Only this run writes the directory, so a
+    # lock it no longer owns fails the seed ({Coordination::LockLostError})
+    # instead of falling back.
     def run_incremental(staging, changed)
-      extractor = extractor_class.new(output_dir: staging)
-      extractor.extract_changed(changed)
-      extractor.raise_on_publication_failure!
+      lock = Coordination::PipelineLock.for_index(staging)
+      lock.with_lock do
+        extractor = extractor_class.new(output_dir: staging)
+        extractor.extract_changed(changed)
+        extractor.raise_on_publication_failure!
+      ensure
+        lock.fenced { nil } unless forked_from_seed?
+      end
     rescue Woods::ExtractionConfigChanged => e
       raise Unverifiable, e.message
     end

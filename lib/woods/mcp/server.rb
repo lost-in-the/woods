@@ -3292,7 +3292,8 @@ module Woods
           dir = index_dir.to_s
           return nil unless File.directory?(dir)
 
-          output, _stderr, status = Open3.capture3('git', '-C', dir, 'status', '--porcelain')
+          output, _stderr, status = Open3.capture3(Woods::GitCommand::CHILD_ENV,
+                                                   'git', '-C', dir, 'status', '--porcelain')
           status.success? ? output : nil
         rescue StandardError
           nil

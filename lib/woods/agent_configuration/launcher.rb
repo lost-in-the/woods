@@ -2,35 +2,73 @@
 
 require 'pathname'
 require_relative 'error'
+require_relative '../mcp/client_entry'
 
 module Woods
   module AgentConfiguration
-    # Supported command shapes are built as argv, never as shell snippets.
+    # Supported command shapes are built as argv, never as shell snippets,
+    # except the relative form, which is {Woods::MCP::ClientEntry}'s.
+    #
+    # Two entry forms:
+    # - `absolute`: names this machine's application root, Gemfile and index
+    #   (and the Compose project directory). Per-machine; user scope always.
+    # - `relative`: the checkout-aware entry with no absolute path, for a
+    #   project configuration that is committed and shared by every checkout
+    #   and worktree. It needs the application inside a git checkout.
     class Launcher
-      attr_reader :root, :index, :mode, :service, :container_root
+      FORMS = %w[relative absolute].freeze
 
-      def initialize(root:, index: 'tmp/woods', mode: 'host', service: nil, container_root: nil)
+      attr_reader :root, :index, :mode, :service, :container_root, :form
+
+      # @param settings [Hash] `index:`, `mode:`, `service:`, `container_root:`
+      def initialize(root:, form: 'absolute', **settings)
+        unknown = settings.keys - %i[index mode service container_root]
+        raise ArgumentError, "unknown keywords: #{unknown.join(', ')}" unless unknown.empty?
+        raise Conflict, 'Supported entry forms: --entry-form relative or absolute' unless FORMS.include?(form)
+
+        @form = form
         @root = File.realpath(root)
-        @index = Pathname.new(index).cleanpath.to_s
-        @mode = mode
-        @service = service
-        @container_root = container_root
-        unless !Pathname.new(@index).absolute? && @index != '..' && !@index.start_with?('../')
-          raise Conflict, 'Index must be an explicit path inside the selected application root'
-        end
-        raise Conflict, 'Application Gemfile is missing' unless File.file?(File.join(@root, 'Gemfile'))
-        raise Conflict, 'Supported launch modes: host, compose' unless %w[host compose].include?(mode)
-
-        validate_compose! if mode == 'compose'
+        @index = Pathname.new(settings.fetch(:index, 'tmp/woods')).cleanpath.to_s
+        @mode = settings.fetch(:mode, 'host')
+        @service = settings[:service]
+        @container_root = settings[:container_root]
+        validate!
+        @location = locate if form == 'relative'
       end
 
       def entry
+        if form == 'relative'
+          return MCP::ClientEntry.checkout(service: (service if mode == 'compose'), application: @location.application,
+                                           output: @location.output)
+        end
+
         argv = prefix + ['bundle', 'exec', 'woods-mcp-start', index_path]
         { 'type' => 'stdio', 'command' => argv.first, 'args' => argv.drop(1), 'env' => environment }
       end
 
+      # The relative form also asks the probe to resolve the checkout from the
+      # application root and to load the `--checkout --await-index` support.
       def probe_command(script)
-        prefix(frozen: true) + ['bundle', 'exec', 'ruby', '-e', script, index_path, process_root]
+        prefix(frozen: true) + ['bundle', 'exec', 'ruby', '-e', script, index_path, process_root] +
+          (form == 'relative' ? ['relative'] : [])
+      end
+
+      # The relative Compose entry starts in the service's working directory;
+      # this asks the service which directory that is.
+      #
+      # @return [Array<String>, nil] nil for any other launch
+      def working_directory_command
+        prefix + ['pwd'] if form == 'relative' && mode == 'compose'
+      end
+
+      # @param directory [String] where the service starts ({#working_directory_command})
+      # @return [String, nil] why the written entry would not start in the application root
+      def working_directory_mismatch(directory)
+        return if directory.empty? || File.expand_path(directory) == File.expand_path(container_root)
+
+        "The written entry starts in the #{service} service's working directory, #{directory}, not " \
+          "--container-root #{container_root}: set the service's working_dir to #{container_root}, or use " \
+          '--entry-form absolute.'
       end
 
       def environment
@@ -42,7 +80,8 @@ module Woods
       end
 
       def intent
-        { 'mode' => mode, 'index' => index, 'service' => service, 'container_root' => container_root }.compact
+        { 'mode' => mode, 'index' => index, 'service' => service, 'container_root' => container_root,
+          'entry_form' => form }.compact
       end
 
       private
@@ -55,11 +94,32 @@ module Woods
         File.join(process_root, index)
       end
 
+      # The relative entry ({MCP::ClientEntry.checkout}) names no project
+      # directory and no -w, so its probe runs where the entry will run.
       def prefix(frozen: false)
         return [] if mode == 'host'
 
-        ['docker', 'compose', '--project-directory', root, 'exec', '-T', '-w', container_root] +
-          (frozen ? ['-e', 'BUNDLE_FROZEN=true'] : []) + [service]
+        placed = form == 'relative' ? [] : ['--project-directory', root]
+        working = form == 'relative' ? [] : ['-w', container_root]
+        ['docker', 'compose', *placed, 'exec', '-T', *working] + (frozen ? ['-e', 'BUNDLE_FROZEN=true'] : []) +
+          [service]
+      end
+
+      def validate!
+        unless !Pathname.new(@index).absolute? && @index != '..' && !@index.start_with?('../')
+          raise Conflict, 'Index must be an explicit path inside the selected application root'
+        end
+        raise Conflict, 'Application Gemfile is missing' unless File.file?(File.join(@root, 'Gemfile'))
+        raise Conflict, 'Supported launch modes: host, compose' unless %w[host compose].include?(mode)
+
+        validate_compose! if mode == 'compose'
+      end
+
+      def locate
+        MCP::ClientEntry.locate(root, index: index)
+      rescue ArgumentError
+        raise Conflict, "#{root} is not inside a git checkout, so `woods-mcp-start --checkout` cannot find it; " \
+                        'use --entry-form absolute'
       end
 
       def validate_compose!
