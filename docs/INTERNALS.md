@@ -344,7 +344,9 @@ The two servers have fundamentally different runtime requirements:
 
 ### Index server (`woods-mcp`)
 
-**31 schemas; 15 register in the packaged default. Two resources and two templates. Reads pre-extracted JSON without booting Rails.**
+**32 schemas; 16 register in the packaged default.
+Two resources and two templates.
+Reads pre-extracted JSON without booting Rails.**
 
 Starts with a path to the extraction output directory and reads from it:
 

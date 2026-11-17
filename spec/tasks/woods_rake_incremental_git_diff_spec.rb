@@ -128,7 +128,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       it "escalates #{path} before relevance filtering in the freshly booted task" do
         require 'woods/extractor'
         stub_const('Rails', double('Rails', root: Pathname.new(repo_dir)))
-        stub_const('ENV', ENV.to_h.merge('CHANGED_FILES' => path, 'WOODS_OUTPUT' => repo_dir))
+        replace_env(ENV.to_h.merge('CHANGED_FILES' => path, 'WOODS_OUTPUT' => repo_dir))
         allow(Woods::RakeHelpers).to receive(:woods_daemon_coverage).and_return(:absent)
         allow(Woods::RakeHelpers).to receive(:woods_with_extraction_lock).and_yield
         extractor = instance_double(Woods::Extractor, raise_on_publication_failure!: nil, extractor_timings: {})
@@ -151,7 +151,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
                'app/models/../models/deleted.rb', "#{repo_dir}-other/app/models/outsider.rb",
                '../other/app/models/outsider.rb', 'app/../../../other/app/models/outsider.rb',
                './notes/unrelated.txt']
-      stub_const('ENV', ENV.to_h.merge('CHANGED_FILES' => paths.join(','), 'WOODS_OUTPUT' => repo_dir))
+      replace_env(ENV.to_h.merge('CHANGED_FILES' => paths.join(','), 'WOODS_OUTPUT' => repo_dir))
       expect(Woods::RakeHelpers).not_to receive(:woods_changed_paths_for_range)
       allow(Woods::RakeHelpers).to receive(:woods_daemon_coverage).and_return(:absent)
       allow(Woods::RakeHelpers).to receive(:woods_with_extraction_lock).and_yield
@@ -174,7 +174,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
   describe 'CI range selection' do
     before do
       values = ENV.to_h.except('CI_COMMIT_BEFORE_SHA', 'CI_COMMIT_SHA', 'GITHUB_BASE_REF')
-      stub_const('ENV', values)
+      replace_env(values)
     end
 
     it 'ignores empty and whitespace-only CI variables' do
@@ -380,7 +380,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
     end
 
     it 'resolves the feature range through its relocated worktree-specific git directory' do
-      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => @mounted_gitdir))
+      replace_env(ENV.to_h.merge('WOODS_GIT_DIR' => @mounted_gitdir))
 
       paths, failure = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD', root: worktree)
 
