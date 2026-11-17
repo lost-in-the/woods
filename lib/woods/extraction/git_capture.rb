@@ -169,10 +169,10 @@ module Woods
       # so no later run mistakes it for a table of the plain history.
       REWRITES_UNKNOWN = 'unknown'
 
-      # The digest of the replace refs and the grafts file this repository's
-      # walks honour, nil when there are none, {REWRITES_UNKNOWN} when git
-      # could not say. It follows git's own reading (environment.c,
-      # replace-object.c, from 2.31):
+      # The digest of the replace refs, with their base, and the grafts file
+      # this repository's walks honour, nil when there are none,
+      # {REWRITES_UNKNOWN} when git could not say. It follows git's own
+      # reading (environment.c, replace-object.c, from 2.31):
       #
       # * replace refs count only while replacement is on:
       #   `GIT_NO_REPLACE_OBJECTS` unset (any value turns it off) and
@@ -322,6 +322,10 @@ module Woods
         table.merge('history_rewrites' => REWRITES_UNKNOWN)
       end
 
+      # The base is digested with the refs: git names each original from the
+      # part of a ref below the base, so the same refs under another base can
+      # replace other objects.
+      #
       # @return [String, nil] see {#history_rewrites}
       def read_history_rewrites
         refs = replacement_refs
@@ -329,7 +333,12 @@ module Woods
         return REWRITES_UNKNOWN if refs.nil? || grafts.nil?
         return nil if refs.empty? && grafts.empty?
 
-        Digest::SHA256.hexdigest("replace\n#{refs}\ngrafts\n#{grafts}")
+        Digest::SHA256.hexdigest("replace\n#{replace_ref_base}\n#{refs}\ngrafts\n#{grafts}")
+      end
+
+      # @return [String] the replace ref prefix git reads, `refs/replace/` when unset
+      def replace_ref_base
+        ENV.fetch('GIT_REPLACE_REF_BASE', 'refs/replace/')
       end
 
       # @return [String, nil] `<ref> <object>` lines of the replace refs in
@@ -340,7 +349,7 @@ module Woods
         enabled, _error, status = Open3.capture3(*git_argv('config', '--bool', 'core.useReplaceRefs'))
         return '' if status.success? && enabled.strip == 'false'
 
-        base = ENV.fetch('GIT_REPLACE_REF_BASE', 'refs/replace/')
+        base = replace_ref_base
         output, _error, status = Open3.capture3(
           *git_argv('for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)')
         )

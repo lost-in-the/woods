@@ -372,6 +372,30 @@ RSpec.describe Woods::Extractor, 'commit table' do
         end
       end
 
+      # Git names the original from the part of the ref below the base, so the
+      # same ref can replace an object under one base and nothing under another.
+      it 'walks again when only GIT_REPLACE_REF_BASE changes, though it selects the same refs' do
+        git('update-ref', "refs/custom/a#{original_root}", stand_in('Custom stand-in'))
+        with_ref_base('refs/custom/') do
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Add post'])
+        end
+
+        with_ref_base('refs/custom/a') do
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Custom stand-in'])
+        end
+      end
+
+      it 'keeps the table when GIT_REPLACE_REF_BASE names the default base explicitly' do
+        replace_root_commit
+        refresh
+        replaced = File.binread(table_path)
+
+        with_ref_base('refs/replace/') { expect(refresh_noting_walk).to eq([false, nil]) }
+        expect(File.binread(table_path)).to eq(replaced)
+      end
+
       it 'counts a replace ref nested below the base, and ignores one whose name is not an object id' do
         git('update-ref', "refs/replace/nested/#{original_root}", stand_in('Nested stand-in'))
         expect(refresh_noting_walk).to eq([true, :written])

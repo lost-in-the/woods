@@ -3,8 +3,8 @@
   window start, bounds and history rewrites (`GitCommitTable.current?`), and otherwise rebuilds the whole table.
   The table now records `history_rewrites`: `none` for a plain history, or a digest of the replace refs and grafts
   the walk honours (read as git reads them, including a set but empty `GIT_REPLACE_REF_BASE` and `GIT_GRAFT_FILE`),
-  so adding, changing or removing one rebuilds the table; when that state cannot be read, or changes while the
-  table is walked, the run records `unknown` and the next run walks again.
+  so adding, changing or removing one, or changing `GIT_REPLACE_REF_BASE`, rebuilds the table; when that state
+  cannot be read, or changes while the table is walked, the run records `unknown` and the next run walks again.
   A table written before this field cannot say which history it describes, so the first run after upgrading walks
   history once.
   An unreadable table is rebuilt.
