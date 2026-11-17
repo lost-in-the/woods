@@ -181,10 +181,14 @@ module Woods
         end.compact.map { |value| utf8(value) }.reject(&:empty?).uniq
       end
 
+      # The password percent-decoded as Active Record reads it, +plus+ kept,
+      # and form-decoded as well.
       def url_values(url)
         uri = URI.parse(url)
         password = uri.password
-        [url, password && uri.userinfo, password, password && URI.decode_www_form_component(password)]
+        return [url] unless password
+
+        [url, uri.userinfo, password, URI::DEFAULT_PARSER.unescape(password), URI.decode_www_form_component(password)]
       rescue URI::Error
         [url]
       end

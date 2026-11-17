@@ -112,6 +112,15 @@ RSpec.describe Woods::DiagnosticRedaction do
       expect(redacted).to eq('auth failed with [REDACTED], [REDACTED]')
     end
 
+    it "removes a registered URL's password as Active Record decodes it, + kept, and as a form decodes it" do
+      described_class.register("postgres://u:a+b%2F-#{marker}@db/x")
+      described_class.register("postgres://u:c%2Bd-#{marker}@db/x")
+
+      redacted = described_class.redact("got a+b/-#{marker}, a b/-#{marker} and c+d-#{marker}")
+
+      expect(redacted).to eq('got [REDACTED], [REDACTED] and [REDACTED]')
+    end
+
     it 'removes the password of a registered configuration hash, and of a connection pool' do
       db_config = double('DbConfig', configuration_hash: { password: password, host: 'db' })
       described_class.register(double('Connection', pool: double('Pool', db_config: db_config)))
