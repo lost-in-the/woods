@@ -255,7 +255,7 @@ RSpec.describe 'woods-agent-config relative project entries' do
     it 'keeps user scope per-machine and absolute, and refuses a relative user entry' do
       config_dir = File.join(directory, 'client-config')
       FileUtils.mkdir_p(config_dir)
-      stub_const('ENV', ENV.to_h.merge('CLAUDE_CONFIG_DIR' => config_dir))
+      replace_env(ENV.to_h.merge('CLAUDE_CONFIG_DIR' => config_dir))
 
       code, path = plan('setup', 'user.json', scope: 'user')
       expect(code).to eq(0), errors.string
