@@ -46,6 +46,20 @@ RSpec.describe 'Index MCP startup guidance and path selection' do
     [output, errors.force_encoding(Encoding::UTF_8).scrub, status]
   end
 
+  it 'refuses woods-mcp --await-index with no index path instead of waiting in the current directory' do
+    _, strict_errors, strict_status = launch('woods-mcp')
+    output, errors, status = launch('woods-mcp', '--await-index')
+    _, given_errors, given_status = launch('woods-mcp', '--await-index',
+                                           env: { 'WOODS_DIR' => File.join(@directory, 'later') })
+
+    expect(strict_status.exitstatus).to eq(1)
+    expect(strict_errors).to include("Could not resolve a published Woods index in: #{@cwd}")
+    expect(status.exitstatus).to eq(1)
+    expect(output).to be_empty
+    expect(errors).to include('--await-index needs an index path')
+    expect(given_status).to be_success, given_errors
+  end
+
   %w[woods-mcp woods-mcp-start].each do |executable|
     context executable do
       it 'boots an atomic index via WOODS_OUTPUT from an unrelated working directory' do
@@ -66,6 +80,26 @@ RSpec.describe 'Index MCP startup guidance and path selection' do
                                         env: { 'WOODS_DIR' => '/missing/dir', 'WOODS_OUTPUT' => '/missing/output' })
         expect(status).to be_success, errors
         expect(JSON.parse(output).dig('result', 'serverInfo', 'name')).to eq('woods')
+      end
+
+      it 'asks whether a missing path is a host or a container path before the extract advice' do
+        output, errors, status = launch(executable, File.join(@directory, 'no-such-index'))
+
+        expect(status.exitstatus).to eq(1)
+        expect(output).to be_empty
+        expect(errors.index('container path')).not_to be_nil, errors
+        expect(errors.index('container path')).to be < errors.index('woods:extract')
+      end
+
+      it 'refuses a file given as the index directory under --await-index' do
+        file = File.join(@directory, 'a-file')
+        File.write(file, '')
+
+        output, errors, status = launch(executable, '--await-index', file)
+
+        expect(status.exitstatus).to eq(1)
+        expect(output).to be_empty
+        expect(errors).to include("#{file} is not a directory")
       end
 
       it 'does not fall through a bad explicit path to a valid environment path' do

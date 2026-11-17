@@ -216,6 +216,18 @@ File-based extractors derive an identifier in three steps, first match wins:
 
 1. **Zeitwerk-governed naming.** For a file under a managed autoload path, the expected constant path comes from its owning Rails loader (`main` or `once`), including that loader's inflections, root namespace, collapsed directories and ignored paths. Without loader information, the offline path convention applies. The source must declare exactly the expected constant: `app/services/domain/container/parser.rb` is expected to define `Domain::Container::Parser`. This is what lets a file whose namespaces are written as *classes* (`module Domain; class Container; class Parser`) name the file's own constant instead of the wrapper `Domain::Container`, which every sibling under the same wrapper would otherwise collide with.
 2. **Position-aware nesting scan** (`SourceNesting`, the supporting utility above). The first `class` declaration qualified by the namespaces actually open at that position. Compact declarations keep their segments; a helper module nested inside the class and sibling modules that closed earlier do not contribute.
+
+   A compact declaration's first constant is looked up as Ruby looks it up, as far as the source settles it:
+   the innermost module's own constant when the file declares it, else an enclosing module of that name.
+   `module Billing; class Billing::Invoice` names `Billing::Invoice`.
+   Otherwise the declaration stays nested, since a nearer constant may come from another file:
+   `class Invoice::Line` inside `module Billing` names `Billing::Invoice::Line`.
+   A prefix a superclass supplies also stays nested.
+   A leading `::` is absolute.
+   `module Billing; class Billing::Invoice` still names `Billing::Invoice`
+   when another file declares `Billing::Billing`,
+   which is safe on a Zeitwerk-managed path because `billing/invoice.rb` must define `Billing::Invoice`.
+   Method table owners, `lookup Owner#method` and the self-map name declarations by the same rule.
 3. **Path convention.** Camelize the path under `app/<kind>/` (details vary per extractor).
 
 Unmanaged paths (`lib/` unless configured for autoloading, and configured non-autoload roots) and sources that declare nothing matching the expected constant skip step 1 entirely: the source scan and path convention decide. A namespace file containing only `Acme::VERSION` does not acquire an invented `Acme::Version` declaration.
@@ -262,6 +274,9 @@ Model, service, job, PORO, manager, mailer and controller units record what each
 - **Cap.** `method_effects_limit` (default 50) bounds the map per unit; past it the first methods are kept and `method_effects_truncated: true` is set.
 - **Edges.** The unit's existing `job_enqueue`, mailer and service edges gain `through`: the public methods that reach the target, sorted and joined with `, ` (`"through": "capture!, refund!"`). Controller actions are named here too. No edge is added or removed, so `dependents` answers are the same for a caller that ignores `through`.
 - **Limits.** The reading is static and heuristic, like callback side effects. Calls made through metaprogramming, through another object, from an included concern, or from a block in the class body are not attributed. Nested method definitions and blocks that change `self` to another object do not contribute same-class method effects. Same-line definitions are read from their own source ranges.
+  Calls in a lambda or proc body or a `defined?` operand do not run where they are written.
+  They add no events, external calls or same-class calls.
+  Jobs, mailers and services are read from the method text, so a lambda body still adds those.
 
 ### Eager loading
 
@@ -337,6 +352,8 @@ publish the same values.
 ### ModelExtractor
 
 **What it captures:** Every named, non-abstract `ActiveRecord::Base` descendant loaded in the process, except Rails-generated `HABTM_` join classes. A table is not required: a model whose table is missing is still extracted, with `table_exists: false` and empty column metadata. Models a gem or the framework defines are included too (an engine model, and on Rails before 7.1 `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata`); `origin` says which (below). The source_code is the model's actual Ruby source *plus* all included concerns inlined below it as formatted comment blocks. When the table exists, schema information (columns, types, indexes, foreign keys) is prepended as a header comment.
+The indexes and foreign keys are read from the model's own database.
+A section whose read fails says `unknown (could not be read)` instead of being left out.
 
 **Key details:**
 - Uses `ActiveRecord::Base.descendants` for discovery (runtime introspection, not static parsing)

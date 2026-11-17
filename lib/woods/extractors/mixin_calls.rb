@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 require 'prism'
-require 'set'
 require_relative '../parse_cache'
+require_relative '../declaration_name'
 
 module Woods
   module Extractors
@@ -97,14 +97,14 @@ module Woods
           @own_only = own_only
           @method_depth = 0
           @nesting = []
-          @declared = Set.new
+          @names = DeclarationName.new
           @self_is = :other
         end
 
         # @param name [String] a qualified module or class name
         # @return [Boolean] whether this source declares it
         def declares?(name)
-          @declared.include?(name)
+          @names.declared?(name)
         end
 
         # The declared module or class a constant names, by lexical lookup
@@ -120,7 +120,7 @@ module Woods
             else
               nesting.reverse.map { |scope| "#{scope}::#{name}" } << name
             end
-          candidates.find { |candidate| @declared.include?(candidate) }
+          candidates.find { |candidate| @names.declared?(candidate) }
         end
 
         # @param node [Prism::ModuleNode]
@@ -175,8 +175,8 @@ module Woods
         private
 
         def within(node, &block)
-          qualified = rooted(declared_name(constant_name(node.constant_path) || node.constant_path.slice))
-          @declared << qualified
+          path = constant_name(node.constant_path) || node.constant_path.slice
+          qualified = @names.record(rooted(@names.resolve(path, @nesting)))
           @nesting.push(qualified)
           self_is(:module, &block)
         ensure
@@ -216,20 +216,6 @@ module Woods
           return nil unless @self_is == :module && @nesting.any?
 
           "::#{@nesting.last}::#{name.delete_prefix('self::')}"
-        end
-
-        # The qualified name of a module or class declared at +path+ here. A
-        # qualified path's first constant is looked up lexically among the
-        # modules already declared (`module Outer::Trackable` inside `Outer`
-        # is `Outer::Trackable`); an unknown one is taken as nested.
-        def declared_name(path)
-          return path.delete_prefix('::') if path.start_with?('::') || @nesting.empty?
-
-          first, rest = path.split('::', 2)
-          scope = rest && (@nesting.reverse.map { |outer| "#{outer}::#{first}" } << first).find do |candidate|
-            @declared.include?(candidate)
-          end
-          scope ? "#{scope}::#{rest}" : "#{@nesting.last}::#{path}"
         end
 
         # The constant a node names, built from its path (`A::B`, `::A::B`,
