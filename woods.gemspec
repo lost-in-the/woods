@@ -75,6 +75,10 @@ Gem::Specification.new do |spec|
   # pin blocks patch releases and user dependency resolution; the SDK-internal
   # touchpoints already guard shape drift defensively.
   spec.add_dependency 'mcp', '>= 1.2', '< 2.0'
+  # Not used by Woods directly. mcp requires json_schemer, which cannot load under
+  # regexp_parser 2.13.2: that release made Regexp::Syntax::Base.implements private.
+  # The floor is json_schemer's own. Remove this line once either gem fixes it.
+  spec.add_dependency 'regexp_parser', '>= 2.0', '!= 2.13.2'
   # Older supported Active Support encoders pass quirks_mode, removed in JSON 3.
   spec.add_dependency 'json', '>= 2.19.9', '< 3'
   spec.add_dependency 'msgpack', '>= 1.8.2', '< 2'
