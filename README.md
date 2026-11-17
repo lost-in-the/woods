@@ -112,7 +112,27 @@ Run these where your Rails application can boot. The default output is `tmp/wood
 
 ### 4. Connect your MCP client
 
-Adapt this example to your MCP client's project configuration format, using your application path and preserving other server entries. See [client configuration locations](docs/MCP_SERVERS.md#client-configuration-locations) for guidance:
+`bundle exec woods-agent-config setup --client claude --scope project --root "$PWD" --plan FILE`
+(then `apply FILE`) writes a project `.mcp.json` with no absolute path, so the team can commit it;
+`bin/rails generate woods:install` prints the same entry for any client.
+See [managed configuration](docs/AGENT_SETUP.md#managed-claude-code-configuration):
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
+    }
+  }
+}
+```
+
+It needs `sh` where the client runs. On a Woods release without `--checkout`, or without `sh`, adapt this
+per-machine example to your MCP
+client's project configuration format, using your application path and preserving other server entries.
+See [client configuration locations](docs/MCP_SERVERS.md#client-configuration-locations) for guidance:
 
 ```json
 {

@@ -13,6 +13,8 @@ module Woods
       SCRIPT = <<~'RUBY'
         require 'timeout'
         Timeout.timeout(25) do
+          wrong = ARGV[2] == 'relative' ? { 'starts in' => Dir.pwd, 'resolves the application at' => Bundler.root.to_s }.reject { |_, dir| File.realpath(dir) == File.realpath(ARGV[1]) } : {}
+          abort "The launch #{wrong.map { |fact, dir| "#{fact} #{dir}" }.join(' and ')}, not #{ARGV[1]}" unless wrong.empty?
           require 'json'
           require 'woods'
           require 'woods/mcp/server'
@@ -27,8 +29,18 @@ module Woods
           report = Woods::Resilience::IndexValidator.new(index_dir: index, app_root: root).validate
           abort report.errors.join("\n") unless report.valid?
           tools = Woods::MCP::Server.build(index_dir: index, warmup: false).tools.keys
+          checkout = nil
+          if ARGV[2] == 'relative'
+            begin
+              require 'woods/mcp/index_wait'
+            rescue LoadError
+              abort 'Installed Woods cannot launch with --checkout --await-index; use --entry-form absolute'
+            end
+            checkout = Woods::MCP::ServedIdentity.checkout_root(root)
+            abort "No git checkout contains #{root} where the server runs; use --entry-form absolute" unless checkout
+          end
           puts JSON.generate(version: Woods::VERSION, tools: tools.sort, root: root, index: index,
-                             generation: reader.loaded_generation, warnings: report.warnings)
+                             generation: reader.loaded_generation, warnings: report.warnings, checkout: checkout)
         end
       RUBY
 
@@ -54,16 +66,30 @@ module Woods
       private
 
       def run(launcher)
-        command = launcher.probe_command(SCRIPT)
         environment = Watch::ChildEnvironment.build(@environment.to_h, root: launcher.root)
                                              .merge(launcher.probe_environment)
-        Open3.popen3(environment, *command, chdir: launcher.root, unsetenv_others: true,
+        execute(launcher.probe_command(SCRIPT), environment, launcher.root)
+      rescue Conflict => e
+        raise Conflict, [e.message, working_directory_note(launcher, environment)].compact.join("\n")
+      end
+
+      def execute(command, environment, root)
+        Open3.popen3(environment, *command, chdir: root, unsetenv_others: true,
                                             pgroup: true) do |stdin, out, err, wait|
           stdin.close
           collect(out, err, wait)
         end
       rescue Errno::ENOENT => e
         raise Conflict, "Launch command unavailable: #{e.message}"
+      end
+
+      # Why a failed relative Compose probe failed, when the service starts
+      # somewhere other than the requested application root.
+      def working_directory_note(launcher, environment)
+        command = launcher.respond_to?(:working_directory_command) && launcher.working_directory_command
+        launcher.working_directory_mismatch(execute(command, environment, launcher.root).strip) if command
+      rescue Conflict
+        nil
       end
 
       def collect(stdout, stderr, wait)

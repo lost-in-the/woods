@@ -48,6 +48,13 @@ module Woods
 
       def validate_setup_compatibility!
         if @previous['entry'] != @entry
+          previous_form = (@previous['intent'].is_a?(Hash) && @previous['intent']['entry_form']) || 'absolute'
+          requested_form = @intent['entry_form']
+          if requested_form && requested_form != previous_form
+            raise Conflict, "The owned entry uses the #{previous_form} form; preview an explicit update with " \
+                            "--entry-form #{requested_form} to change it"
+          end
+
           raise Conflict, 'Setup differs from the owned installation; preview an explicit update'
         end
         return if @previous['template_version'] == self.class::TEMPLATE_VERSION
@@ -62,8 +69,16 @@ module Woods
           raise Conflict, 'The owned MCP entry was edited or removed; restore it or resolve ownership manually'
         end
         return unless servers.key?(@name)
+        # A teammate's checkout of a committed, path-free entry: the same bytes
+        # setup would write. Only the receipt is this checkout's own to add.
+        # An absolute entry names one machine, so an unowned one stays refused.
+        return @adopted = true if adoptable?(servers[@name])
 
         raise Conflict, "MCP entry #{@name.inspect} already exists without a Woods receipt; choose another name"
+      end
+
+      def adoptable?(existing)
+        @operation == 'setup' && @intent['entry_form'] == 'relative' && existing == @entry
       end
 
       def validate_instruction_selection!(requested, previous_sections)
