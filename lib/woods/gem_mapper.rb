@@ -54,7 +54,8 @@ module Woods
 
     # Stage, let the caller write, flush, then promote, publish and prune
     # inside the fence. The stage is removed on every path that does not
-    # promote it.
+    # promote it, by the process that created it: a child forked inside the
+    # block unwinds this same ensure and must leave the parent's stage alone.
     #
     # @yieldparam stage [Pathname] the private stage to write into
     # @return [Generation::Marker]
@@ -62,6 +63,7 @@ module Woods
     def publish
       number = current_number + 1
       stage = @payloads.create_stage(number, @lock.token)
+      created_by = Process.pid
       PublicationSeam.reach(:staged, @output_dir)
       yield stage
       # The publisher writes every file without its own flush; one flush of
@@ -71,7 +73,7 @@ module Woods
       PublicationSeam.reach(:before_promotion, @output_dir)
       @lock.fenced { promote_and_publish(stage, number) }
     ensure
-      @payloads.discard_stage(stage) if stage
+      @payloads.discard_stage(stage) if stage && created_by == Process.pid
     end
 
     private
