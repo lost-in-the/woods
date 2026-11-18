@@ -473,7 +473,7 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         def y; end
       end
     RUBY
-    'later definitions in the same and an enclosing branch' => [<<~RUBY, { true => [7, 8], false => [10] }]
+    'later definitions in the same and an enclosing branch' => [<<~RUBY, { true => [7, 8], false => [10] }],
       class Post
         if FLAG
           if FLAG
@@ -487,6 +487,37 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         end
       end
     RUBY
+    # FLAG :outer runs the outer branch only, :inner both.
+    'a visibility call in a nested branch after a redefinition there' =>
+      [<<~RUBY, { outer: [2, 4, 5, 6, 7], inner: [2, 9, 10, 12, 13] }],
+        class Post
+          def self.memoize(name) = name
+          if FLAG
+            def x; end
+            def y; end
+            def z; end
+            def self.w; end
+            if FLAG == :inner
+              private def x; end
+              def y; end
+              private :y
+              private memoize def z; end
+              private_class_method def self.w; end
+            end
+          end
+        end
+      RUBY
+    'module_function def in a nested branch after a definition in the enclosing one' =>
+      [<<~RUBY, { outer: [3], inner: [5] }]
+        module Util
+          if FLAG
+            def x; end
+            if FLAG == :inner
+              module_function def x; end
+            end
+          end
+        end
+      RUBY
   }.each do |label, (source, taken)|
     it "agrees with Ruby on each branch for #{label}, and lists no definition Ruby holds on no branch" do
       taken.each do |flag, lines|

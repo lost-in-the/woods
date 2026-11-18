@@ -174,7 +174,7 @@ module Woods
             @overridden = definite(all - [@chosen])
           else
             @ambiguity = :paths
-            @ambiguous = alternatives.sort_by { |candidate| candidate.entry['line'].to_i }
+            @ambiguous = alternatives.reverse # latest first, so now in source order
             @overridden = definite(all - alternatives)
           end
         end
@@ -209,6 +209,9 @@ module Woods
           return per_concern.map { |candidates| ordered_group(candidates) } if ORDERED_TYPES.include?(@unit['type'])
 
           found = per_concern.reject(&:empty?)
+          # One concern that defines the member has no include order to know.
+          return [ordered_group(found.first)] if found.one?
+
           [Group.new(found.map(&:first), false, found.flat_map { |candidates| candidates.drop(1) })]
         end
 
@@ -223,8 +226,17 @@ module Woods
             entry['name'] == @reference.name && !entry['file_unit'] && entry['owner'] == name &&
               @reference.kind?(entry) && !class_methods.include?(entry['line'])
           end
-          found = candidates(entries, unit, level, :own, nil) + macros
-          found.sort_by { |candidate| -candidate.entry['line'].to_i }
+          latest_first(candidates(entries, unit, level, :own, nil) + macros)
+        end
+
+        # +found+ by line, the later first. On one line a candidate comes
+        # first: a definite definition replaces every earlier one of its
+        # name and side, so one that survives beside a candidate precedes it. Ties
+        # past that keep their order.
+        def latest_first(found)
+          found.each_with_index.sort_by do |candidate, index|
+            [-candidate.entry['line'].to_i, candidate.entry.key?(MethodTable::CANDIDATE) ? 0 : 1, index]
+          end.map(&:first)
         end
 
         # The class-body calls that define the member at this level, by
@@ -276,10 +288,10 @@ module Woods
         end
 
         def candidates(entries, unit, level, origin, concern)
-          entries.sort_by { |entry| -entry['line'].to_i }.map do |entry|
+          latest_first(entries.map do |entry|
             Candidate.new(entry: @reference.as_named(entry), unit: unit, level: level, origin: origin,
                           concern: concern)
-          end
+          end)
         end
 
         def blocks_of(unit)

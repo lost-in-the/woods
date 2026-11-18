@@ -223,7 +223,8 @@ module Woods
       # Apply a call's change to the entries it can reach. A call on a path
       # Ruby may not run changes only the candidates of that path (made in
       # the branches that enclose the call, or in branches nested in its
-      # own), never a definite definition or a candidate of another branch.
+      # own), never a definite definition or a candidate of another branch,
+      # nor one that a later candidate of a branch around the call replaced.
       #
       # @yieldparam entries [Array<Hash>]
       # @yieldreturn [Array<Hash>] those entries after the call
@@ -231,7 +232,21 @@ module Woods
         return @entries = yield(@entries) unless @candidate
 
         reached, others = @entries.partition { |entry| entry.key?(CANDIDATE) && on_path?(entry[Marks::PATH]) }
-        @entries = others + yield(reached)
+        replaced, reached = reached.partition { |entry| replaced_here?(entry, reached) }
+        @entries = others + replaced + yield(reached)
+      end
+
+      # Whether a candidate of an enclosing branch has every side redefined
+      # by a candidate of a nested branch the call runs in: whenever the
+      # call runs, that later definition has run.
+      def replaced_here?(entry, reached)
+        path = entry[Marks::PATH]
+        reached.any? do |later|
+          inner = later[Marks::PATH]
+          inner.size > path.size && inner.first(path.size) == path && @path.first(inner.size) == inner &&
+            later.values_at('owner', 'name') == entry.values_at('owner', 'name') &&
+            (Marks.slots(entry) - Marks.slots(later)).empty?
+        end
       end
 
       # Whether a candidate made on +path+ can be held where the walk is:

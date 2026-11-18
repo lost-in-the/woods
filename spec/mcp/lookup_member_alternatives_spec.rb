@@ -42,6 +42,21 @@ RSpec.describe Woods::MCP::LookupMember, 'over alternative definitions of one me
     data['candidates'].map { |candidate| candidate.dig('member', 'file_line') }
   end
 
+  # The published source of Alternative with +concern+ (module Choosing)
+  # inlined as a commented block.
+  def includer_of(concern)
+    framed = concern.lines.map { |line| "  # #{line.rstrip}" }.join("\n")
+    <<~RUBY
+      class Alternative
+      end
+      # ┌─────────────────────────────────────────────────────────────────────┐
+      # │ Included from: #{'Choosing'.ljust(54)}│
+      # └─────────────────────────────────────────────────────────────────────┘
+      #{framed}
+      # ─────────────────────────── End Choosing ───────────────────────────
+    RUBY
+  end
+
   let(:if_else) { <<~RUBY }
     class Alternative
       if FLAG
@@ -194,18 +209,7 @@ RSpec.describe Woods::MCP::LookupMember, 'over alternative definitions of one me
       end
     RUBY
 
-    let(:includer) do
-      framed = concern.lines.map { |line| "  # #{line.rstrip}" }.join("\n")
-      <<~RUBY
-        class Alternative
-        end
-        # ┌─────────────────────────────────────────────────────────────────────┐
-        # │ Included from: #{'Choosing'.ljust(54)}│
-        # └─────────────────────────────────────────────────────────────────────┘
-        #{framed}
-        # ─────────────────────────── End Choosing ───────────────────────────
-      RUBY
-    end
+    let(:includer) { includer_of(concern) }
 
     # The concern line of the class method Ruby gives the includer when
     # FLAG is +flag+.
@@ -233,6 +237,81 @@ RSpec.describe Woods::MCP::LookupMember, 'over alternative definitions of one me
       data = answer(unit_for(includer, identity_lines: 2), 'Alternative.wrapped')
 
       expect(data['member']).to include('kind' => 'singleton', 'file_unit' => 'Choosing', 'file_line' => 10)
+    end
+  end
+
+  # A controller's concerns are not written in include order, but the
+  # alternatives of one concern's body are still that body's.
+  describe 'in the body of the one inlined concern of a controller' do
+    let(:concern) { <<~RUBY }
+      module Choosing
+        extend ActiveSupport::Concern
+        if FLAG
+          def pick = :first
+        else
+          def pick = :second
+        end
+        def kept = :kept
+      end
+    RUBY
+
+    def includer_line(flag, name)
+      namespace = Module.new
+      namespace.const_set(:FLAG, flag)
+      namespace.module_eval(concern, 'choosing.rb', 1)
+      Class.new.include(namespace::Choosing).instance_method(name).source_location.last
+    end
+
+    it 'lists the alternatives of the concern as candidates' do
+      expect([includer_line(true, :pick), includer_line(false, :pick)]).to eq([4, 6])
+
+      data = answer(unit_for(includer_of(concern), type: :controller, identity_lines: 2))
+
+      expect(data).not_to have_key('member')
+      expect(data['candidates'].map { |candidate| candidate['member'].values_at('file_unit', 'file_line') })
+        .to eq([['Choosing', 4], ['Choosing', 6]])
+      expect(data).not_to have_key('other_definitions')
+      expect(data['statement']).to include('concern Choosing, inlined into controller unit Alternative,')
+    end
+
+    it 'answers a single definition of the concern as the member' do
+      data = answer(unit_for(includer_of(concern), type: :controller, identity_lines: 2), 'Alternative#kept')
+
+      expect(data['member']).to include('file_unit' => 'Choosing', 'file_line' => 8)
+      expect(data).not_to have_key('candidates')
+    end
+  end
+
+  # Ruby runs the later of two definitions on one line last; a sort by line
+  # alone leaves their order to chance.
+  describe 'with a definite and a conditional definition on one line' do
+    let(:one_line) { 'def pick = :plain; def pick = :conditional if FLAG' }
+
+    def evaluated(source, flag)
+      namespace = Module.new
+      namespace.const_set(:FLAG, flag)
+      namespace.module_eval(source, path, 1)
+      namespace.const_get(:Alternative).new.pick
+    end
+
+    it 'lists both as candidates of the own body, the definite one first' do
+      source = "class Alternative\n  #{one_line}\nend\n"
+      expect([evaluated(source, true), evaluated(source, false)]).to eq(%i[conditional plain])
+
+      data = answer(unit_for(source))
+
+      expect(data).not_to have_key('member')
+      expect(data['candidates'].map { |candidate| [candidate.dig('member', 'file_line'), candidate['note']] })
+        .to eq([[2, nil], [2, 'defined under a condition']])
+    end
+
+    it 'lists both as candidates of an inlined concern' do
+      concern = "module Choosing\n  #{one_line}\nend\n"
+      data = answer(unit_for(includer_of(concern), identity_lines: 2))
+
+      expect(data).not_to have_key('member')
+      expect(data['candidates'].map { |candidate| [candidate.dig('member', 'file_line'), candidate['note']] })
+        .to eq([[2, nil], [2, 'defined under a condition']])
     end
   end
 end

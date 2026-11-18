@@ -469,6 +469,24 @@ RSpec.describe Woods::MethodTable do
       )
     end
 
+    it 'applies a call in a nested branch to an enclosing candidate the branch does not redefine on that side' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            def x; end
+            def self.a; end
+            if Feature.beta?
+              private :x
+              private_class_method def a; end
+            end
+          end
+        end
+      RUBY
+
+      expect(table(source).map { |name, kind, line, _, visibility| [name, kind, line, visibility] })
+        .to eq([['x', 'instance', 3, 'private'], ['a', 'singleton', 4, 'private'], ['a', 'instance', 7, 'public']])
+    end
+
     it 'makes every alternative of a name a module function, and keeps candidates beside a definite source' do
       source = <<~RUBY
         module Util

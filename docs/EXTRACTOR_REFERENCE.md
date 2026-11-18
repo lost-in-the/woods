@@ -174,6 +174,8 @@ published `source_code` coordinates, sorted by line.
     A later candidate in the same branch, or in a branch that encloses it, replaces it too.
   - A visibility call on such a path acts on that path's candidates only: those of the branches that enclose it
     or are nested in its own, never another branch's. A bare `private` there lasts to the end of its branch.
+    It skips an enclosing branch's candidate that a nested branch around the call redefines on every side:
+    Ruby holds that outer definition only when the nested branch does not run, and then the call does not run either.
   - `module_function :a` makes each alternative of `a` a module function where it stands.
 - The table holds the methods Ruby holds once the body has run, one entry per method and side.
   A later definition replaces an earlier one on the same side (`def a` twice keeps the later, with the visibility in
