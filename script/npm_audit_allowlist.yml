@@ -1,0 +1,9 @@
+# Advisories `script/npm-audit` lets through, by GHSA id and package.
+# An entry fails the audit once its advisory leaves the report, and from the day after its re-check date.
+- ghsa: GHSA-fc5q-39xc-vjpf
+  package: picomatch
+  reason: >-
+    upstream disputes the report and no patched release exists;
+    the dependency is test-only (the Inspector's vite) and not shipped in the gem;
+    CI supplies no untrusted glob patterns
+  recheck: 2027-02-15

@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Runs `npm audit --json` in the current directory and fails on any advisory
+# at moderate or above that script/npm_audit_allowlist.yml does not name.
+# Prints one line per decision. Run it after `npm ci`.
+#
+#   script/npm-audit
+require 'date'
+require 'open3'
+require_relative 'npm_audit_check'
+
+begin
+  allowlist = NpmAuditCheck.load_allowlist(NpmAuditCheck::ALLOWLIST_PATH)
+  # npm exits 1 both for findings and for its own errors, so only the report's shape is trusted.
+  output, _status = Open3.capture2('npm', 'audit', '--json')
+  report = NpmAuditCheck.parse_report(output)
+rescue NpmAuditCheck::Error, SystemCallError => e
+  abort "npm-audit: #{e.message}"
+end
+
+result = NpmAuditCheck.evaluate(report, allowlist, today: Date.today)
+puts result.lines
+abort "npm-audit: #{result.failures} failure(s)" unless result.passed?
+puts 'npm-audit: passed'

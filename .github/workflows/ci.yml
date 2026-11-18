@@ -539,8 +539,10 @@ jobs:
           cache: npm
       - name: Install pinned Inspector
         run: npm ci --ignore-scripts
+      # Fails on any moderate or worse advisory that script/npm_audit_allowlist.yml
+      # does not name by GHSA id, and on an allowlist entry that is stale or overdue.
       - name: Audit Inspector dependencies
-        run: npm audit --audit-level=moderate
+        run: ruby script/npm-audit
       - name: Run MCP process contracts
         env:
           WOODS_RUN_HTTP_SERVER: '1'

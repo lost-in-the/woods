@@ -1,0 +1,111 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "picomatch": {
+      "name": "picomatch",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1247710,
+          "name": "picomatch",
+          "dependency": "picomatch",
+          "title": "picomatch vulnerable to ReDoS through single-branch repeated extglobs",
+          "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=4.0.7"
+        }
+      ],
+      "effects": [
+        "fdir",
+        "tinyglobby",
+        "vite"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/picomatch"
+      ],
+      "fixAvailable": {
+        "name": "@modelcontextprotocol/inspector",
+        "version": "0.15.0",
+        "isSemVerMajor": true
+      }
+    },
+    "fdir": {
+      "name": "fdir",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "picomatch"
+      ],
+      "effects": [],
+      "range": ">=5.2.1",
+      "nodes": [
+        "node_modules/fdir"
+      ],
+      "fixAvailable": true
+    },
+    "tinyglobby": {
+      "name": "tinyglobby",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "fdir",
+        "picomatch"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/tinyglobby"
+      ],
+      "fixAvailable": true
+    },
+    "vite": {
+      "name": "vite",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "picomatch",
+        "tinyglobby"
+      ],
+      "effects": [
+        "@modelcontextprotocol/inspector",
+        "@vitejs/plugin-react"
+      ],
+      "range": ">=6.3.0-beta.0",
+      "nodes": [
+        "node_modules/vite"
+      ],
+      "fixAvailable": {
+        "name": "@modelcontextprotocol/inspector",
+        "version": "0.15.0",
+        "isSemVerMajor": true
+      }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 6,
+      "critical": 0,
+      "total": 6
+    },
+    "dependencies": {
+      "prod": 1,
+      "dev": 156,
+      "optional": 39,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 156
+    }
+  }
+}
