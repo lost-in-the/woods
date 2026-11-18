@@ -313,5 +313,171 @@ RSpec.describe Woods::MCP::LookupMember, 'over alternative definitions of one me
       expect(data['candidates'].map { |candidate| [candidate.dig('member', 'file_line'), candidate['note']] })
         .to eq([[2, nil], [2, 'defined under a condition']])
     end
+
+    it 'lists two bodies that start on one line in source order' do
+      source = <<~RUBY
+        class Alternative
+          if FLAG then def pick = :first else def pick
+            :second
+          end end
+        end
+      RUBY
+      expect([evaluated(source, true), evaluated(source, false)]).to eq(%i[first second])
+
+      data = answer(unit_for(source))
+
+      expect(data['candidates'].map { |candidate| candidate.dig('member', 'end_line') }).to eq([2, 4])
+    end
+  end
+
+  # Alternatives that Ruby may all skip leave the next definition callable:
+  # it is named as the fallback, never as overridden. Alternatives that
+  # cover every branch (an `if` with an `else`) replace it.
+  describe 'with a definition the alternatives may leave in place' do
+    let(:parent) { "class Parent\n  def pick = :parent\nend\n" }
+
+    def service(identifier, source, parent: nil)
+      unit = Woods::ExtractedUnit.new(type: :service, identifier: identifier, file_path: "app/#{identifier}.rb")
+      unit.source_code = source
+      Woods::MethodTable.record(unit)
+      unit.metadata[:parent_class] = parent if parent
+      JSON.parse(JSON.generate(unit.to_h))
+    end
+
+    def child_answer(child)
+      units = { 'Child' => service('Child', child, parent: 'Parent'), 'Parent' => service('Parent', parent) }
+      described_class.answer(units['Child'], described_class.parse('Child#pick'),
+                             find_unit: ->(name, _type) { units[name] })
+    end
+
+    # What Child.new.pick returns with the conditions set to +flags+.
+    def called(child, **flags)
+      namespace = Module.new
+      flags.each { |name, value| namespace.const_set(name, value) }
+      namespace.module_eval(parent)
+      namespace.module_eval(child)
+      namespace.const_get(:Child).new.pick
+    end
+
+    it 'names the parent as the fallback of two independent conditions' do
+      child = "class Child < Parent\n  if A\n    def pick = :a\n  end\n  if B\n    def pick = :b\n  end\nend\n"
+      expect(called(child, A: false, B: false)).to eq(:parent)
+
+      data = child_answer(child)
+
+      expect(data['candidates'].map { |candidate| candidate.dig('member', 'line') }).to eq([3, 6])
+      expect(data).not_to have_key('other_definitions')
+      expect(data['caveats']).to eq(['Where Ruby runs none of the definitions above, it calls the next ' \
+                                     'definition of pick: line 2 of the published source of Parent.'])
+    end
+
+    it 'names the parent as the fallback of a lone conditional definition' do
+      child = "class Child < Parent\n  def pick = :a if A\nend\n"
+      expect(called(child, A: false)).to eq(:parent)
+
+      data = child_answer(child)
+
+      expect(data['member']).to include('line' => 2)
+      expect(data).not_to have_key('other_definitions')
+      expect(data['caveats'].last).to eq('Where Ruby runs none of the definitions above, it calls the next ' \
+                                         'definition of pick: line 2 of the published source of Parent.')
+    end
+
+    it 'keeps the parent overridden by an if and its else' do
+      child = "class Child < Parent\n  if A\n    def pick = :a\n  else\n    def pick = :b\n  end\nend\n"
+      expect([called(child, A: true), called(child, A: false)]).to eq(%i[a b])
+
+      data = child_answer(child)
+
+      expect(data['candidates'].map { |candidate| candidate.dig('member', 'line') }).to eq([3, 5])
+      expect(data['other_definitions'].map { |entry| entry.values_at('unit', 'line') }).to eq([['Parent', 2]])
+      expect(data).not_to have_key('caveats')
+    end
+
+    # Each body defines pick under A and B; the parent is overridden only
+    # where Ruby calls it on no combination of the two.
+    {
+      'if, elsif and else' => ['if A then def pick = :a elsif B then def pick = :b else def pick = :c end', true],
+      'if and elsif' => ['if A then def pick = :a elsif B then def pick = :b end', false],
+      'unless and else' => ['unless A then def pick = :a else def pick = :b end', true],
+      'case with an else' => ['case A when true then def pick = :a else def pick = :b end', true],
+      'case without an else' => ['case A when true then def pick = :a when nil then def pick = :b end', false],
+      'an if and its else, nested in a branch' =>
+        ["if A\n    if B then def pick = :a else def pick = :b end\n  else def pick = :c end", true],
+      'a block' => ['[].each { def pick = :a }; if A then def pick = :b end', false]
+    }.each do |form, (body, covered)|
+      it "#{covered ? 'overrides' : 'falls back to'} the parent for #{form}, as Ruby does" do
+        child = "class Child < Parent\n  #{body}\nend\n"
+        reached = [true, false].product([true, false]).map { |a, b| called(child, A: a, B: b) }
+        expect(reached.include?(:parent)).to eq(!covered)
+
+        data = child_answer(child)
+
+        expect(data.key?('other_definitions')).to eq(covered)
+      end
+    end
+
+    it 'lists no earlier plain definition that an if and its else both replace' do
+      source = <<~RUBY
+        class Alternative
+          def pick = :plain
+          if FLAG
+            def pick = :first
+          else
+            def pick = :second
+          end
+        end
+      RUBY
+      expect([installed_line(source, true), installed_line(source, false)]).to eq([4, 6])
+
+      data = answer(unit_for(source))
+
+      expect(candidate_lines(data)).to eq([4, 6])
+      expect(data['other_definitions'].map { |entry| entry['line'] }).to eq([2])
+    end
+
+    it 'lists no earlier plain definition of an inlined concern that an if and its else both replace' do
+      concern = <<~RUBY
+        module Choosing
+          def pick = :plain
+          if FLAG
+            def pick = :first
+          else
+            def pick = :second
+          end
+        end
+      RUBY
+      namespace = Module.new
+      namespace.const_set(:FLAG, false)
+      namespace.module_eval(concern)
+      expect(Class.new.include(namespace::Choosing).new.pick).to eq(:second)
+
+      data = answer(unit_for(includer_of(concern), identity_lines: 2))
+
+      expect(data['candidates'].map { |candidate| candidate['member'].values_at('file_unit', 'file_line') })
+        .to eq([['Choosing', 4], ['Choosing', 6]])
+      expect(data['other_definitions'].map { |entry| entry['file_line'] }).to eq([2])
+    end
+
+    it 'names the plain definition past a call that may define the name, and lists neither as overridden' do
+      source = <<~RUBY
+        class Alternative
+          def self.maybe_define(name) = name
+          def pick = :plain
+          maybe_define :pick
+          def pick = :conditional if FLAG
+        end
+      RUBY
+      expect([installed_line(source, true), installed_line(source, false)]).to eq([5, 3])
+
+      data = answer(unit_for(source))
+
+      expect(data['member']).to include('line' => 5)
+      expect(data).not_to have_key('other_definitions')
+      expect(data['caveats'].last).to eq('Where Ruby runs none of the definitions above, it calls `maybe_define` ' \
+                                         '(line 4 of the published source of Alternative), which may define ' \
+                                         'pick, and otherwise the next definition of pick: line 3 of the ' \
+                                         'published source of Alternative.')
+    end
   end
 end

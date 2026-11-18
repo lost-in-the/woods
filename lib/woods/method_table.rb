@@ -160,7 +160,7 @@ module Woods
           end
 
           names = given_names(argument, owner, scope, state)
-          mark { |entries| Marks.visibility(entries, names, owner, scope, visibility) }
+          mark(scope) { |entries| Marks.visibility(entries, names, owner, scope, visibility) }
           []
         end
       end
@@ -186,7 +186,7 @@ module Woods
           end
 
           names = given_names(argument, owner, scope, state) unless argument.is_a?(Prism::ArrayNode)
-          mark { |entries| Marks.module_functions(entries, Array(names), owner) } if scope == 'instance'
+          mark('instance') { |entries| Marks.module_functions(entries, Array(names), owner) } if scope == 'instance'
           []
         end
       end
@@ -199,24 +199,25 @@ module Woods
         node.arguments&.arguments.to_a.flat_map do |argument|
           unless argument.is_a?(Prism::DefNode)
             names = given_names(argument, owner, 'instance', state)
-            mark { |entries| Marks.visibility(entries, names, owner, 'singleton', visibility) }
+            mark('singleton') { |entries| Marks.visibility(entries, names, owner, 'singleton', visibility) }
             next []
           end
 
-          inline_definition(argument, owner, 'instance', state) do |entries, name|
+          inline_definition(argument, owner, 'instance', state, target: 'singleton') do |entries, name|
             Marks.visibility(entries, [name], owner, 'singleton', visibility)
           end
         end
       end
 
+      # @param target [String] the side the call acts on
       # @yieldparam entries [Array<Hash>] the entries the call can act on
       # @yieldparam name [String] the name the `def` returns
       # @yieldreturn [Array<Hash>] the entries the call leaves
       # @return [Array] nothing more to place
-      def inline_definition(node, owner, scope, state)
+      def inline_definition(node, owner, scope, state, target: scope)
         entry = plain_definition(node, owner, scope, state)
         place(entry) if entry
-        mark { |entries| yield(entries, node.name.to_s) }
+        mark(target) { |entries| yield(entries, node.name.to_s) }
         []
       end
 
@@ -226,26 +227,38 @@ module Woods
       # own), never a definite definition or a candidate of another branch,
       # nor one that a later candidate of a branch around the call replaced.
       #
+      # @param target [String] the side the call acts on
       # @yieldparam entries [Array<Hash>]
       # @yieldreturn [Array<Hash>] those entries after the call
-      def mark
+      def mark(target)
         return @entries = yield(@entries) unless @candidate
 
         reached, others = @entries.partition { |entry| entry.key?(CANDIDATE) && on_path?(entry[Marks::PATH]) }
-        replaced, reached = reached.partition { |entry| replaced_here?(entry, reached) }
+        replaced, reached = split_replaced(reached, target)
         @entries = others + replaced + yield(reached)
       end
 
-      # Whether a candidate of an enclosing branch has every side redefined
-      # by a candidate of a nested branch the call runs in: whenever the
-      # call runs, that later definition has run.
-      def replaced_here?(entry, reached)
+      # [replaced, still reached]. Only candidates of one name are compared,
+      # and a branch whose candidates share one depth has none replaced.
+      def split_replaced(reached, target)
+        return [[], reached] if reached.map { |entry| entry[Marks::PATH].size }.uniq.size < 2
+
+        named = reached.group_by { |entry| entry.values_at('owner', 'name') }
+        reached.partition { |entry| replaced_here?(entry, named[entry.values_at('owner', 'name')], target) }
+      end
+
+      # Whether a candidate of an enclosing branch has the side the call
+      # acts on (every side, when it holds no such side) redefined by a
+      # candidate of the same name in a nested branch the call runs in:
+      # whenever the call runs, that later definition has run.
+      def replaced_here?(entry, same_name, target)
         path = entry[Marks::PATH]
-        reached.any? do |later|
+        slots = Marks.slots(entry)
+        slots &= [target] if slots.include?(target)
+        same_name.any? do |later|
           inner = later[Marks::PATH]
           inner.size > path.size && inner.first(path.size) == path && @path.first(inner.size) == inner &&
-            later.values_at('owner', 'name') == entry.values_at('owner', 'name') &&
-            (Marks.slots(entry) - Marks.slots(later)).empty?
+            (slots - Marks.slots(later)).empty?
         end
       end
 

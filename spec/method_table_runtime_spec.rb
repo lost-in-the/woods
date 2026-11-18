@@ -530,4 +530,30 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
       expect(described_class.call(source).map { |entry| entry['line'] }.uniq.sort).to eq(taken.values.flatten.uniq.sort)
     end
   end
+
+  # The nested `def x` replaces only the instance side of the outer module
+  # function, so `public` there reaches no instance body of the outer branch.
+  it 'leaves the instance side of an outer module function private when a nested branch redefines it public' do
+    source = <<~RUBY
+      module Util
+        if FLAG
+          module_function def x; end
+          if FLAG == :inner
+            public def x; end
+          end
+        end
+      end
+    RUBY
+    held = lambda do |flag|
+      namespace = Module.new
+      namespace.const_set(:FLAG, flag)
+      namespace.module_eval(source)
+      defined_facts(namespace)
+    end
+
+    expect(table_facts(source, lines: [3])).to eq(held.call(:outer))
+    expect(held.call(:inner)).to eq({ ['Util', :instance, 'x'] => ['public', 5],
+                                      ['Util', :singleton, 'x'] => ['public', 3] })
+    expect(table_facts(source, lines: [5])).to eq({ ['Util', :instance, 'x'] => ['public', 5] })
+  end
 end

@@ -22,3 +22,7 @@
   It lists them under `candidates` with a statement that Woods cannot tell which one Ruby calls,
   unless a controller's `action_sources` names the one Ruby installed.
   The method table now also reads definitions in the branches of a `case` as `candidate: "conditional"`.
+  Where Ruby may run none of those definitions and their body holds no plain `def` to fall back to, the next
+  definition (the superclass's, or a plain `def` behind a call Woods does not know) is named in a caveat as the
+  one Ruby then calls, not listed as overridden.
+  An earlier plain `def` that an `if` and its `else` both replace is listed as overridden, not as a candidate.
