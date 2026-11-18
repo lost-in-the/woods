@@ -81,6 +81,31 @@ RSpec.describe 'Units re-extracted when an edit moves what their references reso
     expect(retargeted(changes)).to contain_exactly('Pinging', 'Pinned')
   end
 
+  def register_model(identifier, dependencies)
+    unit = Woods::ExtractedUnit.new(type: :model, identifier: identifier,
+                                    file_path: @root.join("app/models/#{identifier.downcase}.rb").to_s)
+    unit.dependencies = dependencies
+    graph.register(unit)
+  end
+
+  it 'selects the units that include or inherit a selected module, though their sources do not list it' do
+    referrer('app/models/concerns/pinging.rb', 'Pinging', "module Pinging\n  def ping = AlertJob.perform_later\nend\n")
+    register_model('Pinned', [{ type: :concern, target: 'Pinging', via: :include }])
+    register_model('SpecialPinned', [{ type: :model, target: 'Pinned', via: :inheritance }])
+    changes = edit('app/jobs/pinging/alert_job.rb', "class Pinging::AlertJob < ApplicationJob\nend\n")
+
+    expect(retargeted(changes)).to contain_exactly('Pinging', 'Pinned', 'SpecialPinned')
+  end
+
+  it 'leaves out a unit that only references a module consumer' do
+    referrer('app/models/concerns/pinging.rb', 'Pinging', "module Pinging\n  def ping = AlertJob.perform_later\nend\n")
+    register_model('Pinned', [{ type: :concern, target: 'Pinging', via: :include }])
+    register_model('Ledger', [{ type: :model, target: 'Pinned', via: :belongs_to }])
+    changes = edit('app/jobs/pinging/alert_job.rb', "class Pinging::AlertJob < ApplicationJob\nend\n")
+
+    expect(retargeted(changes)).to contain_exactly('Pinging', 'Pinned')
+  end
+
   it 'falls back to the constants an opaque file declares' do
     changes = edit('app/jobs/host/ping_job.rb', "class Host::PingJob < ::PingJob\nend\nHost.const_set(:Other, 1)\n")
 

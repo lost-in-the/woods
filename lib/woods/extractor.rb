@@ -3948,11 +3948,29 @@ module Woods
     # reference names: a job nested under the referring class shadows the
     # top-level one. The graph before the run holds no edge to the new
     # constant, so the units naming a touched constant are added by name.
+    # A class that includes, extends or inherits a selected unit runs its code
+    # and records what it resolves (a concern's callback enqueues on the
+    # model), though its own source does not hold the reference.
     # @param scope [RenderScope]
     # @return [Array<String>] identifiers of units to re-extract
     def reference_retarget_ids(scope)
       leaves = scope.touched_leaves
-      leaves.empty? ? [] : source_reference_owners_naming(leaves)
+      leaves.empty? ? [] : structural_consumers(source_reference_owners_naming(leaves))
+    end
+
+    # +seeds+ and every unit that reaches one through {STRUCTURAL_VIAS} edges
+    # alone, in the pre-change graph. A graph read from JSON keys a via as a
+    # String, a registered unit as a Symbol.
+    # @param seeds [Array<String>] identifiers
+    # @return [Array<String>]
+    def structural_consumers(seeds)
+      vias = STRUCTURAL_VIAS + STRUCTURAL_VIAS.map(&:to_sym)
+      reached = seeds.to_set
+      queue = seeds.dup
+      while (current = queue.shift)
+        @dependency_graph.dependents_of(current, via: vias).each { |dep| queue << dep if reached.add?(dep) }
+      end
+      reached.to_a
     end
 
     # @param identifier [String] controller constant name

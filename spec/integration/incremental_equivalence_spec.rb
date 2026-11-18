@@ -5697,7 +5697,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   # file, and every edge of the graph before the run, stays the same.
   describe 'a constant added or removed under the scope of an untouched reference' do
     let(:shadow_constants) do
-      %i[ShadowProbeWitness ShadowProbeHost ShadowLedger ShadowDepot ShadowProbeJob ShadowAuditService ShadowOtherJob]
+      %i[ShadowProbeWitness ShadowProbeHost ShadowLedger ShadowDepot ShadowProbeJob ShadowAuditService ShadowOtherJob
+         ShadowPingHost ShadowPinging]
     end
 
     after do
@@ -5929,6 +5930,61 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(touched).to include('ShadowProbeHost::ShadowOtherJob')
       expect(touched).not_to include('ShadowProbeHost', 'ShadowLedger::Entry')
       expect(differences(index, full_extraction)).to be_empty
+    end
+
+    # The model runs the concern's callback and records its job, but its own
+    # source lists only the model file. Only the concern names the job.
+    def write_concern_fixture
+      write_shadow_fixture
+      load_written('app/models/concerns/shadow_pinging.rb', <<~RUBY)
+        module ShadowPinging
+          extend ActiveSupport::Concern
+          included { after_save :ping_probe }
+
+          def ping_probe = ShadowProbeJob.perform_later
+        end
+      RUBY
+      load_written('app/models/shadow_ping_host.rb', <<~RUBY)
+        class ShadowPingHost < ApplicationRecord
+          self.table_name = 'posts'
+          include ShadowPinging
+        end
+      RUBY
+    end
+
+    def enqueued_by_callbacks(index, identifier)
+      unit_snapshot(index).find { |key, data| key.start_with?('models/') && data['identifier'] == identifier }
+                          .last.dig('metadata', 'callbacks')
+                          .flat_map { |callback| callback.dig('side_effects', 'jobs_enqueued') || [] }
+    end
+
+    it 'retargets a model whose callback comes from an untouched concern when a job is nested in the concern' do
+      write_concern_fixture
+      index = full_extraction
+      added = load_written('app/jobs/shadow_pinging/shadow_probe_job.rb', nested_job('ShadowPinging'))
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowPinging', 'ShadowPingHost')
+      expect(touched).not_to include('ShadowLedger')
+      clean = full_extraction
+      expect(enqueued_by_callbacks(index, 'ShadowPingHost')).to eq(enqueued_by_callbacks(clean, 'ShadowPingHost'))
+      expect(differences(index, clean)).to be_empty
+    end
+
+    it 'retargets a model whose callback comes from an untouched concern when the nested job is removed' do
+      write_concern_fixture
+      nested = load_written('app/jobs/shadow_pinging/shadow_probe_job.rb', nested_job('ShadowPinging'))
+      index = full_extraction
+      delete_file(nested)
+      remove_nested(:ShadowPinging, :ShadowProbeJob)
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([nested])
+
+      expect(touched).to include('ShadowPinging', 'ShadowPingHost')
+      clean = full_extraction
+      expect(enqueued_by_callbacks(index, 'ShadowPingHost')).to eq(enqueued_by_callbacks(clean, 'ShadowPingHost'))
+      expect(differences(index, clean)).to be_empty
     end
   end
 
