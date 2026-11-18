@@ -68,21 +68,25 @@ module Woods
       # PostgreSQL, MySQL and MariaDB: server at "h" (10.0.0.1), for user "u",
       # database 'd', 'u'@'h', host name "h", server on 'h', through socket 's'
       [/\b((?:#{QUOTING_PHRASES})\s+)(?:#{QUOTED})(@(?:#{QUOTED}))?/i, "\\1\"#{MARK}\""],
-      [/(server at "#{Regexp.escape(MARK)}"\s+)\([^)]*\)/, "\\1(#{MARK})"]
+      [/(server at (?:#{QUOTED})\s+)\([^)]*\)/, "\\1(#{MARK})"]
     ].freeze
     private_constant :FORMS
 
     @values = Set.new
     @lock = Mutex.new
 
-    class << self
-      # Registered values go first, whole, so a form cannot split one; then
-      # the forms.
+    class << self # rubocop:disable Metrics/ClassLength -- one redaction policy for every diagnostic site
+      # Registered values and forms are both found in the original text, so
+      # neither can split or hide the other: a registered +password+ still
+      # leaves +password=x+ recognisable. Their spans are removed together,
+      # then the forms run once more over the result.
       #
       # @param text [#to_s, nil] in any encoding, valid or not
       # @return [String] +text+ as valid UTF-8, without connection details
       def redact(text)
-        result = remove_registered(utf8(text))
+        original = utf8(text)
+        registered = registered_spans(original)
+        result = remove_spans(original, form_spans(original, merge_spans(registered)) + registered)
         FORMS.each { |pattern, replacement| result = result.gsub(pattern, replacement) }
         result
       end
@@ -152,20 +156,71 @@ module Woods
         string.encode(Encoding::UTF_8, invalid: :replace, undef: :replace).scrub
       end
 
-      # Every character inside an occurrence of any registered value is
-      # removed, so values that overlap or contain one another leave no part.
-      def remove_registered(text)
-        spans = values.flat_map do |value|
-          text.enum_for(:scan, value_pattern(value)).map { Regexp.last_match.offset(0) }
+      # What each form removes: the match after its kept first group, and the
+      # text that replaces it. As when the forms run in turn, an earlier form
+      # wins where two overlap, and the second pass applies the later one;
+      # unless a +registered+ span hides the later one's first group.
+      def form_spans(text, registered)
+        hidden = []
+        kept = FORMS.reduce([]) do |spans, (pattern, replacement)|
+          fresh, overlapping = form_matches(text, pattern, replacement)
+                               .partition { |_, from, to, _| !overlaps?(spans, from, to) }
+          hidden.concat(overlapping.select { |start, from, _, _| overlaps?(registered, start, from) })
+          (spans + fresh.map { |span| span.drop(1) }).sort
         end
-        merge_spans(spans).reverse_each.with_object(text.dup) { |(from, to), result| result[from...to] = MARK }
+        kept + hidden.map { |span| span.drop(1) }
+      end
+
+      def form_matches(text, pattern, replacement)
+        tail = replacement.delete_prefix('\\1')
+        text.enum_for(:scan, pattern).map do
+          start, to = byte_offsets(Regexp.last_match, 0)
+          [start, byte_offsets(Regexp.last_match, 1)[1], to, tail]
+        end
+      end
+
+      # A character offset into UTF-8 text walks the text from its start,
+      # so offsets are bytes; Ruby before 3.2 has no +byteoffset+.
+      def byte_offsets(match, group)
+        return match.byteoffset(group) if match.respond_to?(:byteoffset)
+
+        offsets = match.offset(group)
+        match.string.ascii_only? ? offsets : offsets.map { |at| match.string[0, at].bytesize }
+      end
+
+      # +spans+ are sorted and disjoint, so the first to end after +from+ is
+      # the only one that can overlap.
+      def overlaps?(spans, from, to)
+        span = spans.bsearch { |_, span_to, _| span_to > from }
+        !span.nil? && span[0] < to
+      end
+
+      def registered_spans(text)
+        values.flat_map do |value|
+          text.enum_for(:scan, value_pattern(value)).map { [*byte_offsets(Regexp.last_match, 0), MARK] }
+        end
+      end
+
+      # Every character inside any span is removed, so spans that overlap or
+      # contain one another leave no part. A merged span keeps the
+      # replacement of the first span that covers all of it, else +MARK+.
+      def remove_spans(text, spans)
+        result = +''
+        last = merge_spans(spans).reduce(0) do |at, (from, to, tail)|
+          result << text.byteslice(at, from - at) << tail
+          to
+        end
+        result << text.byteslice(last, text.bytesize - last)
       end
 
       def merge_spans(spans)
-        spans.sort.each_with_object([]) do |(from, to), merged|
-          next merged << [from, to] if merged.empty? || from > merged.last[1]
+        ordered = spans.each_with_index.sort_by { |(from, to, _), index| [from, -to, index] }.map(&:first)
+        ordered.each_with_object([]) do |(from, to, tail), merged|
+          next merged << [from, to, tail] if merged.empty? || from > merged.last[1]
+          next if to <= merged.last[1]
 
-          merged.last[1] = [merged.last[1], to].max
+          merged.last[1] = to
+          merged.last[2] = MARK
         end
       end
 
@@ -181,16 +236,28 @@ module Woods
         end.compact.map { |value| utf8(value) }.reject(&:empty?).uniq
       end
 
-      # The password percent-decoded as Active Record reads it, +plus+ kept,
-      # and form-decoded as well.
+      # The userinfo password and every password-named query value, each
+      # percent-decoded as Active Record reads it, +plus+ kept, and
+      # form-decoded as well.
       def url_values(url)
         uri = URI.parse(url)
-        password = uri.password
-        return [url] unless password
-
-        [url, uri.userinfo, password, URI::DEFAULT_PARSER.unescape(password), URI.decode_www_form_component(password)]
+        decoded = [uri.password, *query_passwords(uri)].compact.flat_map do |password|
+          [password, URI::DEFAULT_PARSER.unescape(password), URI.decode_www_form_component(password)]
+        end
+        [url, uri.password && uri.userinfo, *decoded]
       rescue URI::Error
         [url]
+      end
+
+      # Active Record splits the query on +&+ alone and the last repeat wins;
+      # it is read split on +;+ as well and every repeat kept, to remove too
+      # much rather than too little.
+      def query_passwords(uri)
+        pairs = (uri.opaque ? uri.opaque.partition('?').last : uri.query.to_s).split('&')
+        (pairs + pairs.flat_map { |pair| pair.split(';') }).uniq.filter_map do |pair|
+          key, value = pair.split('=', 2)
+          value if PASSWORD_KEYS.include?(utf8(URI::DEFAULT_PARSER.unescape(key.to_s)).downcase)
+        end
       end
 
       def hash_values(config)

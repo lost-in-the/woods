@@ -164,6 +164,75 @@ RSpec.describe Woods::DiagnosticRedaction do
       expect(redacted).to eq('auth failed with [REDACTED] and [REDACTED]')
     end
 
+    it "removes a registered URL's query password, as Active Record decodes it, + kept, and as a form decodes it" do
+      described_class.register("postgres://app@db/x?sslmode=require&password=q%2Bs-#{marker}")
+      described_class.register("postgres://app@db/x?password=a+b-#{marker}")
+
+      redacted = described_class.redact("got q+s-#{marker}, q%2Bs-#{marker}, a+b-#{marker} and a b-#{marker}")
+
+      expect(redacted).to eq('got [REDACTED], [REDACTED], [REDACTED] and [REDACTED]')
+    end
+
+    it 'removes every password-named query value: an override, a repeat, a ; separator, a key in any case' do
+      described_class.register("postgres://app:info-#{marker}@db/x?password=over-#{marker}&password=again-#{marker}")
+      described_class.register("postgres://app@db/x?sslmode=require;PASSWORD=semi-#{marker}&pwd=pwd-#{marker}")
+      described_class.register("mysql2://app@db/x?passwd=passwd-#{marker}&sslpassword=ssl-#{marker}")
+      described_class.register("postgres:x?password=opaque-#{marker}")
+      described_class.register("postgres://app@db/x?password=a%26b-#{marker}")
+
+      text = "info-#{marker} over-#{marker} again-#{marker} semi-#{marker} pwd-#{marker} " \
+             "passwd-#{marker} ssl-#{marker} opaque-#{marker} a&b-#{marker}"
+
+      expect(described_class.redact(text)).to eq(Array.new(9, '[REDACTED]').join(' '))
+    end
+
+    it 'ends a query password at the fragment, and registers no empty value and no other parameter' do
+      described_class.register("postgres://app@db/x?password=frag-#{marker}#tail")
+      described_class.register('postgres://app@db/x?password=&sslmode=require')
+
+      expect(described_class.redact("got frag-#{marker}; sslmode require")).to eq('got [REDACTED]; sslmode require')
+    end
+
+    it 'removes a query password holding ;, which Active Record does not split on' do
+      described_class.register("postgres://app@db/x?password=x;y-#{marker}")
+
+      expect(described_class.redact("got x;y-#{marker}")).to eq('got [REDACTED]')
+    end
+
+    it 'keeps every password of a registered URL whose query has a key that is not valid UTF-8' do
+      described_class.register("postgres://app:info-#{marker}@db/x?%FF=1&password=query-#{marker}")
+
+      expect(described_class.redact("got info-#{marker} and query-#{marker}")).to eq('got [REDACTED] and [REDACTED]')
+    end
+
+    it 'removes a registered URL the parser rejected whole, query password and all' do
+      url = "postgres://app #{user}@#{host}/x?password=#{password}"
+      described_class.register(url)
+
+      expect(described_class.redact("bad URI (is not URI?): #{url}")).not_to include(marker)
+    end
+
+    it "keeps every form working when a registered value is one of the forms' own words" do
+      described_class.register('postgres://postgres:postgres@localhost/woods')
+      %w[password username user server redis].each { |word| described_class.register(password: word) }
+      described_class.register('postgres://app@db/x?password=password')
+
+      text = "postgres://app:s1-#{marker}@db/x password=s2-#{marker} {:password=>\"s3-#{marker}\"} " \
+             "username: s4-#{marker}. for user \"s5-#{marker}\" redis://app:s6-#{marker}@cache/0 " \
+             "connection to server at \"s7-#{marker}\" (10.9.8.7), port 5432"
+
+      redacted = described_class.redact(text)
+
+      expect(redacted).not_to include(marker)
+      expect(redacted).not_to include('10.9.8.7')
+    end
+
+    it 'keeps a form that overlaps an earlier one when a registered value hides its key' do
+      described_class.register(password: 'url')
+
+      expect(described_class.redact("url=postgres://u:p@h/x'tail-#{marker}")).not_to include(marker)
+    end
+
     it 'leaves a word that only contains a registered value, and the names it was not given' do
       described_class.register('postgres://postgres:postgres@localhost/woods')
 
@@ -215,6 +284,20 @@ RSpec.describe Woods::DiagnosticRedaction do
       'http://ollama.internal:11434: Connection refused',
       'Unknown metadata_store: cassandra: woods.json names a store adapter this gem cannot build.'
     ].each { |message| expect(described_class.redact(message)).to eq(message) }
+  end
+
+  it 'redacts its own output to the same text, with and without registered values' do
+    texts = [
+      "postgres://u:#{password}@#{host}/x password='#{password}' {:password=>\"#{password}\"} username: #{user}.",
+      %(connection to server at "#{host}" (10.9.8.7) for user "#{user}"; Access denied for user 'u'@'h'),
+      "redis://app:#{password}@after@cache/0 and https://#{user}@qdrant.example:6333/x"
+    ]
+    once = texts.map { |text| described_class.redact(text) }
+    expect(once.map { |text| described_class.redact(text) }).to eq(once)
+
+    described_class.register("postgres://#{user}:#{password}@#{host}/x?password=password")
+    once = texts.map { |text| described_class.redact(text) }
+    expect(once.map { |text| described_class.redact(text) }).to eq(once)
   end
 
   it 'describes an error as its class and redacted message' do
