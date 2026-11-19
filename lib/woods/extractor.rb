@@ -601,7 +601,7 @@ module Woods
       @symlinked_dirs = nil
       # A full run rewrites every unit file of every family it extracts and
       # sweeps the rest, so seeding those is work the run undoes.
-      profile_phase('payload seed') { begin_payload!(rewritten_dirs: replaced_type_dirs) }
+      profile_phase('payload seed') { begin_payload!(rewritten_dirs: replaced_payload_dirs) }
 
       # Eager load once — all extractors need loaded classes for introspection.
       profile_phase('eager load') { safe_eager_load! }
@@ -626,6 +626,7 @@ module Woods
 
       # Phase 1.6: Package membership. Runs before the graph is rebuilt so
       # registration copies metadata[:package] onto the node (#280).
+      Rails.logger.info '[Woods] Annotating units...'
       profile_phase('package annotation') { annotate_packages }
       # Container attribution (W-9) is a function of each unit's own type and
       # metadata, so the incremental path applies it per unit in
@@ -646,6 +647,7 @@ module Woods
       # full extraction has just registered every unit including duplicates,
       # and rebuilding from the deduped set is both cheaper and less
       # error-prone than unwinding registrations one at a time.
+      Rails.logger.info '[Woods] Rebuilding dependency graph...'
       profile_phase('graph rebuild') do
         @dependency_graph = DependencyGraph.new
         @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
@@ -704,28 +706,33 @@ module Woods
         Rails.logger.info '[Woods] Precomputing request flows...'
         profile_phase('flows') { precompute_flows }
       else
-        withdraw_disabled_flows
+        profile_phase('flow withdrawal') { withdraw_disabled_flows }
       end
 
+      Rails.logger.info '[Woods] Writing dependency graph...'
       profile_phase('graph write') do
         write_dependency_graph
         write_graph_analysis
       end
+      Rails.logger.info '[Woods] Writing skipped files report...'
       profile_phase('skipped files') do
         write_skipped_files(@dependency_graph.registered_paths, flow_failures: Array(@flow_failures))
       end
-      profile_phase('commit table') { refresh_commit_table(full: true) }
+      Rails.logger.info '[Woods] Building git commit table...'
+      profile_phase('commit table') { refresh_commit_table }
+      Rails.logger.info '[Woods] Writing manifest...'
       profile_phase('manifest and summary') do
         write_manifest
         write_structural_summary
       end
-      @source_inputs.full_units(@results, consumers: @extractors)
+      profile_phase('source accounting') { @source_inputs.full_units(@results, consumers: @extractors) }
+      Rails.logger.info '[Woods] Publishing generation...'
       published = publish_generation('full')
       # After the publish, and only when it succeeded: an obsolete writer
       # (lock taken over) never reaches the snapshot store.
       profile_phase('snapshot') { capture_published_snapshot } if published
 
-      log_summary
+      profile_phase('summary') { log_summary }
 
       @results
     ensure
@@ -1179,7 +1186,7 @@ module Woods
       skipped_changed = !published_skipped.nil? && skipped != published_skipped
       # HEAD can move while no indexed file does (a commit of files already
       # extracted), and the table must follow it like a full run would.
-      commits_changed = profile_phase('commit table') { refresh_commit_table(full: false) }
+      commits_changed = profile_phase('commit table') { refresh_commit_table }
 
       if touched.empty? && !withdrew_flows && !skipped_changed && !commits_changed
         Rails.logger.info '[Woods] Incremental run changed nothing — leaving manifest timestamp untouched'
@@ -1769,17 +1776,22 @@ module Woods
       end
     end
 
-    # The per-type directories a full run writes in full and then sweeps
-    # ({#sweep_orphaned_unit_files}): every extractor family the configuration
-    # does not gate out. A gated family (`rails_source` with
-    # `include_framework_sources` off) keeps its seeded units, as before.
+    # The payload directories whose JSON a full run writes in full and then
+    # sweeps, so none of it is seeded:
+    #
+    # * every extractor family the configuration does not gate out
+    #   ({#sweep_orphaned_unit_files}). A gated family (`rails_source` with
+    #   `include_framework_sources` off) keeps its seeded units, as before.
+    # * `flows/`, in either mode: {#precompute_flows} writes every document
+    #   and the three indexes again and sweeps the rest, and
+    #   {#withdraw_disabled_flows} removes the directory.
     #
     # On the 11k-unit field app seeding was 3.4s of hardlinks that the run
     # then replaced one by one; the sweep then had nothing to find.
     #
     # @return [Array<String>]
-    def replaced_type_dirs
-      EXTRACTORS.keys.reject { |key| skip_by_configuration?(key) }.map(&:to_s)
+    def replaced_payload_dirs
+      EXTRACTORS.keys.reject { |key| skip_by_configuration?(key) }.map(&:to_s) + PAYLOAD_DIRS
     end
 
     # Uses {PayloadStore#link_or_copy} rather than a bare +FileUtils.ln+ for
@@ -3175,12 +3187,11 @@ module Woods
     # Runs after the graph is final, because the indexed path set is read
     # off it.
     #
-    # @param full [Boolean] whether this is a full extraction
     # @return [Symbol, nil] `:written` or `:withdrawn` when the payload's
     #   table changed, nil when it is unchanged
-    def refresh_commit_table(full:)
+    def refresh_commit_table
       published = published_commit_table
-      table = git_capture.commit_table(published, graph: @dependency_graph, full: full)
+      table = git_capture.commit_table(published, graph: @dependency_graph)
       return nil if table == published
 
       if table
