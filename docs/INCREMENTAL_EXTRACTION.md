@@ -20,12 +20,13 @@ same manifest counts and `graph_analysis.json` — and, when flow
 precomputation is enabled, the same `flows/flow_index.json`, the same
 flow documents, and the same flow annotations on controller units.
 
-Two differences are tolerated, and nothing else:
+`dependency_graph.json` is compared byte for byte, PageRank included.
+Every tolerated difference is a row of `IndexComparison::MASKS` in `spec/support/index_comparison.rb`; the main ones:
 
 | Tolerated | Why |
 |---|---|
 | Wall-clock stamps (`extracted_at`, `generated_at`, and the digest over it) | A unit an incremental run correctly left alone keeps an older stamp. |
-| PageRank beyond six decimal places | Iterative floating point accumulated in each run's registration order. Scores are compared as values; only the last bits are forgiven. |
+| Keyed source digests and capture accounting | Each index has its own private key; an incremental run reuses digests. |
 
 The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.
 A nested metadata field with the same name is application data: changing it
@@ -1015,8 +1016,9 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_8.0.gemfile \
 WOODS_DIFF_BRIEF=4000 ...
 ```
 
-Seeds are fixed, so a failure reproduces. `spec/support/index_comparison.rb`
-owns the definition of "the two indexes agree" and documents every exclusion.
+Seeds are fixed, so a failure reproduces.
+`IndexComparison::MASKS` declares every exclusion once with its reason; a self-check proves each is as wide as declared.
+`WOODS_DIFF_MASKS=1` prints the masks in effect on a green run too, and `WOODS_DIFF_MASK_SEED` reseeds the self-check.
 
 **Run it before and after any change to the incremental path.**
 
