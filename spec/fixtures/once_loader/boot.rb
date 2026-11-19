@@ -12,6 +12,7 @@ require 'woods'
 require 'woods/extractor'
 require 'woods/mcp/index_reader'
 require 'woods/resilience/index_validator'
+require_relative '../../support/index_comparison'
 
 def write_fixture(root, relative, source)
   path = File.join(root, relative)
@@ -116,8 +117,8 @@ Dir.mktmpdir('woods_once_loader') do |root|
   full = Woods::MCP::IndexReader.new(full_output)
   expected.each_key do |identifier|
     check!("full/incremental equivalence #{identifier}") do
-      incremental.find_unit(identifier, type: 'lib').except('extracted_at') ==
-        full.find_unit(identifier, type: 'lib').except('extracted_at')
+      IndexComparison.mask(:unit_extracted_at, incremental.find_unit(identifier, type: 'lib')) ==
+        IndexComparison.mask(:unit_extracted_at, full.find_unit(identifier, type: 'lib'))
     end
   end
   report = Woods::Resilience::IndexValidator.new(index_dir: output, app_root: root).validate

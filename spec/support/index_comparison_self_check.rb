@@ -1,0 +1,599 @@
+# frozen_string_literal: true
+
+require 'fileutils'
+require 'json'
+require_relative 'index_comparison'
+
+module IndexComparison
+  # Proves on a real index that {IndexComparison.compare} can fail, and that
+  # every mask in {MASKS} is exactly as wide as declared.
+  #
+  # Each probe changes one value in a copy of a reference index, compares the
+  # copy against the reference, and puts the file back:
+  #
+  # - `:unmasked`: a value outside every mask. It must be reported, under the
+  #   artifact it lives in.
+  # - `:masked`: a value inside one mask. It must not be reported.
+  # - `:lifted`: the same masked change with that one mask left out of the
+  #   comparison. It must be reported again, so the mask is what hid it.
+  # - `:membership`: a unit file removed, or one added. It must be reported.
+  #
+  # An opt-in mask (`default: false`) is probed the way an example applies it:
+  # masked under {DEFAULT_MASKS} plus that mask, lifted under {DEFAULT_MASKS}
+  # alone. An order mask over an array the index leaves with fewer than two
+  # members is probed on members planted in both copies. A mask over documents
+  # no index holds ({DETACHED_ARTIFACTS}) is probed on a document built from its
+  # path. A declared mask no probe reaches is named by {#unexercised_masks}.
+  #
+  # The files, keys and values are drawn with a seeded Random, so a run is
+  # reproducible from its seed.
+  class SelfCheck # rubocop:disable Metrics/ClassLength
+    # One change and what the comparison said about it.
+    Probe = Struct.new(:kind, :artifact, :file, :path, :mask, :found, keyword_init: true) do
+      # @return [Boolean] whether the comparison answered as the probe requires
+      def expected?
+        return found.empty? if kind == :masked
+
+        found.any? { |line| line.match?(REPORTED_AS.fetch(artifact, //)) }
+      end
+
+      # @return [String]
+      def to_s
+        outcome = found.empty? ? 'no difference' : found.first(2).join(' | ')[0, 300]
+        "#{kind} #{artifact} #{file} #{path.inspect}#{" mask=#{mask}" if mask}: #{outcome}"
+      end
+    end
+
+    # The artifacts the comparison reads, each with how its differences start.
+    REPORTED_AS = {
+      unit: /\A(unit |ghost units|missing units)/,
+      type_index: /\A_index\.json /,
+      dependency_graph: /\Agraph[ :]/,
+      manifest: /\Amanifest: /,
+      skipped_files: /\Askipped_files\.json: /,
+      commit_table: /\Agit_commits\.json: /,
+      graph_analysis: /\Agraph_analysis\.json: /,
+      flow: %r{\Aflow artifact flows/},
+      summary: /\ASUMMARY\.md /,
+      source_references: /\Asource_references\.json: /,
+      source_inputs: /\Asource_inputs\.json[: ]/
+    }.freeze
+
+    SINGLE_FILES = {
+      'dependency_graph.json' => :dependency_graph, 'manifest.json' => :manifest,
+      'skipped_files.json' => :skipped_files, 'git_commits.json' => :commit_table,
+      'graph_analysis.json' => :graph_analysis, 'SUMMARY.md' => :summary,
+      'source_inputs.json' => :source_inputs, 'source_references.json' => :source_references
+    }.freeze
+
+    # How many unit directories, and type indexes, the unmasked probes sample.
+    SAMPLED_TYPES = 4
+
+    # Artifacts of masks an example applies itself, with {IndexComparison.mask},
+    # to documents it builds: no index holds them.
+    DETACHED_ARTIFACTS = %i[impact_report].freeze
+
+    # @param reference_dir [String] a published index; never modified
+    # @param scratch_dir [String] an empty directory for the copy
+    # @param seed [Integer]
+    def initialize(reference_dir, scratch_dir, seed:)
+      # The copy is compared against a second copy, so a probe can plant a
+      # value in both.
+      @reference = File.join(scratch_dir, 'self_check_reference')
+      @copy = File.join(scratch_dir, 'self_check_copy')
+      [@reference, @copy].each { |dir| FileUtils.cp_r(reference_dir, dir) }
+      @payload = IndexComparison.payload_dir(@copy)
+      @reference_payload = IndexComparison.payload_dir(@reference)
+      @random = Random.new(seed)
+      @masks = IndexComparison.default_masks
+    end
+
+    # @return [Array<Probe>] every probe, run once
+    def probes
+      @probes ||= [baseline_probe] + unmasked_probes + masked_probes + membership_probes + [baseline_probe]
+    end
+
+    # @return [Array<Probe>] probes the comparison answered wrongly
+    def failures
+      probes.reject(&:expected?)
+    end
+
+    # @return [Array<Symbol>] compared artifacts no unmasked probe reached
+    def uncovered_artifacts
+      REPORTED_AS.keys - probes.select { |probe| probe.kind == :unmasked }.map(&:artifact)
+    end
+
+    # @return [Array<Symbol>] declared masks, opt-in ones included, no masked probe reached
+    def unexercised_masks
+      MASKS.map(&:name) - probes.select { |probe| probe.kind == :masked }.map(&:mask)
+    end
+
+    # @return [Array<String>] payload files no artifact or mask accounts for
+    def unclaimed_files
+      payload_files.reject { |relative| artifact_of(relative) }
+    end
+
+    # The share of its artifact's JSON bytes each `:key` and `:value` mask
+    # removes, over every document of the artifact. Summed rather than per
+    # document: a fixed-size stamp is a large share of a small flow document
+    # without hiding anything more, and which documents exist depends on the tree.
+    #
+    # @return [Hash{Symbol => Float}]
+    def key_mask_shares
+      indexed_masks.select { |mask| %i[key value].include?(mask.width) }.to_h do |mask|
+        sizes = documents(mask.artifact).filter_map { |_relative, document| masked_bytes(document, mask) }
+        [mask.name, sizes.sum(&:first).fdiv([sizes.sum(&:last), 1].max)]
+      end
+    end
+
+    # Key masks that leave some document with nothing to compare.
+    #
+    # @return [Array<Symbol>]
+    def whole_document_masks
+      indexed_masks.select { |mask| mask.width == :key && !mask.wide? && empties_a_document?(mask) }.map(&:name)
+    end
+
+    # Masks wider than the budget without saying so.
+    #
+    # @return [Array<String>]
+    def budget_violations
+      shape_violations + share_violations +
+        whole_document_masks.map { |name| "#{name} leaves a whole document uncompared but declares no wide: reason" }
+    end
+
+    private
+
+    MISSING = Object.new.freeze
+    private_constant :MISSING
+
+    # Every declared mask over an artifact an index holds, opt-in ones included.
+    def indexed_masks
+      MASKS.reject { |mask| DETACHED_ARTIFACTS.include?(mask.artifact) }
+    end
+
+    # The masks a masked probe compares with: the defaults, and +mask+.
+    def with_mask(mask)
+      IndexComparison::DEFAULT_MASKS | [mask.name]
+    end
+
+    # A key mask removes the key, its value and their punctuation, so it is
+    # measured as the document's size before and after the drop. A value mask
+    # keeps the key and hides the value, so it is measured by the values.
+    #
+    # @return [(Integer, Integer), nil] bytes the mask hides and the document's
+    #   bytes, nil when the mask matches nothing in it
+    def masked_bytes(document, mask)
+      paths = concrete_paths(document, mask.path)
+      return nil if paths.empty?
+
+      whole = JSON.generate(document).bytesize
+      if mask.width == :key
+        return [whole - JSON.generate(IndexComparison.drop_path(document, mask.path)).bytesize, whole]
+      end
+
+      [paths.sum { |path| JSON.generate(dig(document, path)).bytesize }, whole]
+    end
+
+    def shape_violations
+      MASKS.filter_map do |mask|
+        next unless %i[section artifact].include?(mask.width) && !mask.wide?
+
+        "#{mask.name} drops a whole #{mask.width} but declares no wide: reason"
+      end
+    end
+
+    def share_violations
+      key_mask_shares.filter_map do |name, share|
+        next if share <= MAX_KEY_SHARE || IndexComparison.mask_named(name).wide?
+
+        "#{name} removes #{(share * 100).round(1)}% of its artifact's bytes (budget " \
+          "#{(MAX_KEY_SHARE * 100).round}%) but declares no wide: reason"
+      end
+    end
+
+    def empties_a_document?(mask)
+      documents(mask.artifact).any? do |_relative, document|
+        document.is_a?(Hash) && document.any? && IndexComparison.drop_path(document, mask.path).empty?
+      end
+    end
+
+    def baseline_probe
+      Probe.new(kind: :masked, artifact: :baseline, file: '(none)', path: [], found: compare)
+    end
+
+    def compare(masks: IndexComparison::DEFAULT_MASKS)
+      IndexComparison.compare(@copy, @reference, masks: masks)
+    end
+
+    # ── Unmasked ─────────────────────────────────────────────────────────
+
+    def unmasked_probes
+      scope_membership_probes + sampled_files.flat_map do |relative|
+        artifact = artifact_of(relative)
+        next summary_probe(relative) if artifact == :summary
+
+        document = read(relative)
+        top_level_slots(document).filter_map do |slot|
+          path = unmasked_leaf(artifact, document, slot)
+          next unless path
+          next rename_probe(artifact, relative, document, path.last) if path.first == :rename
+
+          probe(:unmasked, artifact, relative, path, nil) { write(relative, mutate_at(document, path)) }
+        end
+      end
+    end
+
+    # A consumer scope added empty, and an empty one removed: a scope's
+    # presence is compared, not only the paths it records.
+    def scope_membership_probes
+      relative = SINGLE_FILES.key(:source_inputs)
+      return [] unless payload_files.include?(relative)
+
+      document = read(relative)
+      scopes = document.fetch('scopes', {})
+      added = replace_at(document, ['scopes'], scopes.merge('whole:self_check' => {}))
+      probes = [probe(:unmasked, :source_inputs, relative, %w[scopes whole:self_check], nil) { write(relative, added) }]
+      empty = scopes.keys.sort.find { |scope| scope != 'runtime' && scopes[scope] == {} }
+      return probes unless empty
+
+      removed = replace_at(document, ['scopes'], scopes.except(empty))
+      probes << probe(:unmasked, :source_inputs, relative, ['scopes', empty, 'removed'], nil) do
+        write(relative, removed)
+      end
+    end
+
+    # A few unit directories and type indexes, and every other compared file.
+    def sampled_files
+      grouped = payload_files.group_by { |relative| artifact_of(relative) }.slice(*REPORTED_AS.keys)
+      indexes = grouped.fetch(:type_index, []).reject { |relative| read(relative).empty? }
+      sampled_units(grouped.fetch(:unit, [])) + indexes.sample(SAMPLED_TYPES, random: @random) +
+        grouped.except(:unit, :type_index).values.flatten.sort
+    end
+
+    # One unit file from each of a few unit directories.
+    def sampled_units(files)
+      by_type = files.group_by { |relative| File.dirname(relative) }
+      by_type.keys.sort.sample(SAMPLED_TYPES, random: @random).map { |dir| by_type.fetch(dir).sample(random: @random) }
+    end
+
+    # Each top-level key of a document, or the whole of an array document.
+    def top_level_slots(document)
+      document.is_a?(Hash) ? document.keys.map { |key| [key] } : [[]]
+    end
+
+    # A leaf under +slot+ outside every mask, or the slot itself when it holds
+    # an empty container. nil when the whole slot is masked.
+    #
+    # An empty container is filled. A container whose every value a `:value`
+    # mask hides still has keys that are compared, so one is renamed instead,
+    # returned as `[:rename, path]`; nil when key masks hide all of it too.
+    def unmasked_leaf(artifact, document, slot)
+      return nil if masked_path?(artifact, slot)
+
+      leaves = leaf_paths(dig(document, slot), slot)
+      open = leaves.reject { |path| masked_path?(artifact, path) }
+      return open.sample(random: @random) unless open.empty?
+
+      renamable = leaves.reject { |path| key_masked?(artifact, path) }
+      renamable.empty? ? nil : [:rename, renamable.sample(random: @random)]
+    end
+
+    # The last key of +path+ renamed in a copy of the document.
+    def rename_probe(artifact, relative, document, path)
+      parent = path[0...-1]
+      renamed = dig(document, parent).to_h { |key, value| [key == path.last ? "#{key}.self_check" : key, value] }
+      probe(:unmasked, artifact, relative, path + ['renamed'], nil) do
+        write(relative, replace_at(document, parent, renamed))
+      end
+    end
+
+    def key_masked?(artifact, path)
+      @masks.any? { |mask| mask.artifact == artifact && mask.width == :key && within?(path, mask.path) }
+    end
+
+    def summary_probe(relative)
+      path = File.join(@payload, relative)
+      text = File.read(path, encoding: 'UTF-8')
+      totals = text[SUMMARY_TOTALS]
+      changed = text.sub(totals, totals.sub(/Units: (\d+)/) { "Units: #{Integer(::Regexp.last_match(1)) + 1}" })
+      [probe(:unmasked, :summary, relative, ['totals line'], nil) { File.write(path, changed) }]
+    end
+
+    # ── Masked and lifted ────────────────────────────────────────────────
+
+    def masked_probes
+      MASKS.flat_map do |mask|
+        next detached_probes(mask) if DETACHED_ARTIFACTS.include?(mask.artifact)
+
+        [send(:"#{mask.width}_probes", mask)].flatten.compact
+      end
+    end
+
+    def key_probes(mask)
+      candidates = documents(mask.artifact).reject { |_name, document| concrete_paths(document, mask.path).empty? }
+      relative, document = candidates.sort_by(&:first).sample(random: @random)
+      return [] unless relative
+
+      target = concrete_paths(document, mask.path).sample(random: @random)
+      # A leaf another mask also hides would not show when only this one is lifted.
+      leaves = leaf_paths(dig(document, target), target).reject { |leaf| masked_path?(mask.artifact, leaf, mask) }
+      path = leaves.empty? ? target : leaves.sample(random: @random)
+      changed = mutate_at(document, path)
+      masked_and_lifted(mask, relative, path) { write(relative, changed) }
+    end
+
+    def order_probes(mask)
+      candidates = documents(mask.artifact).sort_by(&:first).flat_map do |relative, document|
+        order_targets(mask, document).map { |path| [relative, document, path] }
+      end
+      relative, document, path = candidates.sample(random: @random)
+      return planted_order_probes(mask) unless relative
+
+      changed = replace_at(document, path, dig(document, path).reverse)
+      masked_and_lifted(mask, relative, path) { write(relative, changed) }
+    end
+
+    # Two members appended, in both copies, to an array under the mask that
+    # holds fewer than two; the copy's then reversed.
+    def planted_order_probes(mask)
+      relative, document = documents(mask.artifact).min_by(&:first)
+      return [] unless relative && mask.path.any? && dig(document, mask.path).is_a?(Array)
+
+      members = dig(document, mask.path) + [{ 'self_check' => 1 }, { 'self_check' => 2 }]
+      reversed = replace_at(document, mask.path, members.reverse)
+      planting(relative, replace_at(document, mask.path, members)) do
+        masked_and_lifted(mask, relative, mask.path) { write(relative, reversed) }
+      end
+    end
+
+    # +document+ written to +relative+ in both copies while the block runs.
+    def planting(relative, document)
+      paths = [@payload, @reference_payload].map { |payload| File.join(payload, relative) }
+      originals = paths.to_h { |path| [path, File.binread(path)] }
+      paths.each { |path| File.write(path, JSON.generate(document)) }
+      yield
+    ensure
+      originals&.each { |path, bytes| File.binwrite(path, bytes) }
+    end
+
+    # Arrays under the mask whose reversal changes them.
+    def order_targets(mask, document)
+      return reorderable?(document) ? [[]] : [] if mask.path.empty?
+
+      section = dig(document, mask.path)
+      return [] unless section.is_a?(Hash)
+
+      section.keys.select { |key| reorderable?(section[key]) }.map { |key| mask.path + [key] }
+    end
+
+    def reorderable?(members)
+      members.is_a?(Array) && members.reverse != members
+    end
+
+    def masked_and_lifted(mask, relative, path, &change)
+      lifted = with_mask(mask) - [mask.name]
+      [probe(:masked, mask.artifact, relative, path, mask.name, masks: with_mask(mask), &change),
+       probe(:lifted, mask.artifact, relative, path, mask.name, masks: lifted, &change)]
+    end
+
+    def artifact_probes(mask)
+      case mask.artifact
+      when :summary then summary_body_probe(mask)
+      when :outside_payload then outside_payload_probe(mask)
+      end
+    end
+
+    # A value under the mask changed; its key stays.
+    def value_probes(mask)
+      relative, document, path = documents(mask.artifact).sort_by(&:first).flat_map do |name, parsed|
+        concrete_paths(parsed, mask.path).reject { |found| masked_path?(mask.artifact, found, mask) }
+                                         .map { |found| [name, parsed, found] }
+      end.sample(random: @random)
+      return [] unless relative
+
+      changed = mutate_at(document, path)
+      masked_and_lifted(mask, relative, path) { write(relative, changed) }
+    end
+
+    # The masked element added to the array that may hold it.
+    def element_probes(mask)
+      relative, document = documents(mask.artifact).min_by(&:first)
+      array = mask.path[0...-1]
+      return [] unless relative && dig(document, array).is_a?(Array)
+
+      changed = replace_at(document, array, dig(document, array) + [mask.path.last])
+      masked_and_lifted(mask, relative, mask.path) { write(relative, changed) }
+    end
+
+    def summary_body_probe(mask)
+      path = File.join(@payload, 'SUMMARY.md')
+      lines = File.read(path, encoding: 'UTF-8').lines
+      line = lines.each_index.reject { |index| lines[index].match?(SUMMARY_TOTALS) }.sample(random: @random)
+      changed = lines.dup.tap { |copy| copy[line] = "#{copy[line].chomp} (changed)\n" }.join
+      probe(:masked, :summary, 'SUMMARY.md', ["line #{line + 1}"], mask.name, masks: with_mask(mask)) do
+        File.write(path, changed)
+      end
+    end
+
+    def outside_payload_probe(mask)
+      stray = File.join(@copy, 'self_check_stray.json')
+      probe(:masked, :outside_payload, File.basename(stray), [], mask.name, masks: with_mask(mask), cleanup: stray) do
+        File.write(stray, '{}')
+      end
+    end
+
+    # The same document, rewritten pretty-printed with its keys reversed.
+    def representation_probes(mask)
+      relative = payload_files.select { |file| artifact_of(file) == :unit }.min
+      document = read(relative)
+      reordered = document.to_a.reverse.to_h
+      probe(:masked, :json, relative, [], mask.name, masks: with_mask(mask)) do
+        File.write(File.join(@payload, relative), JSON.pretty_generate(reordered))
+      end
+    end
+
+    # ── Detached ─────────────────────────────────────────────────────────
+
+    # A key mask over documents no index holds, probed on one built from its
+    # path beside one other key: a change at the path is hidden by the mask
+    # and shown without it, and a change beside it is shown under the mask.
+    def detached_probes(mask)
+      return [] unless mask.width == :key
+
+      path = mask.path.map { |step| step == '*' ? 'self_check' : step }
+      document = nested(path, 0).merge('self_check_beside' => 0)
+      changed = nested(path, 1).merge('self_check_beside' => 0)
+      [detached_probe(:masked, mask, path, [document, changed], applied: true),
+       detached_probe(:lifted, mask, path, [document, changed], applied: false),
+       detached_probe(:unmasked, mask, ['self_check_beside'], [document, document.merge('self_check_beside' => 1)],
+                      applied: true)]
+    end
+
+    def detached_probe(kind, mask, path, pair, applied:)
+      left, right = applied ? pair.map { |document| IndexComparison.mask(mask.name, document) } : pair
+      found = left == right ? [] : ["#{IndexComparison::ARTIFACTS.fetch(mask.artifact)}: #{left} != #{right}"]
+      Probe.new(kind: kind, artifact: mask.artifact, file: '(built from the mask path)', path: path,
+                mask: (mask.name unless kind == :unmasked), found: found)
+    end
+
+    def nested(path, value)
+      path.reverse.reduce(value) { |inner, step| { step => inner } }
+    end
+
+    # ── Membership ───────────────────────────────────────────────────────
+
+    def membership_probes
+      relative = payload_files.select { |file| artifact_of(file) == :unit }.sort.sample(random: @random)
+      added = File.join(File.dirname(relative), 'SelfCheckAddedUnit.json')
+      [probe(:membership, :unit, relative, ['removed'], nil) { File.delete(File.join(@payload, relative)) },
+       probe(:membership, :unit, added, ['added'], nil, cleanup: File.join(@payload, added)) do
+         FileUtils.cp(File.join(@payload, relative), File.join(@payload, added))
+       end]
+    end
+
+    # ── Running one probe ────────────────────────────────────────────────
+
+    # Change the copy, compare, and restore the file the change touched.
+    def probe(kind, artifact, file, path, mask, masks: IndexComparison::DEFAULT_MASKS, cleanup: nil)
+      target = cleanup || File.join(@payload, file)
+      original = File.exist?(target) && !cleanup ? File.binread(target) : nil
+      yield
+      Probe.new(kind: kind, artifact: artifact, file: file, path: path, mask: mask, found: compare(masks: masks))
+    ensure
+      original ? File.binwrite(target, original) : FileUtils.rm_f(cleanup)
+    end
+
+    # ── Documents ────────────────────────────────────────────────────────
+
+    def payload_files
+      @payload_files ||= Dir.glob(File.join(@payload, '**', '*'), File::FNM_DOTMATCH)
+                            .select { |path| File.file?(path) }
+                            .map { |path| path.delete_prefix("#{@payload}/") }.sort
+    end
+
+    def artifact_of(relative)
+      return SINGLE_FILES.fetch(relative) if SINGLE_FILES.key?(relative)
+
+      case relative
+      when %r{\Aflows/[^/]+\.json\z} then :flow
+      when %r{\A[^/]+/_index\.json\z} then :type_index
+      when %r{\A[^/]+/[^/]+\.json\z} then :unit
+      end
+    end
+
+    # @return [Array<(String, Object)>] every document of an artifact, parsed
+    def documents(artifact)
+      payload_files.select { |relative| artifact_of(relative) == artifact }
+                   .map { |relative| [relative, read(relative)] }
+    end
+
+    def read(relative)
+      JSON.parse(Woods::AtomicFile.read(File.join(@payload, relative)))
+    end
+
+    def write(relative, document)
+      File.write(File.join(@payload, relative), JSON.generate(document))
+    end
+
+    def masked_path?(artifact, path, except = nil)
+      @masks.any? do |mask|
+        !mask.equal?(except) && mask.artifact == artifact && %i[key value].include?(mask.width) &&
+          within?(path, mask.path)
+      end
+    end
+
+    # Whether +path+ lies at or under +pattern+, a `*` step matching any key.
+    def within?(path, pattern)
+      path.size >= pattern.size && pattern.each_with_index.all? { |step, index| ['*', path[index]].include?(step) }
+    end
+
+    # Every existing path in +document+ that +pattern+ names, `*` expanded
+    # over the members of a Hash or an Array, as {IndexComparison.drop_path} reads it.
+    def concrete_paths(document, pattern, prefix = [])
+      return [prefix] if pattern.empty?
+
+      step, *rest = pattern
+      step_members(document, step).flat_map { |key, value| concrete_paths(value, rest, prefix + [key]) }
+    end
+
+    # The `[key, value]` pairs one pattern step names.
+    def step_members(document, step)
+      return document.each_with_index.map { |value, index| [index, value] } if step == '*' && document.is_a?(Array)
+      return [] unless document.is_a?(Hash)
+
+      step == '*' ? document.to_a : document.slice(step).to_a
+    end
+
+    # Paths to every scalar under +value+, and to every empty container.
+    def leaf_paths(value, prefix)
+      children = case value
+                 when Hash then value.map { |key, child| [prefix + [key], child] }
+                 when Array then value.each_with_index.map { |child, index| [prefix + [index], child] }
+                 else return [prefix]
+                 end
+      children.empty? ? [prefix] : children.flat_map { |path, child| leaf_paths(child, path) }
+    end
+
+    def dig(document, path)
+      path.reduce(document) do |node, step|
+        return MISSING unless (node.is_a?(Hash) && node.key?(step)) || (node.is_a?(Array) && step.is_a?(Integer))
+
+        node[step]
+      end
+    end
+
+    def mutate_at(document, path)
+      replace_at(document, path, mutate(dig(document, path)))
+    end
+
+    # One value changed: the last character of a string, a number by one, a
+    # boolean flipped, an empty container filled.
+    def mutate(value)
+      case value
+      when String then mutate_text(value)
+      when Numeric then value + 1
+      when Hash then value.merge('self_check' => 1)
+      when Array then value + ['self_check']
+      else MUTATED.fetch(value)
+      end
+    end
+
+    MUTATED = { true => false, false => true, nil => 'x' }.freeze
+    private_constant :MUTATED
+
+    def mutate_text(text)
+      return 'x' if text.empty?
+
+      text.sub(/.\z/m) { |last| last == 'x' ? 'y' : 'x' }
+    end
+
+    def replace_at(document, path, value)
+      return value if path.empty?
+
+      head, *rest = path
+      copy = document.dup
+      copy[head] = replace_at(document[head], rest, value)
+      copy
+    end
+  end
+end
