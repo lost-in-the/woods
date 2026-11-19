@@ -94,6 +94,15 @@ RSpec.describe Woods::PublishedIndex, '#git_commits' do
     end
   end
 
+  it 'reads a table that records history_rewrites like any other' do
+    write_table(2, scenario_table.merge('history_rewrites' => 'd' * 64))
+
+    described_class.open(@index_dir) do |index|
+      expect(index.git_commits.commits.map { |entry| entry['sha'] }).to eq([model_sha, digest_sha, mailer_sha])
+      expect(index.git_commits.to_h['history_rewrites']).to eq('d' * 64)
+    end
+  end
+
   it 'reads the pinned generation, not the current one' do
     write_table(1, scenario_table.merge('head' => digest_sha))
     write_table(2, scenario_table)

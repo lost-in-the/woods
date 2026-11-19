@@ -1118,12 +1118,18 @@ edit does not establish that a day of commits is below the crossover.
   other files. The same holds for the node attributes `commit_count` and
   `change_frequency` that feed the `volatile_dependencies` report.
 - **The commit table follows HEAD on every run.** `git_commits.json` is not
-  patched per unit: an incremental or refresh run compares the published
-  table's `head`, `since`, bounds and indexed-path digest with its own and
-  rebuilds the whole table from one history walk when any differs, so it
-  matches a full extraction of the same tree and HEAD even when no indexed file
-  changed. A changed table alone publishes a generation. A run without
-  readable history withdraws the table instead of keeping a stale one. See
+  patched per unit: every run, full, incremental or refresh, compares the
+  published table's `head`, `since`, bounds, indexed-path digest and
+  `history_rewrites` (replace refs and grafts) with its own and rebuilds the
+  whole table from one history walk when any differs, so it matches a full
+  extraction of the same tree and HEAD even when no indexed file changed.
+  A run that cannot read the replace-ref and graft state always walks, and a
+  table written before `history_rewrites` existed is rebuilt once, so the
+  first run after upgrading walks history.
+  A normal `woods:extract` keeps a table that still matches; a clean
+  extraction (`woods:clean` first, or a fresh output directory) forces the
+  walk. A changed table alone publishes a generation. A run without readable
+  history withdraws the table instead of keeping a stale one. See
   [Index layout](INDEX_LAYOUT.md#commit-table).
 - **View partial targets are fixed when the rendering template is extracted.**
   A render edge is resolved against the partial files on disk and the
