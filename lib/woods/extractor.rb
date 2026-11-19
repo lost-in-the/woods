@@ -793,6 +793,7 @@ module Woods
       scope = render_scope(change_set)
       @hybrid_discovery_keys = hybrid_discovery_keys(change_set, affected_ids, scope: scope)
       affected_ids |= render_retarget_ids(change_set, scope: scope)
+      affected_ids |= reference_retarget_ids(scope)
       @flow_scope = profile_phase('flow radius') { flow_scope_for(change_set) }
       @flow_changed_units = flow_changed_units_for(change_set)
       @last_blast_radius_size = affected_ids.size
@@ -3951,6 +3952,36 @@ module Woods
         @dependency_graph.node(id, type: :controller)&.dig(:unresolved_render_count).to_i.positive?
       end
       unresolved | scope.controller_ids(ancestors_of: method(:controller_ancestor_names))
+    end
+
+    # A reference resolves by name against the loaded constants, so a constant
+    # added, removed or redefined anywhere can move what an untouched unit's
+    # reference names: a job nested under the referring class shadows the
+    # top-level one. The graph before the run holds no edge to the new
+    # constant, so the units naming a touched constant are added by name.
+    # A class that includes, extends or inherits a selected unit runs its code
+    # and records what it resolves (a concern's callback enqueues on the
+    # model), though its own source does not hold the reference.
+    # @param scope [RenderScope]
+    # @return [Array<String>] identifiers of units to re-extract
+    def reference_retarget_ids(scope)
+      leaves = scope.touched_leaves
+      leaves.empty? ? [] : structural_consumers(source_reference_owners_naming(leaves))
+    end
+
+    # +seeds+ and every unit that reaches one through {STRUCTURAL_VIAS} edges
+    # alone, in the pre-change graph. A graph read from JSON keys a via as a
+    # String, a registered unit as a Symbol.
+    # @param seeds [Array<String>] identifiers
+    # @return [Array<String>]
+    def structural_consumers(seeds)
+      vias = STRUCTURAL_VIAS + STRUCTURAL_VIAS.map(&:to_sym)
+      reached = seeds.to_set
+      queue = seeds.dup
+      while (current = queue.shift)
+        @dependency_graph.dependents_of(current, via: vias).each { |dep| queue << dep if reached.add?(dep) }
+      end
+      reached.to_a
     end
 
     # @param identifier [String] controller constant name
