@@ -91,6 +91,38 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
 
       expect(logged.grep(/\[profile/)).to be_empty
     end
+    it 'names every full-extraction step after the flows in a progress line' do
+      stub_full_run
+
+      extractor.extract_all
+
+      progress = logged.grep(/\A\[Woods\] [A-Z][a-z]+ .*\.\.\.\z/)
+      expect(progress.drop_while { |line| line != '[Woods] Precomputing request flows...' }).to eq(
+        ['[Woods] Precomputing request flows...', '[Woods] Writing dependency graph...',
+         '[Woods] Writing skipped files report...', '[Woods] Building git commit table...',
+         '[Woods] Writing manifest...', '[Woods] Publishing generation...']
+      )
+    end
+
+    it 'splits the steps between deduplication and dependents with progress lines' do
+      stub_full_run
+
+      extractor.extract_all
+
+      progress = logged.grep(/\A\[Woods\] [A-Z][a-z]+ .*\.\.\.\z/)
+      expect(progress.slice_after('[Woods] Deduplicating results...').to_a[1].first(3)).to eq(
+        ['[Woods] Annotating units...', '[Woods] Rebuilding dependency graph...', '[Woods] Resolving dependents...']
+      )
+    end
+
+    it 'leaves the full-extraction progress lines out of an incremental run' do
+      stub_incremental_run
+
+      extractor.extract_changed(['app/models/user.rb'])
+
+      expect(logged).not_to include('[Woods] Publishing generation...', '[Woods] Building git commit table...')
+    end
+
     it 'logs no phase or total timing lines during incremental extraction' do
       stub_incremental_run
 
@@ -123,8 +155,20 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
          'source references', 'graph rebuild', 'doc references', 'dependents', 'git enrichment', 'graph analysis',
          'path normalization', 'reference projection',
          'write results', 'orphan sweep', 'flows', 'graph write', 'skipped files', 'commit table',
-         'manifest and summary', 'source verification', 'payload sync', 'publish', 'payload prune', 'snapshot']
+         'manifest and summary', 'source accounting', 'source verification', 'payload sync', 'publish',
+         'payload prune', 'snapshot', 'summary']
       )
+    end
+
+    it 'times the flow withdrawal in place of the flows when precomputation is off' do
+      stub_full_run
+      Woods.configuration.precompute_flows = false
+      allow(extractor).to receive(:withdraw_disabled_flows)
+
+      extractor.extract_all
+
+      expect(profiled_phases.each_cons(3).to_a).to include(['orphan sweep', 'flow withdrawal', 'graph write'])
+      expect(profiled_phases).not_to include('flows')
     end
 
     it 'logs one timing line per incremental phase, in run order' do

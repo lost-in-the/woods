@@ -154,7 +154,8 @@ RSpec.describe 'Flow top-level constant verdicts' do
 
       live = JSON.parse(JSON.generate(live_flow.to_h))
 
-      expect(live.except('generated_at')).to eq(precomputed.except('generated_at'))
+      expect(IndexComparison.mask(:flow_generated_at, live))
+        .to eq(IndexComparison.mask(:flow_generated_at, precomputed))
       operation = live['steps'].first['operations'].find { |op| op['target'] == 'ShadowProbe' }
       expect(operation['ambiguous_candidates']).to eq(['::ShadowProbe', 'Lint::ShadowProbe'])
     end
