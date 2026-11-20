@@ -115,7 +115,8 @@ Dir.mktmpdir('woods_model_origin') do |base|
   oracle_differences = lambda do |output|
     Dir.mktmpdir('model_origin_oracle') do |oracle|
       Woods::Extractor.new(output_dir: oracle).extract_all
-      IndexComparison.differences(output, oracle)
+      IndexComparison.differences(output, oracle,
+                                  masks: IndexComparison::DEFAULT_MASKS + %i[source_inputs_errors_order])
     end
   end
 

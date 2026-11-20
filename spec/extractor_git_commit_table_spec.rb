@@ -36,11 +36,12 @@ RSpec.describe Woods::Extractor, 'commit table' do
                                                                  file_path: path.to_s))
   end
 
-  def refresh(full:)
+  # Full and incremental runs decide the table the same way.
+  def refresh
     # Each call represents a new extraction run, whose entry point clears
     # the previous capture before resolving the table's inputs.
     extractor.send(:reset_git_capture)
-    extractor.send(:refresh_commit_table, full: full)
+    extractor.send(:refresh_commit_table)
   end
 
   before do
@@ -59,7 +60,7 @@ RSpec.describe Woods::Extractor, 'commit table' do
   after { FileUtils.rm_rf(root) }
 
   it 'publishes the indexed application paths of the final graph on a full run' do
-    expect(refresh(full: true)).to eq(:written)
+    expect(refresh).to eq(:written)
 
     table = Woods::GitCommitTable.read(output)
     expect(table['head']).to eq(git('rev-parse', 'HEAD'))
@@ -69,65 +70,418 @@ RSpec.describe Woods::Extractor, 'commit table' do
   end
 
   it 'keeps the seeded table on an incremental run whose inputs are unchanged, without walking history' do
-    refresh(full: true)
+    refresh
     before = File.binread(table_path)
     expect_any_instance_of(Woods::GitCommitTable).not_to receive(:build)
 
-    expect(refresh(full: false)).to be_nil
+    expect(refresh).to be_nil
     expect(File.binread(table_path)).to eq(before)
   end
 
   it 'rebuilds the whole table when HEAD moves or the indexed path set changes' do
-    refresh(full: true)
+    refresh
     moved = commit('Add comment', { 'app/models/comment.rb' => 'class Comment; end' })
 
-    expect(refresh(full: false)).to eq(:written)
+    expect(refresh).to eq(:written)
     expect(Woods::GitCommitTable.read(output)).to include('head' => moved, 'paths' => { 'app/models/post.rb' => [
                                                             git('rev-parse', 'HEAD~1')
                                                           ] })
 
     register(:model, 'Comment', root.join('app/models/comment.rb'))
-    expect(refresh(full: false)).to eq(:written)
+    expect(refresh).to eq(:written)
     expect(Woods::GitCommitTable.read(output)['paths'].keys).to eq(%w[app/models/comment.rb app/models/post.rb])
   end
 
   it 'matches the bytes a full run writes after an incremental rebuild' do
-    refresh(full: true)
+    refresh
     commit('Edit post', { 'app/models/post.rb' => 'class Post; def a; end; end' })
-    refresh(full: false)
+    refresh
     incremental = File.binread(table_path)
 
     full = described_class.new(output_dir: root.join('oracle'))
     FileUtils.mkdir_p(root.join('oracle'))
     full.instance_variable_set(:@dependency_graph, extractor.dependency_graph)
-    full.send(:refresh_commit_table, full: true)
+    full.send(:refresh_commit_table)
 
     expect(File.binread(root.join('oracle', Woods::GitCommitTable::FILENAME))).to eq(incremental)
   end
 
   it 'withdraws a seeded table when the application has no readable history' do
-    refresh(full: true)
+    refresh
     FileUtils.rm_rf(root.join('.git'))
 
-    expect(refresh(full: false)).to eq(:withdrawn)
+    expect(refresh).to eq(:withdrawn)
     expect(table_path).not_to exist
-    expect(described_class.new(output_dir: output).send(:refresh_commit_table, full: false)).to be_nil
+    expect(described_class.new(output_dir: output).send(:refresh_commit_table)).to be_nil
   end
 
   it 'withdraws the table when the walk fails rather than publishing a partial one' do
-    refresh(full: true)
+    refresh
     commit('Edit post', { 'app/models/post.rb' => 'changed' })
     allow_any_instance_of(Woods::GitCommitTable).to receive(:build).and_return(nil)
 
-    expect(refresh(full: false)).to eq(:withdrawn)
+    expect(refresh).to eq(:withdrawn)
     expect(table_path).not_to exist
   end
 
   it 'rebuilds over an unreadable seeded copy' do
     File.write(table_path, '{')
 
-    expect(refresh(full: false)).to eq(:written)
+    expect(refresh).to eq(:written)
     expect(Woods::GitCommitTable.read(output)['head']).to eq(git('rev-parse', 'HEAD'))
+  end
+
+  describe 'on a full run over a published table' do
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    before { refresh }
+
+    def refresh_noting_walk
+      walked = false
+      # Ruby 3.0 and 3.1 splat the paths array into a block that names the
+      # original method beside a keyword parameter, so take them all as one.
+      allow_any_instance_of(Woods::GitCommitTable).to receive(:build).and_wrap_original do |*arguments, **keywords|
+        walked = true
+        original, *rest = arguments
+        original.call(*rest, **keywords)
+      end
+      result = refresh
+      [walked, result]
+    end
+
+    it 'reuses the published table when every input matches, without walking history' do
+      before = File.binread(table_path)
+
+      expect(refresh_noting_walk).to eq([false, nil])
+      expect(File.binread(table_path)).to eq(before)
+    end
+
+    it 'walks again when HEAD moves' do
+      commit('Edit post', { 'app/models/post.rb' => 'class Post; def a; end; end' })
+
+      expect(refresh_noting_walk).to eq([true, :written])
+    end
+
+    it 'walks again when the indexed path set changes' do
+      commit('Add comment', { 'app/models/comment.rb' => 'class Comment; end' })
+      refresh
+      register(:model, 'Comment', root.join('app/models/comment.rb'))
+
+      expect(refresh_noting_walk).to eq([true, :written])
+    end
+
+    it "walks again when the window's first UTC day moves" do
+      tomorrow = Time.now + 86_400
+      allow(Time).to receive(:now).and_return(tomorrow)
+
+      expect(refresh_noting_walk).to eq([true, :written])
+    end
+
+    {
+      git_commit_table_days: 30, git_commit_table_limit: 10, git_commit_table_files_limit: 3,
+      git_commit_table_line_stats: false, git_commit_table_hunk_budget: 7
+    }.each do |setting, value|
+      it "walks again when #{setting} changes" do
+        Woods.configuration.public_send(:"#{setting}=", value)
+
+        expect(refresh_noting_walk).to eq([true, :written])
+      end
+    end
+
+    it 'walks again over an unreadable published table rather than trusting it' do
+      File.write(table_path, '{')
+
+      expect(refresh_noting_walk).to eq([true, :written])
+      expect(Woods::GitCommitTable.read(output)['head']).to eq(git('rev-parse', 'HEAD'))
+    end
+
+    it 'keeps a withdrawn table withdrawn when the history is still unreadable' do
+      FileUtils.rm_rf(root.join('.git'))
+      expect(refresh).to eq(:withdrawn)
+
+      expect(refresh).to be_nil
+      expect(table_path).not_to exist
+    end
+
+    # Replace refs and grafts change the history git walks without moving
+    # HEAD. Full and incremental runs both decide the table here, in
+    # #refresh_commit_table, so one example per form covers both modes.
+    describe 'when replace refs or grafts rewrite the history' do
+      let(:original_root) { git('rev-list', '--max-parents=0', 'HEAD') }
+
+      before do
+        commit('Edit post', { 'app/models/post.rb' => 'class Post; def a; end; end' })
+        refresh
+        @plain = File.binread(table_path)
+      end
+
+      def messages
+        Woods::GitCommitTable.read(output)['commits'].map { |row| row['message'] }
+      end
+
+      def replace_root_commit
+        stand_in = git('commit-tree', "#{original_root}^{tree}", '-m', 'Stand-in for the first commit')
+        git('replace', original_root, stand_in)
+      end
+
+      it 'records the explicit no-rewrites state for a plain history, and keeps that table' do
+        expect(Woods::GitCommitTable.read(output)['history_rewrites']).to eq(Woods::GitCommitTable::REWRITES_NONE)
+        expect(refresh_noting_walk).to eq([false, nil])
+      end
+
+      it 'walks again while a replace ref is added, kept or removed, and reuses once it is unchanged' do
+        replace_root_commit
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post', 'Stand-in for the first commit'])
+        expect(refresh_noting_walk).to eq([false, nil])
+
+        git('replace', '-d', original_root)
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(File.binread(table_path)).to eq(@plain)
+        expect(refresh_noting_walk).to eq([false, nil])
+      end
+
+      it 'walks again when a replace ref is pointed at another commit' do
+        replace_root_commit
+        refresh
+        other = git('commit-tree', "#{original_root}^{tree}", '-m', 'Another stand-in')
+        git('replace', '-f', original_root, other)
+
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post', 'Another stand-in'])
+      end
+
+      # A table written before the field existed cannot say whether a replace
+      # ref shaped it, even when none is left now: it is rebuilt once.
+      it 'rebuilds a legacy table without the field once, after a replacement it recorded was removed' do
+        replace_root_commit
+        refresh
+        legacy = Woods::GitCommitTable.read(output).except('history_rewrites')
+        Woods::GitCommitTable.write(output, legacy, durable: false)
+        git('replace', '-d', original_root)
+
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post', 'Add post'])
+        expect(Woods::GitCommitTable.read(output)['history_rewrites']).to eq(Woods::GitCommitTable::REWRITES_NONE)
+        expect(File.binread(table_path)).to eq(@plain)
+        expect(refresh_noting_walk).to eq([false, nil])
+      end
+
+      it 'rebuilds a legacy plain table once on the upgrade, with the same HEAD and paths' do
+        Woods::GitCommitTable.write(output, Woods::GitCommitTable.read(output).except('history_rewrites'),
+                                    durable: false)
+
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(File.binread(table_path)).to eq(@plain)
+      end
+
+      it 'digests the refs in name order, whatever order they were made in' do
+        stand_ins = Array.new(2) { |i| git('commit-tree', "#{original_root}^{tree}", '-m', "Stand-in #{i}") }
+        git('replace', original_root, stand_ins.first)
+        git('update-ref', 'refs/replace/zz-extra', stand_ins.last)
+        first = Woods::Extraction::GitCapture.new(root: root, logger: double.as_null_object).history_rewrites
+        git('update-ref', '-d', 'refs/replace/zz-extra')
+        git('update-ref', 'refs/replace/zz-extra', stand_ins.last)
+
+        expect(Woods::Extraction::GitCapture.new(root: root, logger: double.as_null_object).history_rewrites)
+          .to eq(first).and match(/\A\h{64}\z/)
+      end
+
+      it 'walks again when a grafts file is written or removed' do
+        grafts = root.join(git('rev-parse', '--git-path', 'info/grafts'))
+        FileUtils.mkdir_p(grafts.dirname)
+        File.write(grafts, "#{git('rev-parse', 'HEAD')}\n")
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post'])
+
+        FileUtils.rm_f(grafts)
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(File.binread(table_path)).to eq(@plain)
+      end
+
+      it 'keeps the table when replacement is turned off, since the refs then change nothing' do
+        replace_root_commit
+        git('config', 'core.useReplaceRefs', 'false')
+
+        expect(refresh_noting_walk).to eq([false, nil])
+        expect(File.binread(table_path)).to eq(@plain)
+      end
+
+      ['1', ''].each do |value|
+        it "keeps the table under GIT_NO_REPLACE_OBJECTS=#{value.inspect}, which git honours whatever its value" do
+          replace_root_commit
+          ENV['GIT_NO_REPLACE_OBJECTS'] = value
+
+          expect(refresh_noting_walk).to eq([false, nil])
+          expect(File.binread(table_path)).to eq(@plain)
+        ensure
+          ENV.delete('GIT_NO_REPLACE_OBJECTS')
+        end
+      end
+
+      it 'reads core.useReplaceRefs as git does, so off turns replacement off' do
+        replace_root_commit
+        git('config', 'core.useReplaceRefs', 'off')
+
+        expect(refresh_noting_walk).to eq([false, nil])
+      end
+
+      # Git takes the original's name from the ref's last path component
+      # (replace-object.c, register_replace_ref), below a raw string prefix.
+      def with_ref_base(value)
+        ENV['GIT_REPLACE_REF_BASE'] = value
+        yield
+      ensure
+        ENV.delete('GIT_REPLACE_REF_BASE')
+      end
+
+      def stand_in(message)
+        git('commit-tree', "#{original_root}^{tree}", '-m', message)
+      end
+
+      # The spec's own git calls run under the same environment, and with an
+      # empty base git warns about every ref; make the objects first.
+      it 'counts a replacement anywhere in the refs when GIT_REPLACE_REF_BASE is set but empty' do
+        first = stand_in('Custom stand-in')
+        second = stand_in('Second custom stand-in')
+        ref = "refs/custom/#{original_root}"
+        with_ref_base('') do
+          git('update-ref', ref, first)
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Custom stand-in'])
+
+          git('update-ref', ref, second)
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Second custom stand-in'])
+        end
+      end
+
+      it 'reads replacements below a custom GIT_REPLACE_REF_BASE, and only there' do
+        git('update-ref', "refs/custom/#{original_root}", stand_in('Custom stand-in'))
+        expect(refresh_noting_walk).to eq([false, nil])
+
+        with_ref_base('refs/custom/') do
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Custom stand-in'])
+        end
+      end
+
+      # Git before 2.56 names the original from the part of the ref below a
+      # base without a trailing slash, so the same ref can replace another
+      # object under another base; Git 2.56 aborts on such a base. The base
+      # stays in the digest for the older reading, and bases that end in a
+      # slash keep this example the same on every Git.
+      it 'walks again when only GIT_REPLACE_REF_BASE changes, though it selects the same refs' do
+        git('update-ref', "refs/custom/a/#{original_root}", stand_in('Custom stand-in'))
+        with_ref_base('refs/custom/') do
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Custom stand-in'])
+        end
+
+        with_ref_base('refs/custom/a/') do
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Custom stand-in'])
+        end
+      end
+
+      it 'keeps the table when GIT_REPLACE_REF_BASE names the default base explicitly' do
+        replace_root_commit
+        refresh
+        replaced = File.binread(table_path)
+
+        with_ref_base('refs/replace/') { expect(refresh_noting_walk).to eq([false, nil]) }
+        expect(File.binread(table_path)).to eq(replaced)
+      end
+
+      it 'counts a replace ref nested below the base, and ignores one whose name is not an object id' do
+        git('update-ref', "refs/replace/nested/#{original_root}", stand_in('Nested stand-in'))
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post', 'Nested stand-in'])
+
+        git('update-ref', 'refs/replace/not-an-object-id', stand_in('Ignored'))
+        expect(refresh_noting_walk).to eq([false, nil])
+      end
+
+      it 'reads the grafts file GIT_GRAFT_FILE names' do
+        grafts = root.join('elsewhere-grafts')
+        File.write(grafts, "#{git('rev-parse', 'HEAD')}\n")
+        ENV['GIT_GRAFT_FILE'] = grafts.to_s
+
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post'])
+      ensure
+        ENV.delete('GIT_GRAFT_FILE')
+      end
+
+      # The rewrite state is read before the walk; git reads the refs again
+      # when each walk process starts. A replacement moved in between must not
+      # leave the walked history under the digest of the state read first.
+      it 'never reuses a table whose replacements changed while it was walked' do
+        original = stand_in('Stand-in A')
+        moved = stand_in('Stand-in B')
+        git('replace', original_root, original)
+        once = true
+        allow_any_instance_of(Woods::GitCommitTable).to receive(:build).and_wrap_original do |*arguments, **keywords|
+          git('replace', '-f', original_root, moved) if once
+          once = false
+          method, *rest = arguments
+          method.call(*rest, **keywords)
+        end
+        expect(refresh).to eq(:written)
+        expect(messages).to eq(['Edit post', 'Stand-in B'])
+
+        git('replace', '-f', original_root, original)
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post', 'Stand-in A'])
+        expect(refresh_noting_walk).to eq([false, nil])
+      end
+
+      it 'walks when the rewrite state cannot be read' do
+        allow_any_instance_of(Woods::Extraction::GitCapture).to receive(:read_history_rewrites)
+          .and_return(Woods::Extraction::GitCapture::REWRITES_UNKNOWN)
+
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(refresh_noting_walk).to eq([true, nil])
+      end
+    end
+
+    # A shallow repository has no table (GitCapture#available? is false), so
+    # deepening it can never leave a short table behind to reuse: the run
+    # after `--unshallow` finds none and walks.
+    it 'has no table to reuse while a clone is shallow, and walks once it is unshallowed' do
+      commit('Edit post', { 'app/models/post.rb' => 'class Post; def a; end; end' })
+      commit('Edit post again', { 'app/models/post.rb' => 'class Post; def b; end; end' })
+      refresh
+      complete = File.binread(table_path)
+      origin = root.join('origin.git')
+      git('clone', '-q', '--bare', '--no-local', root.to_s, origin.to_s)
+      FileUtils.rm_rf(root.join('.git'))
+      shallow = root.join('shallow')
+      git('clone', '-q', '--depth', '1', "file://#{origin}", shallow.to_s)
+      FileUtils.mv(shallow.join('.git'), root.join('.git'))
+
+      expect(refresh).to eq(:withdrawn)
+      git('fetch', '-q', '--deepen', '1')
+      expect(git('rev-parse', '--is-shallow-repository')).to eq('true')
+      expect(refresh).to be_nil
+      expect(table_path).not_to exist
+
+      git('fetch', '-q', '--unshallow')
+      expect(refresh_noting_walk).to eq([true, :written])
+      expect(File.binread(table_path)).to eq(complete)
+    end
+
+    it 'walks when the index was cleaned, so there is no published table' do
+      FileUtils.rm_f(table_path)
+
+      expect(refresh_noting_walk).to eq([true, :written])
+    end
   end
 
   it 'keeps the configured number of recent commits per unit' do
