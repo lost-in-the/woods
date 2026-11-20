@@ -165,7 +165,7 @@ module Woods
         return false unless File.directory?('/proc/self')
 
         Dir.glob('/proc/[0-9]*/stat').none? do |path|
-          state, _ppid, group = File.read(path).split(') ').last.split.first(3)
+          state, _ppid, group = File.binread(path).split(') ').last.split.first(3)
           group.to_i == pgid && state != 'Z'
         rescue SystemCallError
           false
