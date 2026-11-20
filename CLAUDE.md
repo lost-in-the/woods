@@ -381,7 +381,17 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   - A present `.git` whose ref cannot be resolved (an unmounted worktree git dir in a container) yields `"unknown"`, never a stale env value.
   - `GIT_BRANCH`/`GIT_SHA` env vars count only when there is **no** `.git` at the root, or git is unavailable.
   - `capture_snapshot` treats `"unknown"` as no-sha (#137). Per-file enrichment and manifest provenance both use `GitCommand`, rooted at the application directory with the same `WOODS_GIT_DIR` override. Per-file history is scoped to the selected `HEAD`.
-- `git_commits.json` (`GitCommitTable`, W-3) is rebuilt whole, never patched: it is a pure function of the resolved HEAD sha, the indexed path set read off the final graph, the window's first UTC day and the bounds, all recorded in the file (including `line_stats` and `hunk_budget`). Incremental/refresh runs keep it only when every one matches (`GitCommitTable.current?`); a changed table alone publishes a generation. Per-file line counts and hunks (#804) come from a second `-U0` patch walk over only the table's commits (`GitLineStats`, `GitLog#patch_stream`). No readable history means the file is withdrawn, never written empty. Readers go through `PublishedIndex#git_commits`.
+- `git_commits.json` (`GitCommitTable`, W-3) is rebuilt whole, never patched: it is a pure function of the resolved
+  HEAD sha, the indexed path set read off the final graph, the window's first UTC day, the bounds and the replace-ref
+  and graft state (`history_rewrites`: `none`, a digest, or `unknown`), all recorded in the file (including
+  `line_stats` and `hunk_budget`).
+  Every run, full, incremental or refresh, keeps the seeded table only when every one matches
+  (`GitCommitTable.current?`); `unknown`, a table without the field (written before it existed) and a clean
+  extraction always walk.
+  A changed table alone publishes a generation.
+  Per-file line counts and hunks (#804) come from a second `-U0` patch walk over only the table's commits
+  (`GitLineStats`, `GitLog#patch_stream`).
+  No readable history means the file is withdrawn, never written empty. Readers go through `PublishedIndex#git_commits`.
 - Model name scanning uses a precomputed regex via `ModelNameCache`, invalidated per run. Three passes: whole-word fully-qualified names; string literals passed to `constantize`/`const_get`; unambiguous bare short names via `ModelNameCache.resolve_short_name`. Ambiguous short names are skipped.
 - `extract_dependencies` in every extractor must include `:via`. See `model_extractor` for reference values.
 - `CallbackAnalyzer` is regex-based, not AST. Proc and lambda callbacks are skipped.

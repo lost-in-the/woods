@@ -392,7 +392,8 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
     incremental_flows.each do |name, body|
       # flow documents carry a generated_at stamp; the contract is
       # everything else, byte for byte.
-      expect(body.except('generated_at')).to eq(full_flows[name].except('generated_at'))
+      expect(IndexComparison.mask(:flow_generated_at, body))
+        .to eq(IndexComparison.mask(:flow_generated_at, full_flows[name]))
     end
     expect(flow_paths_of(index_dir, 'FlangesController'))
       .to eq(flow_paths_of(full_dir, 'FlangesController'))
@@ -434,8 +435,8 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
 
   def expect_flows_match_full(index_dir)
     full_dir = extract_all_to_tmp
-    incremental = flow_inventory(index_dir).transform_values { |body| body.except('generated_at') }
-    full = flow_inventory(full_dir).transform_values { |body| body.except('generated_at') }
+    incremental = flow_inventory(index_dir).transform_values { |body| IndexComparison.mask(:flow_generated_at, body) }
+    full = flow_inventory(full_dir).transform_values { |body| IndexComparison.mask(:flow_generated_at, body) }
 
     expect(incremental).to eq(full)
   end
@@ -830,12 +831,12 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
       graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
       flow = Woods::FlowAssembler.new(graph: graph, extracted_dir: payload)
                                  .assemble('VerdictProbesController#show', max_depth: Woods::FlowPrecomputer::DEFAULT_MAX_DEPTH)
-      JSON.parse(JSON.generate(flow.to_h)).except('generated_at')
+      IndexComparison.mask(:flow_generated_at, JSON.parse(JSON.generate(flow.to_h)))
     end
 
     def stored_flow(index_dir)
       file = File.basename(flow_index(index_dir).fetch('VerdictProbesController#show'))
-      flow_doc(index_dir, file).except('generated_at')
+      IndexComparison.mask(:flow_generated_at, flow_doc(index_dir, file))
     end
 
     def probe_operation(index_dir)

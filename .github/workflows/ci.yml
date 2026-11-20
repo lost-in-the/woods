@@ -241,6 +241,7 @@ jobs:
           spec/integration/booted_extraction_spec.rb
           spec/integration/lazy_routes_equivalence_spec.rb
           spec/integration/mailer_determinism_spec.rb
+          spec/integration/job_queue_determinism_spec.rb
           spec/integration/callback_dispatch_forms_spec.rb
           spec/integration/validation_options_spec.rb
           spec/integration/scope_owner_forms_spec.rb
