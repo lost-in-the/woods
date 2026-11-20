@@ -210,7 +210,15 @@ Dir.mktmpdir('woods_graphql_discovery') do |root|
   compare = lambda do |label|
     oracle = Dir.mktmpdir('graphql_oracle')
     Woods::Extractor.new(output_dir: oracle).extract_all
-    differences = IndexComparison.differences(output, oracle)
+    added = %w[app/graphql/discovery_added_schema.rb]
+    known = {
+      unrun_family_scope: { 'whole:database_tables' => %w[app/models/discovery_later_totals.rb],
+                            'whole:events' => added, 'whole:graphql_operations' => added },
+      unconsumed_file_scope: { 'file:concerns' => added }
+    }
+    differences = IndexComparison.differences(
+      output, oracle, masks: IndexComparison::DEFAULT_MASKS + %i[source_reference_added_credit], known: known
+    )
     raise "#{label}: #{differences.inspect}" unless differences.empty?
 
     report << label
