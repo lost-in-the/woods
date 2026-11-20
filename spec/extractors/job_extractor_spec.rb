@@ -323,6 +323,41 @@ RSpec.describe Woods::Extractors::JobExtractor do
       unit = described_class.new.extract_job_file(path)
       expect(unit.metadata[:queue]).to be_nil
     end
+
+    context 'when the queue comes from the loaded class' do
+      def job_class_with_queue(&queue)
+        Class.new do
+          define_singleton_method(:name) { 'DeliveryJob' }
+          define_singleton_method(:queue_name, &queue)
+        end
+      end
+
+      def extracted_queue(job_class)
+        described_class.new.send(:extract_job_class, job_class).metadata[:queue]
+      end
+
+      def published_json(job_class)
+        JSON.generate(described_class.new.send(:extract_job_class, job_class).to_h.except(:extracted_at))
+      end
+
+      it 'leaves out a queue computed by a block, the same in every extraction' do
+        job_class = job_class_with_queue { -> { 'mailers' } }
+
+        first = published_json(job_class)
+
+        expect(first).not_to include('#<Proc')
+        expect(published_json(job_class)).to eq(first)
+        expect(extracted_queue(job_class)).to be_nil
+      end
+
+      it 'keeps a queue the class states as a string' do
+        expect(extracted_queue(job_class_with_queue { 'critical' })).to eq('critical')
+      end
+
+      it 'keeps a queue the class states as a symbol, by name' do
+        expect(extracted_queue(job_class_with_queue { :low })).to eq('low')
+      end
+    end
   end
 
   describe 'queue adapter override (W-9)' do

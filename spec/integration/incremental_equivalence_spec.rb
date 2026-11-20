@@ -220,7 +220,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     previous_sha.nil? ? ENV.delete('GIT_SHA') : ENV['GIT_SHA'] = previous_sha
   end
 
-  it 'tracks nested model mixins through body and callback edits' do
+  # A top-level example header stays on one line: Ruby 3.4 and later record a
+  # multi-line call at its last line, which script/parallel-booted's line
+  # filters would not select.
+  pinnable_scope = { retained_unit_scope: { 'unit:concerns' => %w[app/models/pinned_record/pinnable.rb] } }
+  it 'tracks nested model mixins through body and callback edits', known_source_inputs: pinnable_scope do
     model_path = write_file('app/models/pinned_record.rb', <<~RUBY)
       class PinnedRecord < ApplicationRecord
         self.table_name = 'posts'
@@ -356,10 +360,81 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
   # ── Index comparison ─────────────────────────────────────────────────────
   #
-  # {IndexComparison} owns the definition of "the two indexes agree", and
-  # documents the only three differences it tolerates.
+  # {IndexComparison} owns the definition of "the two indexes agree": every
+  # difference it tolerates is a row of IndexComparison::MASKS.
 
   include IndexComparison
+
+  # An example that shows a known source-input difference declares it in its
+  # `known_source_inputs:` metadata; see IndexComparison::KNOWN_SOURCE_INPUT_DIFFERENCES.
+  def differences(incremental_dir, full_dir, **options)
+    known = RSpec.current_example.metadata.fetch(:known_source_inputs, {}).transform_values do |scopes|
+      scopes.to_h { |scope, paths| [scope, paths == :randomized_artifacts ? randomized_artifacts(scope) : paths] }
+    end
+    IndexComparison.differences(incremental_dir, full_dir, known: known, **options)
+  end
+
+  # The paths the randomized operations can create in one whole-app family's
+  # scope: an anchored pattern for each ARTIFACT_TEMPLATES entry the family's
+  # own rule matches, allowing the `r<n>_` prefixes {#renamed_path} adds.
+  def randomized_artifacts(scope)
+    rules = Woods::PathDispatcher.whole_app_rules.select { |rule| "whole:#{rule.extractor_key}" == scope }
+    ARTIFACT_TEMPLATES.filter_map do |template|
+      next unless rules.any? { |rule| rule.matches?(template.call(0)) }
+
+      dir, base = File.split(template.call('{N}'))
+      %r{\A#{Regexp.escape(dir)}/(?:r\d+_)*#{Regexp.escape(base).gsub('\\{N\\}') { '\\d+' }}\z}
+    end
+  end
+
+  # Every example below trusts the comparison. These prove, on a real index
+  # with Git facts and flows, that it reports a one-value change anywhere the
+  # mask table does not cover, and nothing inside a mask.
+  describe 'the comparison itself' do
+    around do |example|
+      Woods.configuration.precompute_flows = true
+      example.run
+    ensure
+      Woods.configuration.precompute_flows = false
+      FileUtils.rm_rf(app_path('.git'))
+    end
+
+    def reference_index
+      git = ->(*args) { Open3.capture2e({ 'GIT_CONFIG_GLOBAL' => File::NULL }, 'git', '-C', @app_root, *args) }
+      [%w[init], ['config', 'user.name', 'Woods test'], %w[config user.email woods-test@example.invalid],
+       %w[config commit.gpgsign false], %w[add .], %w[commit -m baseline]].each do |args|
+        output, status = git.call(*args)
+        raise "git #{args.first} failed: #{output}" unless status.success?
+      end
+      full_extraction
+    end
+
+    def self_check(reference)
+      scratch = Dir.mktmpdir('woods_diff_self_check')
+      (@scratch_dirs ||= []) << scratch
+      IndexComparison::SelfCheck.new(reference, scratch, seed: Integer(ENV.fetch('WOODS_DIFF_MASK_SEED', '1')))
+    end
+
+    it 'reports a one-value change in every compared artifact, and none inside a declared mask' do
+      check = self_check(reference_index)
+      warn("Comparison self-check probes:\n  #{check.probes.join("\n  ")}") if ENV['WOODS_DIFF_MASKS'] == '1'
+
+      expect(check.unclaimed_files).to be_empty
+      expect(check.uncovered_artifacts).to be_empty
+      expect(check.unexercised_masks).to be_empty
+      expect(check.failures).to be_empty, "#{check.failures.size} of #{check.probes.size} probes answered " \
+                                          "wrongly:\n  #{check.failures.join("\n  ")}"
+    end
+
+    it 'keeps every mask within its declared width' do
+      check = self_check(reference_index)
+      warn("Key mask shares: #{check.key_mask_shares.transform_values { |share| share.round(4) }}") if
+        ENV['WOODS_DIFF_MASKS'] == '1'
+
+      expect(check.key_mask_shares.values).to all(be > 0)
+      expect(check.budget_violations).to be_empty
+    end
+  end
 
   describe 'typed source collision publication (#561)' do
     before do
@@ -451,7 +526,25 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     %i[incremental refresh].each do |operation|
-      it "accepts an explicit removed-source rename during #{operation}" do
+      it "accepts an explicit removed-source rename during #{operation}",
+         known_source_inputs: {
+           deleted_path_kept: {
+             'file:caching' => %w[app/models/collision_original.rb],
+             'file:concerns' => %w[app/models/collision_original.rb],
+             'whole:database_tables' => %w[app/models/collision_original.rb],
+             'whole:events' => %w[app/models/collision_original.rb],
+             'whole:state_machines' => %w[app/models/collision_original.rb]
+           },
+           unrun_family_scope: {
+             'whole:database_tables' => %w[app/models/relocated/collision_original.rb],
+             'whole:events' => %w[app/models/relocated/collision_original.rb],
+             'whole:state_machines' => %w[app/models/relocated/collision_original.rb]
+           },
+           unconsumed_file_scope: {
+             'file:caching' => %w[app/models/relocated/collision_original.rb],
+             'file:concerns' => %w[app/models/relocated/collision_original.rb]
+           }
+         } do
         require 'woods/mcp/index_reader'
         index = full_extraction
         reader = Woods::MCP::IndexReader.new(index)
@@ -929,7 +1022,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(graph.fetch('reverse').fetch('ModuleShapes::Singleton')).to include('ModuleShapes::Functions')
     end
 
-    it 'migrates ownership on includer-only edits without dropping shared-file siblings' do
+    it 'migrates ownership on includer-only edits without dropping shared-file siblings',
+       known_source_inputs: { retained_unit_scope: { 'unit:concerns' => %w[app/models/ownership_bundle.rb] } } do
       write_module_bundle
       model_path = write_module_includer(include_feature: false)
       index = full_extraction
@@ -941,7 +1035,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'reconciles standalone ownership when only models are refreshed' do
+    it 'reconciles standalone ownership when only models are refreshed',
+       known_source_inputs: { retained_unit_scope: { 'unit:concerns' => %w[app/models/ownership_bundle.rb] } } do
       write_module_bundle
       write_module_includer(include_feature: false)
       index = full_extraction
@@ -1097,7 +1192,13 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
     { 'app/models/ruled_tracker.rb' => %w[RuledTracker poro],
       'lib/ruled_library.rb' => %w[RuledLibrary lib] }.each do |relative, (name, plain_type)|
-      it "promotes #{relative} to a concern and demotes it back, matching full extraction each time" do
+      it "promotes #{relative} to a concern and demotes it back, matching full extraction each time",
+         known_source_inputs: {
+           retained_unit_scope: {
+             'unit:poros' => %w[app/models/ruled_tracker.rb],
+             'unit:concerns' => %w[app/models/ruled_tracker.rb lib/ruled_library.rb]
+           }
+         } do
         write_rule_module(relative, name.to_sym, concern: false)
         index = full_extraction
         expect(rule_types(index, name)).to eq([plain_type])
@@ -1111,7 +1212,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it "points a controller's inlined concern at the promoted concern unit, incrementally as in full" do
+    it "points a controller's inlined concern at the promoted concern unit, incrementally as in full",
+       known_source_inputs: { retained_unit_scope: { 'unit:poros' => %w[app/models/ruled_tracker.rb] } } do
       module_path = write_rule_module('app/models/ruled_tracker.rb', :RuledTracker, concern: false)
       controller_path = write_file('app/controllers/ruled_controller.rb', <<~RUBY)
         class RuledController < ApplicationController
@@ -1366,9 +1468,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
     def impact_tests(dir, **budget)
       report = Woods::Impact::Report.compare(dir, from: 'gen:1', to: 'now', depth: 1, **budget).to_h
-      [report.fetch('tests').map { |item| item.except('generation') },
+      [report.fetch('tests').map { |item| IndexComparison.mask(:impact_item_generation, item) },
        report.fetch('unknowns').select { |item| item['feature'] == 'related' || item['kind'].to_s.end_with?('budget') }
-             .map { |item| item.except('generation') }]
+             .map { |item| IndexComparison.mask(:impact_item_generation, item) }]
     end
 
     def mapped(view)
@@ -1497,7 +1599,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
-  it 'omits ignored configuration YAML in both full and incremental extraction' do
+  yaml_scope = { unconsumed_file_scope: { 'file:config_files' => %w[config/settings.local.yml] } }
+  it 'omits ignored configuration YAML in both full and incremental extraction', known_source_inputs: yaml_scope do
     _out, err, status = Open3.capture3(*Woods::GitCommand.argv(@app_root, 'init', '--quiet'))
     raise err unless status.success?
 
@@ -1939,7 +2042,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                    ])
     end
 
-    it 'indexes a nested concern created after the baseline' do
+    it 'indexes a nested concern created after the baseline',
+       known_source_inputs: {
+         unrun_family_scope: { 'whole:database_tables' => %w[app/models/concerns/auditable.rb] }
+       } do
       run_sequence([
                      lambda {
                        write_file('app/models/concerns/auditable.rb',
@@ -2376,7 +2482,12 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       path
     end
 
-    it 'publishes a lib module a model includes as a concern only, as the include comes and goes' do
+    it 'publishes a lib module a model includes as a concern only, as the include comes and goes',
+       known_source_inputs: {
+         retained_unit_scope: {
+           'unit:concerns' => %w[lib/ownership_storage.rb], 'unit:libs' => %w[lib/ownership_storage.rb]
+         }
+       } do
       load app_path(write_file('lib/ownership_storage.rb', "module OwnershipStorage\n  def upload; end\nend\n"))
       host = write_storage_host(include_storage: false)
       index = full_extraction
@@ -2392,7 +2503,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'counts a lib module a model includes once in the manifest and the graph, whichever way it got there' do
+    it 'counts a lib module a model includes once in the manifest and the graph, whichever way it got there',
+       known_source_inputs: { retained_unit_scope: { 'unit:concerns' => %w[lib/ownership_storage.rb] } } do
       load app_path(write_file('lib/ownership_storage.rb', "module OwnershipStorage\n  def upload; end\nend\n"))
       host = write_storage_host(include_storage: true)
       index = full_extraction
@@ -2525,7 +2637,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'publishes a descendant of an application serializer base as a serializer only' do
+    it 'publishes a descendant of an application serializer base as a serializer only',
+       known_source_inputs: {
+         unrun_family_scope: { 'whole:database_tables' => %w[app/models/ownership_summary.rb] }
+       } do
       load app_path(write_file('app/serializers/ownership_base_serializer.rb', "class OwnershipBaseSerializer\nend\n"))
       summary = 'app/models/ownership_summary.rb'
       body = ->(extra) { "class OwnershipSummary < OwnershipBaseSerializer\n  def call = #{extra}\nend\n" }
@@ -2539,7 +2654,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(types.fetch('poro', [])).not_to include('OwnershipSummary')
     end
 
-    it 'gives a nested job only the edges written in its own class body' do
+    it 'gives a nested job only the edges written in its own class body',
+       known_source_inputs: {
+         unrun_family_scope: { 'whole:database_tables' => %w[app/models/ownership_account.rb] }
+       } do
       path = 'app/models/ownership_account.rb'
       body = lambda do |note|
         <<~RUBY
@@ -2692,7 +2810,12 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       document.dig('metadata', 'references').map { |span| span.values_at('target', 'mixin', 'kind', 'confidence') }
     end
 
-    it 'follows an include, extend and prepend as they are added, moved into an included block and removed' do
+    it 'follows an include, extend and prepend as they are added, moved into an included block and removed',
+       known_source_inputs: {
+         unrun_family_scope: {
+           'whole:database_tables' => %w[app/models/mixin_tag_concern.rb app/models/mixin_tag_host.rb]
+         }
+       } do
       host = 'app/models/mixin_tag_host.rb'
       concern = 'app/models/mixin_tag_concern.rb'
       load app_path(write_file('app/models/mixin_tag_shared.rb', "module MixinTagShared\n  def shared = 1\nend\n"))
@@ -3206,7 +3329,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(File.read(File.join(Woods::Generation.new(output_dir: index).payload_dir, 'manifest.json'))).to eq(before)
     end
 
-    it 're-resolves documents on a targeted refresh' do
+    it 're-resolves documents on a targeted refresh',
+       known_source_inputs: { refresh_family_scope: { 'whole:test_mappings' => %w[lib/tasks/audit.rake] } } do
       write_file('docs/tasks.md', guide('`rake audit:run`'))
       index = full_extraction
       write_file('lib/tasks/audit.rake', rake_source('audit', %w[run]))
@@ -3687,6 +3811,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     it 'marks a cycle that lost Git as degraded, keeps the rest published, and is repaired by a full run' do
       index_dir = full_extraction
       healthy = summary(index_dir)
+      capture_masked = -> { mask(:manifest_git_capture, read_json(index_dir, 'manifest.json')).fetch('git_enrichment') }
+      healthy_masked = capture_masked.call
 
       make_git_unreachable
       path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
@@ -3702,7 +3828,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       restore_git
       Woods::Extractor.new(output_dir: index_dir).extract_all
-      expect(summary(index_dir)).to eq(healthy.merge('capture' => summary(index_dir)['capture']))
+      expect(capture_masked.call).to eq(healthy_masked)
       found = differences(index_dir, full_extraction)
       expect(found).to be_empty, found.join("\n")
 
@@ -4478,7 +4604,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   end
 
   describe 'class-based additions' do
-    it 'indexes a service class the file dispatcher and the descendant scan both see' do
+    it 'indexes a service class the file dispatcher and the descendant scan both see',
+       known_source_inputs: { unrun_family_scope: { 'whole:database_tables' => %w[app/models/tag.rb] } } do
       # The reconciliation path keys on live descendants, so the class has to
       # be loaded — which is what a reloading daemon would do after the write.
       run_sequence([
@@ -5118,7 +5245,12 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                           .map { |unit| unit['identifier'] }
     end
 
-    it 'adds, edits, and prunes swept files equivalently to a full extraction' do
+    it 'adds, edits, and prunes swept files equivalently to a full extraction',
+       known_source_inputs: {
+         unrun_family_scope: {
+           'whole:database_tables' => %w[app/models/sweep_namespace.rb app/models/sweep_pattern.rb]
+         }
+       } do
       run_sequence([
                      lambda do
                        write_and_load('app/helpers/sweep_date_helper.rb', <<~RUBY)
@@ -5212,7 +5344,13 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(sweep_units(index, marker: 'owner_fallback')).to eq(['SweepVersionCapabilities'])
     end
 
-    it 'moves a file between its owner and the fallback as its shape changes' do
+    it 'moves a file between its owner and the fallback as its shape changes',
+       known_source_inputs: {
+         retained_unit_scope: {
+           'unit:poros' => %w[app/services/sweep_flip_service.rb],
+           'unit:services' => %w[app/services/sweep_flip_service.rb]
+         }
+       } do
       flip = 'app/services/sweep_flip_service.rb'
       service = "class SweepFlipService\n  def call = :ok\nend\n"
       helper = "module SweepFlipService\n  module_function\n  def call = :ok\nend\n"
@@ -5238,7 +5376,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         end
       end
 
-      it 'drops the stale poro unit when a parent gains a job mixin outside the blast radius' do
+      it 'drops the stale poro unit when a parent gains a job mixin outside the blast radius',
+         known_source_inputs: {
+           retained_unit_scope: { 'unit:poros' => %w[app/models/sweep_child.rb app/models/sweep_parent.rb] }
+         } do
         index = full_extraction
         expect(unit_snapshot(index).values.map { |unit| unit['identifier'] }).to include('SweepChild')
 
@@ -5333,7 +5474,19 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'publishes skip-reason changes that touch no unit, and only those' do
+    it 'publishes skip-reason changes that touch no unit, and only those',
+       known_source_inputs: {
+         unconsumed_file_scope: {
+           'file:caching' => %w[app/models/sweep_empty.rb],
+           'file:concerns' => %w[app/models/sweep_empty.rb],
+           'file:poros' => %w[app/models/sweep_empty.rb]
+         },
+         unrun_family_scope: {
+           'whole:database_tables' => %w[app/models/sweep_empty.rb],
+           'whole:events' => %w[app/models/sweep_empty.rb],
+           'whole:state_machines' => %w[app/models/sweep_empty.rb]
+         }
+       } do
       index = full_extraction
       empty = 'app/models/sweep_empty.rb'
       skipped = -> { read_json(index, 'skipped_files.json').fetch('files') }
@@ -5691,6 +5844,303 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # An untouched unit names `ShadowProbeJob`, and Ruby's lookup at that call
+  # site answers the innermost scope or ancestor that defines it. A constant
+  # added or removed elsewhere can change that answer while the unit's own
+  # file, and every edge of the graph before the run, stays the same.
+  describe 'a constant added or removed under the scope of an untouched reference' do
+    let(:shadow_constants) do
+      %i[ShadowProbeWitness ShadowProbeHost ShadowLedger ShadowDepot ShadowProbeJob ShadowAuditService ShadowOtherJob
+         ShadowPingHost ShadowPinging]
+    end
+
+    after do
+      shadow_constants.each do |name|
+        next unless Object.const_defined?(name, false)
+
+        constant = Object.const_get(name)
+        nested = constant.constants(false).map { |child| constant.const_get(child, false) }
+        ([constant] + nested).each { |klass| klass.abstract_class = true if klass.respond_to?(:abstract_class=) }
+        Object.send(:remove_const, name)
+      end
+    end
+
+    def load_written(relative, source)
+      load app_path(write_file(relative, source))
+      relative
+    end
+
+    def write_shadow_fixture
+      load_written('app/jobs/shadow_probe_job.rb', "class ShadowProbeJob < ApplicationJob\n  def perform; end\nend\n")
+      load_written('app/services/shadow_audit_service.rb', "class ShadowAuditService\n  def self.call; end\nend\n")
+      load_written('app/models/shadow_ledger.rb',
+                   "class ShadowLedger < ApplicationRecord\n  self.table_name = 'posts'\nend\n")
+      write_shadow_referrers
+    end
+
+    def write_shadow_referrers
+      load_written('app/models/shadow_probe_host.rb', <<~RUBY)
+        class ShadowProbeHost < ApplicationRecord
+          self.table_name = 'posts'
+          after_save :enqueue_probe
+
+          def enqueue_probe = ShadowProbeJob.perform_later
+        end
+      RUBY
+      load_written('app/models/shadow_ledger/entry.rb', <<~RUBY)
+        class ShadowLedger
+          class Entry < ApplicationRecord
+            self.table_name = 'comments'
+
+            def settle
+              ShadowAuditService.call
+              ShadowProbeJob.perform_later
+              ShadowTally.count
+            end
+          end
+        end
+      RUBY
+    end
+
+    def nested_job(namespace)
+      "class #{namespace}::ShadowProbeJob < ::ShadowProbeJob\nend\n"
+    end
+
+    def remove_nested(namespace, name)
+      Object.const_get(namespace).send(:remove_const, name)
+    end
+
+    it 'retargets an untouched model when a job is nested under it' do
+      write_shadow_fixture
+      index = full_extraction
+      added = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowProbeHost::ShadowProbeJob', 'ShadowProbeHost')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    def job_dependents(index, job)
+      Woods::DependencyGraph.from_h(read_json(index, 'dependency_graph.json')).dependents_of(job).sort
+    end
+
+    it 'retargets a subclass that reaches the nested job through its parent, keeping a rooted reference' do
+      write_shadow_fixture
+      load_written('app/models/shadow_probe_witness.rb', <<~RUBY)
+        class ShadowProbeWitness < ShadowProbeHost
+          def root_job = ::ShadowProbeJob.perform_later
+          def chosen_job = ShadowProbeJob.perform_later
+        end
+      RUBY
+      index = full_extraction
+      added = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowProbeWitness')
+      expect(job_dependents(index, 'ShadowProbeJob')).to include('ShadowProbeWitness')
+      expect(job_dependents(index, 'ShadowProbeHost::ShadowProbeJob')).to include('ShadowProbeWitness')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    # The names are read from the preceding generation's reference cache, so
+    # a run without a usable one must not fall back to the graph alone.
+    def damage_reference_cache(path, state)
+      return File.delete(path) if state == 'missing'
+
+      File.binwrite(path, JSON.generate(JSON.parse(File.binread(path)).merge('version' => 8)))
+    end
+
+    ['missing', 'from an older format'].each do |state|
+      it "refuses a shadowing edit while the reference cache is #{state}, then recovers after a full extraction" do
+        write_shadow_fixture
+        index = full_extraction
+        generation = Woods::Generation.new(output_dir: index)
+        token = generation.current.token
+        damage_reference_cache(generation.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME).to_s, state)
+        added = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+
+        expect { Woods::Extractor.new(output_dir: index).extract_changed([added]) }
+          .to raise_error(Woods::SourceReferences::RebuildRequired, /woods:extract/)
+        expect(generation.current.token).to eq(token)
+
+        Woods::Extractor.new(output_dir: index).extract_all
+        Woods::Extractor.new(output_dir: index).extract_changed([added])
+        expect(differences(index, full_extraction)).to be_empty
+      end
+    end
+
+    it 'retargets models nested in a plain namespace module when a job is added to the module file' do
+      write_shadow_fixture
+      namespace = load_written('app/models/shadow_depot.rb', "module ShadowDepot\nend\n")
+      consumers = %w[Slip Manifest].map do |name|
+        load_written("app/models/shadow_depot/#{name.downcase}.rb", <<~RUBY)
+          module ShadowDepot
+            class #{name} < ApplicationRecord
+              self.table_name = 'posts'
+              def self.selected_job = ShadowProbeJob
+              def self.dispatch(id) = ShadowProbeJob.perform_later(id)
+            end
+          end
+        RUBY
+        "ShadowDepot::#{name}"
+      end
+      index = full_extraction
+      load_written(namespace, <<~RUBY)
+        module ShadowDepot
+          class ShadowProbeJob < ApplicationJob
+            def perform(id) = id
+          end
+        end
+      RUBY
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([namespace])
+
+      expect(touched).to include(*consumers)
+      expect(job_dependents(index, 'ShadowProbeJob') & consumers).to be_empty
+      expect(job_dependents(index, 'ShadowDepot::ShadowProbeJob')).to include(*consumers)
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'retargets a model nested in a namespace when a job is nested in the namespace model file' do
+      write_shadow_fixture
+      index = full_extraction
+      changed = load_written('app/models/shadow_ledger.rb', <<~RUBY)
+        class ShadowLedger < ApplicationRecord
+          self.table_name = 'posts'
+
+          class ShadowProbeJob < ::ShadowProbeJob
+          end
+        end
+      RUBY
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([changed])
+
+      expect(touched).to include('ShadowLedger::ShadowProbeJob', 'ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'retargets a service reference when a service is nested in the namespace' do
+      write_shadow_fixture
+      index = full_extraction
+      added = load_written('app/services/shadow_ledger/shadow_audit_service.rb',
+                           "class ShadowLedger::ShadowAuditService\n  def self.call; end\nend\n")
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'adds an edge from an untouched model when a namespaced model makes its short name resolve' do
+      write_shadow_fixture
+      index = full_extraction
+      added = load_written('app/models/shadow_ledger/shadow_tally.rb',
+                           "class ShadowLedger::ShadowTally < ApplicationRecord\n  self.table_name = 'posts'\nend\n")
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowLedger::ShadowTally', 'ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'falls back to the outer job when the nested job is removed' do
+      write_shadow_fixture
+      nested = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+      index = full_extraction
+      delete_file(nested)
+      remove_nested(:ShadowProbeHost, :ShadowProbeJob)
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([nested])
+
+      expect(touched).to include('ShadowProbeHost')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'retargets both scopes when a nested job moves from one namespace to another' do
+      write_shadow_fixture
+      old = load_written('app/jobs/shadow_probe_host/shadow_probe_job.rb', nested_job('ShadowProbeHost'))
+      index = full_extraction
+      delete_file(old)
+      remove_nested(:ShadowProbeHost, :ShadowProbeJob)
+      fresh = load_written('app/jobs/shadow_ledger/shadow_probe_job.rb', nested_job('ShadowLedger'))
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([old, fresh])
+
+      expect(touched).to include('ShadowProbeHost', 'ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'leaves untouched references alone when the new constant has another name' do
+      write_shadow_fixture
+      index = full_extraction
+      added = load_written('app/jobs/shadow_probe_host/shadow_other_job.rb',
+                           "class ShadowProbeHost::ShadowOtherJob < ApplicationJob\n  def perform; end\nend\n")
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowProbeHost::ShadowOtherJob')
+      expect(touched).not_to include('ShadowProbeHost', 'ShadowLedger::Entry')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    # The model runs the concern's callback and records its job, but its own
+    # source lists only the model file. Only the concern names the job.
+    def write_concern_fixture
+      write_shadow_fixture
+      load_written('app/models/concerns/shadow_pinging.rb', <<~RUBY)
+        module ShadowPinging
+          extend ActiveSupport::Concern
+          included { after_save :ping_probe }
+
+          def ping_probe = ShadowProbeJob.perform_later
+        end
+      RUBY
+      load_written('app/models/shadow_ping_host.rb', <<~RUBY)
+        class ShadowPingHost < ApplicationRecord
+          self.table_name = 'posts'
+          include ShadowPinging
+        end
+      RUBY
+    end
+
+    def enqueued_by_callbacks(index, identifier)
+      unit_snapshot(index).find { |key, data| key.start_with?('models/') && data['identifier'] == identifier }
+                          .last.dig('metadata', 'callbacks')
+                          .flat_map { |callback| callback.dig('side_effects', 'jobs_enqueued') || [] }
+    end
+
+    it 'retargets a model whose callback comes from an untouched concern when a job is nested in the concern' do
+      write_concern_fixture
+      index = full_extraction
+      added = load_written('app/jobs/shadow_pinging/shadow_probe_job.rb', nested_job('ShadowPinging'))
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([added])
+
+      expect(touched).to include('ShadowPinging', 'ShadowPingHost')
+      expect(touched).not_to include('ShadowLedger')
+      clean = full_extraction
+      expect(enqueued_by_callbacks(index, 'ShadowPingHost')).to eq(enqueued_by_callbacks(clean, 'ShadowPingHost'))
+      expect(differences(index, clean)).to be_empty
+    end
+
+    it 'retargets a model whose callback comes from an untouched concern when the nested job is removed' do
+      write_concern_fixture
+      nested = load_written('app/jobs/shadow_pinging/shadow_probe_job.rb', nested_job('ShadowPinging'))
+      index = full_extraction
+      delete_file(nested)
+      remove_nested(:ShadowPinging, :ShadowProbeJob)
+
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([nested])
+
+      expect(touched).to include('ShadowPinging', 'ShadowPingHost')
+      clean = full_extraction
+      expect(enqueued_by_callbacks(index, 'ShadowPingHost')).to eq(enqueued_by_callbacks(clean, 'ShadowPingHost'))
+      expect(differences(index, clean)).to be_empty
+    end
+  end
+
   describe 'proven ownership moves out of surviving files (#574)' do
     def ownership_source(split: false)
       nested = split ? '' : 'class Car < OwnershipFleet; end'
@@ -5724,7 +6174,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     [false, true].each do |new_first|
-      it "keeps a nested STI model split equivalent and stable after another old-file edit, new first=#{new_first}" do
+      it "keeps a nested STI model split equivalent and stable after another old-file edit, new first=#{new_first}",
+         known_source_inputs: {
+           unrun_family_scope: { 'whole:database_tables' => %w[app/models/ownership_fleet/car.rb] },
+           baseline_error_carried: { 'errors' => %w[app/models/ownership_fleet/car.rb] }
+         } do
         require 'woods/mcp/index_reader'
         index = prepare_ownership_split
         reader = Woods::MCP::IndexReader.new(index)
@@ -5850,7 +6304,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'makes a worker that is the primary class of an app/models file one job unit with its references' do
+    it 'makes a worker that is the primary class of an app/models file one job unit with its references',
+       known_source_inputs: {
+         unrun_family_scope: { 'whole:database_tables' => %w[app/models/ledger_import_manager.rb] }
+       } do
       load_sidekiq_stand_in
       load app_path(write_file('app/models/ledger_rate.rb', "class LedgerRate\n  def self.for(*) = nil\nend\n"))
       index = full_extraction
@@ -6532,7 +6989,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(differences(index_dir, full_extraction)).to be_empty
     end
 
-    it 'refreshes a file-scanning whole-app extractor without a change set' do
+    it 'refreshes a file-scanning whole-app extractor without a change set',
+       known_source_inputs: { refresh_family_scope: { 'whole:test_support' => %w[spec/factories/posts.rb] } } do
       index_dir = Dir.mktmpdir('woods_refresh_factories')
       (@scratch_dirs ||= []) << index_dir
       Woods::Extractor.new(output_dir: index_dir).extract_all
@@ -6780,7 +7238,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         expect(differences(index, full_extraction)).to be_empty
       end
 
-      it 'follows a model onto another table and in and out of abstraction, ownership edges included' do
+      it 'follows a model onto another table and in and out of abstraction, ownership edges included',
+         known_source_inputs: { retained_unit_scope: { 'unit:models' => %w[app/models/parcel_shift.rb] } } do
         %w[parcel_slots parcel_bins].each_with_index do |table, number|
           write_file("db/migrate/2024030800000#{number}_touch_#{table}.rb",
                      migration("Touch#{table.camelize}", "add_column(:#{table}, :extra, :string)"))
@@ -7515,7 +7974,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
   describe 'randomized operation sequences' do
     DIFF_SEEDS.each do |seed|
-      it "stays equivalent to a full extraction over #{DIFF_OPERATION_COUNT} random operations (seed #{seed})" do
+      it "stays equivalent to a full extraction over #{DIFF_OPERATION_COUNT} random operations (seed #{seed})",
+         known_source_inputs: { unrun_family_scope: { 'whole:database_tables' => :randomized_artifacts } } do
         random = Random.new(seed)
         live = []
 

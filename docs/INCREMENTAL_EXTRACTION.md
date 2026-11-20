@@ -20,12 +20,13 @@ same manifest counts and `graph_analysis.json` — and, when flow
 precomputation is enabled, the same `flows/flow_index.json`, the same
 flow documents, and the same flow annotations on controller units.
 
-Two differences are tolerated, and nothing else:
+`dependency_graph.json` is compared byte for byte, PageRank included.
+Every tolerated difference is a row of `IndexComparison::MASKS` in `spec/support/index_comparison.rb`; the main ones:
 
 | Tolerated | Why |
 |---|---|
 | Wall-clock stamps (`extracted_at`, `generated_at`, and the digest over it) | A unit an incremental run correctly left alone keeps an older stamp. |
-| PageRank beyond six decimal places | Iterative floating point accumulated in each run's registration order. Scores are compared as values; only the last bits are forgiven. |
+| Keyed source digests and capture accounting | Each index has its own private key; an incremental run reuses digests. |
 
 The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.
 A nested metadata field with the same name is application data: changing it
@@ -387,6 +388,16 @@ step before it.
    genuine simultaneous source owners still abort before publication.
 3. **Re-extract the rest of the blast radius**: units whose own file did not
    change but which depend on something that did.
+
+   A reference resolves by name against the loaded constants, so an edit in another file can move it.
+   Adding `Billing::ReconcileJob` retargets an unchanged `Billing::Invoice` that enqueues `ReconcileJob`.
+   No graph edge leads there, so such units join the blast radius by name.
+   `RenderScope` reads the constants each changed Ruby file adds, removes or redefines, as in step 4.
+   Every unit whose source holds a reference through one of those names is re-extracted.
+   The preceding generation's source-reference cache lists the references, so no source is parsed again.
+   A method body edit touches no constant and adds no unit.
+   An edit the syntax tree cannot read counts every constant the file declares.
+   A constant created only by name at run time (`const_set`) is not followed.
 4. **Reconcile class-based types** against each extractor's
    `#discoverable_classes`, classes added since the last extraction, and
    classes the graph still holds that the set no longer contains. Exact by
@@ -1015,8 +1026,9 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_8.0.gemfile \
 WOODS_DIFF_BRIEF=4000 ...
 ```
 
-Seeds are fixed, so a failure reproduces. `spec/support/index_comparison.rb`
-owns the definition of "the two indexes agree" and documents every exclusion.
+Seeds are fixed, so a failure reproduces.
+`IndexComparison::MASKS` declares every exclusion once with its reason; a self-check proves each is as wide as declared.
+`WOODS_DIFF_MASKS=1` prints the masks in effect on a green run too, and `WOODS_DIFF_MASK_SEED` reseeds the self-check.
 
 **Run it before and after any change to the incremental path.**
 
@@ -1118,12 +1130,18 @@ edit does not establish that a day of commits is below the crossover.
   other files. The same holds for the node attributes `commit_count` and
   `change_frequency` that feed the `volatile_dependencies` report.
 - **The commit table follows HEAD on every run.** `git_commits.json` is not
-  patched per unit: an incremental or refresh run compares the published
-  table's `head`, `since`, bounds and indexed-path digest with its own and
-  rebuilds the whole table from one history walk when any differs, so it
-  matches a full extraction of the same tree and HEAD even when no indexed file
-  changed. A changed table alone publishes a generation. A run without
-  readable history withdraws the table instead of keeping a stale one. See
+  patched per unit: every run, full, incremental or refresh, compares the
+  published table's `head`, `since`, bounds, indexed-path digest and
+  `history_rewrites` (replace refs and grafts) with its own and rebuilds the
+  whole table from one history walk when any differs, so it matches a full
+  extraction of the same tree and HEAD even when no indexed file changed.
+  A run that cannot read the replace-ref and graft state always walks, and a
+  table written before `history_rewrites` existed is rebuilt once, so the
+  first run after upgrading walks history.
+  A normal `woods:extract` keeps a table that still matches; a clean
+  extraction (`woods:clean` first, or a fresh output directory) forces the
+  walk. A changed table alone publishes a generation. A run without readable
+  history withdraws the table instead of keeping a stale one. See
   [Index layout](INDEX_LAYOUT.md#commit-table).
 - **View partial targets are fixed when the rendering template is extracted.**
   A render edge is resolved against the partial files on disk and the
