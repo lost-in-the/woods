@@ -308,7 +308,7 @@ module Woods
 
         lines = filters.map do |f|
           opts = []
-          opts << "only: [#{f[:only].map { |a| ":#{a}" }.join(', ')}]" if f[:only]&.any?
+          opts << "only: [#{f[:only].map { |a| ":#{a}" }.join(', ')}]" if f[:only]
           opts << "except: [#{f[:except].map { |a| ":#{a}" }.join(', ')}]" if f[:except]&.any?
           opts << "if: #{f[:if]}" if f[:if]
           opts << "unless: #{f[:unless]}" if f[:unless]
@@ -341,7 +341,7 @@ module Woods
 
           result = { kind: callback.kind, filter: callback_filter(callback),
                      origin: callback_origin(controller, callback) }
-          result[:only] = only.sort if only.any?
+          result[:only] = only.sort if only
           result[:except] = except.sort if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
@@ -352,9 +352,10 @@ module Woods
       end
 
       # Where a filter was declared, when that can be known rather than
-      # guessed: a proc filter's own source location, or the first
-      # `before_action :name` (of the callback's kind) in the source of the
-      # controller's app-defined ancestors, in method resolution order.
+      # guessed: a proc filter's own source location, or the last
+      # `before_action :name` (of the callback's kind) in the first source of
+      # the controller's app-defined ancestors, in method resolution order,
+      # that declares it.
       #
       # @param controller [Class]
       # @param callback [ActiveSupport::Callbacks::Callback]

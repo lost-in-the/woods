@@ -202,7 +202,7 @@ module Woods
             filter: callback_filter_label(cb),
             origin: callback_origin(mailer, cb)
           }
-          result[:only] = only if only.any?
+          result[:only] = only if only
           result[:except] = except if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
