@@ -127,7 +127,42 @@ module Woods
         close
       end
 
+      # Retire the claim of a watcher its own launcher stopped, with no token
+      # chosen by an operator. The launcher learned the watcher's pid from its
+      # private event stream, so only a version 2 claim recorded on this host
+      # by that pid qualifies, and only once its process group is gone, its
+      # lease lock is free and the claim names that lease. Never creates,
+      # replaces or unlinks a sidecar.
+      # @param pid [Integer] watcher pid the launcher started and stopped
+      # @param host [String] this host's identity
+      # @yieldreturn [Boolean] the watcher's process group is gone; asked while both locks are held
+      # @return [Boolean] true when the claim was removed; false when no claim names that watcher
+      # @raise [Unavailable] when the claim names that watcher but cannot be proven abandoned
+      def retire_stopped(pid:, host:)
+        coordinate do
+          snapshot = read_claim
+          record = JSON.parse(snapshot)
+          return false unless stopped_watcher_claim?(record, pid, host)
+          raise Unavailable, "watcher pid #{pid} still has a live process group; #{MANUAL_STEP}" unless yield
+
+          acquire_recovery_lease
+          verify_lease(record)
+          return false unless read_claim == snapshot
+
+          File.unlink(File.join(@index, CLAIM))
+          true
+        end
+      rescue Errno::ENOENT, JSON::ParserError, EncodingError
+        false
+      ensure
+        close
+      end
+
       private
+
+      def stopped_watcher_claim?(record, pid, host)
+        valid_record?(record) && record['lease_version'] == 2 && record['host'] == host && record['pid'] == pid
+      end
 
       # @param name [String] fixed sidecar basename
       # @param create [Boolean] permit initial creation

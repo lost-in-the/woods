@@ -4,14 +4,15 @@ require 'fileutils'
 require 'json'
 require 'securerandom'
 
-# Woods::Error is defined in the entry point; required here so this file can
-# be loaded directly (the watch daemon reaches for it without loading the
-# whole gem first).
-require 'woods'
 require 'woods/watch/status'
 require 'woods/coordination/liveness'
 
 module Woods
+  # Defined here only when the entry point is not loaded, so this file loads
+  # directly with nothing but `lib` on the path: the managed launcher retires a
+  # stopped watcher's lock without loading the gem or its dependencies.
+  class Error < StandardError; end unless defined?(Woods::Error)
+
   module Coordination
     class LockError < Woods::Error; end
 
@@ -284,6 +285,33 @@ module Woods
         :missing
       end
 
+      # Retire the lock of one known writer that is gone, for the launcher that
+      # stopped it. Unlike {#retire_stale}, age never counts: the lock captured
+      # atomically from the public path is cleared only when it records exactly
+      # +pid+ on +host+, +host+ is this host, {Liveness} finds that pid gone and
+      # the block agrees. Any other captured lock is restored, never deleted.
+      # Creates nothing when the lock is absent, and waits at most
+      # {DEFAULT_GUARD_WAIT} for the guard.
+      #
+      # @param pid [Integer] the writer's recorded pid
+      # @param host [String] the writer's recorded host identity
+      # @yieldreturn [Boolean] the writer's process group is gone; asked only
+      #   for a lock recording that writer, under the guard
+      # @return [Symbol] `:cleared`; `:missing` when there is no lock;
+      #   `:other_holder` when the lock records anything else; `:alive` when
+      #   it records that writer but the writer is not proven gone; `:busy`
+      #   when the guard stayed held
+      def retire_gone_holder(pid:, host:, &gone)
+        return :missing unless File.file?(@lock_path)
+
+        gone ||= -> { true }
+        with_path_guard(wait: DEFAULT_GUARD_WAIT) { retire_gone_holder_unlocked(pid, host, gone) }
+      rescue Errno::ENOENT
+        :missing
+      rescue GuardBusy
+        :busy
+      end
+
       # Release the lock.
       #
       # Deletes the lock file only if it still carries this instance's
@@ -503,6 +531,34 @@ module Woods
         :cleared
       rescue Errno::ENOENT
         :missing
+      end
+
+      # The capture-then-check of {#retire_stale_unlocked}, judged by holder
+      # identity instead of age. A corrupt captured file is not that writer's
+      # and is restored.
+      #
+      # @return [Symbol] see {#retire_gone_holder}
+      def retire_gone_holder_unlocked(pid, host, gone)
+        graveyard = "#{@lock_path}.stopped.#{Process.pid}.#{SecureRandom.hex(4)}"
+        File.rename(@lock_path, graveyard)
+        begin
+          verdict = gone_holder_verdict(graveyard, pid, host, gone)
+        ensure
+          verdict == :cleared ? FileUtils.rm_f(graveyard) : restore_lock_unlocked(graveyard)
+        end
+        verdict
+      rescue Errno::ENOENT
+        :missing
+      end
+
+      def gone_holder_verdict(path, pid, host, gone)
+        record = JSON.parse(File.read(path))
+        return :other_holder unless record.is_a?(Hash) && record['pid'] == pid && record['host'] == host
+        return :alive unless Liveness.gone?(holder_liveness(record)) && gone.call
+
+        :cleared
+      rescue JSON::ParserError, EncodingError, SystemCallError
+        :other_holder
       end
 
       def release_unlocked
