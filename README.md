@@ -232,6 +232,7 @@ The plugin guides installation, MCP configuration, investigation, repository age
 | Configure Woods | [Configuration reference](docs/CONFIGURATION_REFERENCE.md) |
 | Choose retrieval and storage | [Retrieval guide](docs/RETRIEVAL_GUIDE.md) and [backend matrix](docs/BACKEND_MATRIX.md) |
 | Upgrade from 1.x | [Upgrade guide](docs/UPGRADING_TO_2.md) |
+| Know what an upgrade can change | [Compatibility](docs/COMPATIBILITY.md) |
 | Diagnose a failure | [Troubleshooting](docs/TROUBLESHOOTING.md) |
 
 See the [documentation index](docs/README.md) for all guides and canonical reference pages.

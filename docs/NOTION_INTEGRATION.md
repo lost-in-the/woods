@@ -1,7 +1,7 @@
 # Notion Integration
 
 > **Deprecated.** Notion sync (`woods:notion_sync`, `woods:send` and the `notion_sync` MCP tool) is
-> deprecated and will be removed in the next minor release. Use the [Markdown export](MARKDOWN_EXPORT.md)
+> deprecated and will be removed in Woods 3.0. Use the [Markdown export](MARKDOWN_EXPORT.md)
 > (`woods:markdown`) and sync the folder wherever you need. These commands warn once per process.
 
 Sync your Rails application's data model documentation to Notion databases, making schema, associations, validations, callbacks, and column-level detail accessible to non-technical stakeholders without GitHub access.

@@ -2,7 +2,7 @@
 
 > The generic [Markdown export](MARKDOWN_EXPORT.md) (`woods:markdown`) is the supported export path.
 > This guide covers its Obsidian flavor (`WOODS_MARKDOWN_OBSIDIAN=1`). `woods:obsidian` and
-> `woods:vault` are deprecated aliases and will be removed in the next minor release.
+> `woods:vault` are deprecated aliases and will be removed in Woods 3.0.
 
 Export Woods extraction artifacts to a self-contained [Obsidian](https://obsidian.md) vault, a
 folder of interlinked Markdown notes, one per extracted unit. The vault is designed to be read two

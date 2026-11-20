@@ -63,8 +63,8 @@ Re-running, ownership checks, and the guarded sweep behave as described in
 ## Renamed tasks
 
 `woods:obsidian` and `woods:vault` still work. They export the Obsidian flavor into
-`<output>/obsidian_vault`, print one deprecation line per process, and will be removed in the next
-minor release. Use `woods:markdown` with `WOODS_MARKDOWN_OBSIDIAN=1` instead.
+`<output>/obsidian_vault`, print one deprecation line per process, and will be removed in
+Woods 3.0. Use `woods:markdown` with `WOODS_MARKDOWN_OBSIDIAN=1` instead.
 
 ## Ruby API
 

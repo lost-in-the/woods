@@ -74,7 +74,7 @@ RSpec.describe 'woods:markdown and the deprecated export tasks' do
         out, err, status = run_tasks(name, markdown_fixture)
         expect(status).to be_success, "#{out}\n#{err}"
         expect(out).to include('EXPORTER obsidian=true dir=obsidian_vault')
-        expect(err).to include('DEPRECATED', 'woods:markdown')
+        expect(err).to include('DEPRECATED', 'woods:markdown', 'removed in Woods 3.0')
       end
 
       it 'warns once per process' do
