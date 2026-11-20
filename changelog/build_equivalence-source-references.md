@@ -1,0 +1,1 @@
+- The incremental-equivalence oracle compares `source_references.json`, except each file's keyed identity digest.
