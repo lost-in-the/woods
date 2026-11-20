@@ -607,10 +607,10 @@ module Woods
       # Eager load once — all extractors need loaded classes for introspection.
       profile_phase('eager load') { safe_eager_load! }
       profile_phase('component load') { load_runtime_discovery_files }
-      @schema_readability = profile_phase('schema readability') { read_schema_readability }
-
-      # Phase 1: Extract all units
       Extraction::ServedPools.during do |served|
+        @schema_readability = profile_phase('schema readability') { read_schema_readability }
+
+        # Phase 1: Extract all units
         profile_phase('extraction') do
           if Woods.configuration.concurrent_extraction
             extract_all_concurrent

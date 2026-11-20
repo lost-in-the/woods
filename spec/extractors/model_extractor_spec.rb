@@ -1893,7 +1893,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       stub_const('Rails', double('Rails'))
       allow(Rails).to receive(:logger).and_return(double('Logger').as_null_object)
 
-      model = double('Model', name: 'BrokenModel')
+      model = double('Model', name: 'BrokenModel', connection_pool: nil)
       allow(extractor).to receive(:source_file_for).and_raise(StandardError, 'bad path')
 
       extractor.send(:extract_model, model)
@@ -2021,6 +2021,49 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
         expect(extractor.send(:table_foreign_keys, model)).to be_nil
         expect(schema_failed?(unserved)).to be(true)
+      end
+
+      def extract_with_failing_columns(error)
+        allow(model).to receive(:columns).and_raise(error)
+        allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                             source_file_for: nil)
+        stub_pool_connection(model, double('Connection', indexes: [index], foreign_keys: [foreign_key]))
+      end
+
+      it "refuses a column read that timed out outside the schema readers, on the model's own pool" do
+        pool = extract_with_failing_columns(checkout_timeout.new('could not obtain a connection'))
+
+        expect(extractor.extract_model(model)).to be_nil
+        expect(schema_failed?(->(candidate) { candidate.equal?(pool) })).to be(true)
+      end
+
+      it 'records, without refusing, a column read that timed out on a pool that never answered' do
+        extract_with_failing_columns(checkout_timeout.new('could not obtain a connection'))
+
+        expect(extractor.extract_model(model)).to be_nil
+        expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(true)
+        expect(schema_failed?(unserved)).to be(false)
+      end
+
+      def timeout_carrying(pool)
+        checkout_timeout.new('could not obtain a connection').tap do |error|
+          error.define_singleton_method(:connection_pool) { pool }
+        end
+      end
+
+      it "refuses on the pool a failed read carries, not the model's, when only that pool answered" do
+        other = Object.new
+        extract_with_failing_columns(timeout_carrying(other))
+
+        expect(extractor.extract_model(model)).to be_nil
+        expect(schema_failed?(->(candidate) { candidate.equal?(other) })).to be(true)
+      end
+
+      it "lets a failed read carrying an unanswered pool publish, though the model's own pool answered" do
+        pool = extract_with_failing_columns(timeout_carrying(Object.new))
+
+        expect(extractor.extract_model(model)).to be_nil
+        expect(schema_failed?(->(candidate) { candidate.equal?(pool) })).to be(false)
       end
 
       it 'records nothing for an index that answered but could not be formatted' do

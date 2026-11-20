@@ -33,17 +33,21 @@ module Woods
       # Mark the consumer, and list the failure when +error+ is a schema read
       # that failed on a database that answers.
       #
+      # The pool the error carries (Rails 7.1 and later attach the one the
+      # read used) wins over +pool+: a handler can rescue reads that went
+      # through another pool than the one it names.
+      #
       # @param consumer [Object]
       # @param error [Exception, nil]
-      # @param pool [Object, nil] the pool the read waited for, when known;
-      #   otherwise the error's own (Rails 7.1 and later attach it)
+      # @param pool [Object, nil] the handler's pool, used only when +error+
+      #   carries none (Rails before 7.1, or an error raised without one)
       # @return [void]
       def record_read_failure(consumer, error, pool = nil)
         record(consumer)
         kind = read_failure_kind(error)
         return unless kind
 
-        pool ||= error.connection_pool if error.respond_to?(:connection_pool)
+        pool = (error.connection_pool if error.respond_to?(:connection_pool)) || pool
         failures = consumer.instance_variable_get(READ_FAILURES) || []
         consumer.instance_variable_set(READ_FAILURES, failures + [{ kind: kind, pool: pool }])
       end
@@ -80,8 +84,8 @@ module Woods
       # handlers need not name the error classes.
       #
       # @param consumer [Object]
-      # @param pool [Object, nil] the pool the handled read used, when the
-      #   handler knows it; see {#record_read_failure}
+      # @param pool [Object, nil] the pool the handler expects the read used,
+      #   when the error carries none; see {#record_read_failure}
       # @return [void]
       def log(consumer, *message, pool: nil, &block)
         record_read_failure(consumer, $ERROR_INFO, pool)

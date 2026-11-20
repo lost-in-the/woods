@@ -68,6 +68,25 @@ RSpec.describe Woods::SourceInputs::ConsumerErrors do
       expect(described_class.schema_failed?(consumer, unserved)).to be(false)
     end
 
+    it "refuses on the pool a checkout timeout carries, not the handler's, when only that pool answered" do
+      consumer = log_while_handling(timeout_on(pool), pool: Object.new)
+
+      expect(described_class.schema_failed?(consumer, served)).to be(true)
+    end
+
+    it "lets a checkout timeout carrying an unanswered pool publish, though the handler's pool answered" do
+      handler_pool = Object.new
+      consumer = log_while_handling(timeout_on(pool), pool: handler_pool)
+
+      expect(described_class.schema_failed?(consumer, ->(candidate) { candidate.equal?(handler_pool) })).to be(false)
+    end
+
+    it "refuses on the handler's pool when the error answers that it carries no pool (Rails 7.1 and later)" do
+      consumer = log_while_handling(timeout_on(nil), pool: pool)
+
+      expect(described_class.schema_failed?(consumer, served)).to be(true)
+    end
+
     it 'passes the message alone to the logger when the handler names a pool' do
       expect(logger).to receive(:error).with('handled')
 

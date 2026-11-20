@@ -245,6 +245,39 @@ RSpec.describe 'Concurrent extraction across database pools', :booted_app do
     expect(schema_facts(dir)[:tables]).not_to include('table:billing.invoices')
   end
 
+  # The schema readability probe reads the second database; from then on
+  # another thread holds its only connection, so every later read times out.
+  it 'refuses a full run when the second pool answered only the schema readability probe' do
+    held = Queue.new
+    release = Queue.new
+    holder = nil
+    dir = output_dir('served-by-probe')
+    Woods::Extractor.new(output_dir: dir).extract_all
+    before = generation_state(dir)
+    release_connections
+    allow(Woods::Extractors::TableCatalog).to receive(:schema_readability).and_wrap_original do |original, **options|
+      original.call(**options).tap do
+        holder = Thread.new do
+          BillingRecord.connection_pool.with_connection do
+            held << :held
+            release.pop
+          end
+        rescue StandardError => e
+          held << e
+        end
+        state = held.pop
+        raise state if state.is_a?(Exception)
+      end
+    end
+
+    expect { Woods::Extractor.new(output_dir: dir).extract_all }
+      .to raise_error(Woods::ExtractionError, /Database reads failed for .*database_tables/)
+    expect(generation_state(dir)).to eq(before)
+  ensure
+    release << true
+    holder&.join
+  end
+
   it 'refuses a sequential full run when a pool that answered a listing then fails to connect' do
     Woods.configuration.concurrent_extraction = false
     dir = output_dir('served-then-refused')

@@ -130,7 +130,7 @@ module Woods
         unit
       rescue StandardError => e
         @warnings << "Failed to extract model #{model.name}: #{e.message}"
-        SourceInputs::ConsumerErrors.log(self, "Failed to extract model #{model.name}: #{e.message}")
+        log_schema_read_failure(model, "Failed to extract model #{model.name}: #{e.message}")
         nil
       end
 
@@ -284,9 +284,10 @@ module Woods
         nil
       end
 
-      # Record the schema read being rescued against the model's own pool,
-      # the one the read used, so a full run refuses a read that failed on
-      # a database it otherwise read ({SourceInputs::ConsumerErrors.schema_failed?}).
+      # Record the read being rescued, so a full run refuses a read that
+      # failed on a database it otherwise read
+      # ({SourceInputs::ConsumerErrors.schema_failed?}). The pool the error
+      # carries wins; the model's own pool stands in when it carries none.
       #
       # @param model [Class]
       # @param message [String]
