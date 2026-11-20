@@ -247,8 +247,9 @@ RSpec.describe Woods::Extraction::GitCapture do
       expect(table['paths'].keys).to eq(['app/models/post.rb'])
     end
 
-    it 'keeps a current published table without walking history' do
+    it 'keeps a current published table without walking history', :capable_git do
       published = described_class.new(root: root, logger: logger).commit_table(nil, graph: graph)
+      expect(published).not_to be_nil
       expect_any_instance_of(Woods::GitCommitTable).not_to receive(:build)
 
       expect(capture.commit_table(published, graph: graph)).to equal(published)
