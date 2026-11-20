@@ -18,6 +18,13 @@ module IndexComparison
   #   comparison. It must be reported again, so the mask is what hid it.
   # - `:membership`: a unit file removed, or one added. It must be reported.
   #
+  # An opt-in mask (`default: false`) is probed the way an example applies it:
+  # masked under {DEFAULT_MASKS} plus that mask, lifted under {DEFAULT_MASKS}
+  # alone. An order mask over an array the index leaves with fewer than two
+  # members is probed on members planted in both copies. A mask over documents
+  # no index holds ({DETACHED_ARTIFACTS}) is probed on a document built from its
+  # path. A declared mask no probe reaches is named by {#unexercised_masks}.
+  #
   # The files, keys and values are drawn with a seeded Random, so a run is
   # reproducible from its seed.
   class SelfCheck # rubocop:disable Metrics/ClassLength
@@ -62,14 +69,21 @@ module IndexComparison
     # How many unit directories, and type indexes, the unmasked probes sample.
     SAMPLED_TYPES = 4
 
+    # Artifacts of masks an example applies itself, with {IndexComparison.mask},
+    # to documents it builds: no index holds them.
+    DETACHED_ARTIFACTS = %i[impact_report].freeze
+
     # @param reference_dir [String] a published index; never modified
     # @param scratch_dir [String] an empty directory for the copy
     # @param seed [Integer]
     def initialize(reference_dir, scratch_dir, seed:)
-      @reference = reference_dir
+      # The copy is compared against a second copy, so a probe can plant a
+      # value in both.
+      @reference = File.join(scratch_dir, 'self_check_reference')
       @copy = File.join(scratch_dir, 'self_check_copy')
-      FileUtils.cp_r(reference_dir, @copy)
+      [@reference, @copy].each { |dir| FileUtils.cp_r(reference_dir, dir) }
       @payload = IndexComparison.payload_dir(@copy)
+      @reference_payload = IndexComparison.payload_dir(@reference)
       @random = Random.new(seed)
       @masks = IndexComparison.default_masks
     end
@@ -89,9 +103,9 @@ module IndexComparison
       REPORTED_AS.keys - probes.select { |probe| probe.kind == :unmasked }.map(&:artifact)
     end
 
-    # @return [Array<Symbol>] default masks no masked probe reached
+    # @return [Array<Symbol>] declared masks, opt-in ones included, no masked probe reached
     def unexercised_masks
-      @masks.map(&:name) - probes.select { |probe| probe.kind == :masked }.map(&:mask)
+      MASKS.map(&:name) - probes.select { |probe| probe.kind == :masked }.map(&:mask)
     end
 
     # @return [Array<String>] payload files no artifact or mask accounts for
@@ -106,7 +120,7 @@ module IndexComparison
     #
     # @return [Hash{Symbol => Float}]
     def key_mask_shares
-      @masks.select { |mask| %i[key value].include?(mask.width) }.to_h do |mask|
+      indexed_masks.select { |mask| %i[key value].include?(mask.width) }.to_h do |mask|
         sizes = documents(mask.artifact).filter_map { |_relative, document| masked_bytes(document, mask) }
         [mask.name, sizes.sum(&:first).fdiv([sizes.sum(&:last), 1].max)]
       end
@@ -116,7 +130,7 @@ module IndexComparison
     #
     # @return [Array<Symbol>]
     def whole_document_masks
-      @masks.select { |mask| mask.width == :key && !mask.wide? && empties_a_document?(mask) }.map(&:name)
+      indexed_masks.select { |mask| mask.width == :key && !mask.wide? && empties_a_document?(mask) }.map(&:name)
     end
 
     # Masks wider than the budget without saying so.
@@ -131,6 +145,16 @@ module IndexComparison
 
     MISSING = Object.new.freeze
     private_constant :MISSING
+
+    # Every declared mask over an artifact an index holds, opt-in ones included.
+    def indexed_masks
+      MASKS.reject { |mask| DETACHED_ARTIFACTS.include?(mask.artifact) }
+    end
+
+    # The masks a masked probe compares with: the defaults, and +mask+.
+    def with_mask(mask)
+      IndexComparison::DEFAULT_MASKS | [mask.name]
+    end
 
     # A key mask removes the key, its value and their punctuation, so it is
     # measured as the document's size before and after the drop. A value mask
@@ -278,7 +302,11 @@ module IndexComparison
     # ── Masked and lifted ────────────────────────────────────────────────
 
     def masked_probes
-      @masks.flat_map { |mask| [send(:"#{mask.width}_probes", mask)].flatten.compact }
+      MASKS.flat_map do |mask|
+        next detached_probes(mask) if DETACHED_ARTIFACTS.include?(mask.artifact)
+
+        [send(:"#{mask.width}_probes", mask)].flatten.compact
+      end
     end
 
     def key_probes(mask)
@@ -299,10 +327,33 @@ module IndexComparison
         order_targets(mask, document).map { |path| [relative, document, path] }
       end
       relative, document, path = candidates.sample(random: @random)
-      return [] unless relative
+      return planted_order_probes(mask) unless relative
 
       changed = replace_at(document, path, dig(document, path).reverse)
       masked_and_lifted(mask, relative, path) { write(relative, changed) }
+    end
+
+    # Two members appended, in both copies, to an array under the mask that
+    # holds fewer than two; the copy's then reversed.
+    def planted_order_probes(mask)
+      relative, document = documents(mask.artifact).min_by(&:first)
+      return [] unless relative && mask.path.any? && dig(document, mask.path).is_a?(Array)
+
+      members = dig(document, mask.path) + [{ 'self_check' => 1 }, { 'self_check' => 2 }]
+      reversed = replace_at(document, mask.path, members.reverse)
+      planting(relative, replace_at(document, mask.path, members)) do
+        masked_and_lifted(mask, relative, mask.path) { write(relative, reversed) }
+      end
+    end
+
+    # +document+ written to +relative+ in both copies while the block runs.
+    def planting(relative, document)
+      paths = [@payload, @reference_payload].map { |payload| File.join(payload, relative) }
+      originals = paths.to_h { |path| [path, File.binread(path)] }
+      paths.each { |path| File.write(path, JSON.generate(document)) }
+      yield
+    ensure
+      originals&.each { |path, bytes| File.binwrite(path, bytes) }
     end
 
     # Arrays under the mask whose reversal changes them.
@@ -320,8 +371,8 @@ module IndexComparison
     end
 
     def masked_and_lifted(mask, relative, path, &change)
-      lifted = IndexComparison::DEFAULT_MASKS - [mask.name]
-      [probe(:masked, mask.artifact, relative, path, mask.name, &change),
+      lifted = with_mask(mask) - [mask.name]
+      [probe(:masked, mask.artifact, relative, path, mask.name, masks: with_mask(mask), &change),
        probe(:lifted, mask.artifact, relative, path, mask.name, masks: lifted, &change)]
     end
 
@@ -359,12 +410,14 @@ module IndexComparison
       lines = File.read(path, encoding: 'UTF-8').lines
       line = lines.each_index.reject { |index| lines[index].match?(SUMMARY_TOTALS) }.sample(random: @random)
       changed = lines.dup.tap { |copy| copy[line] = "#{copy[line].chomp} (changed)\n" }.join
-      probe(:masked, :summary, 'SUMMARY.md', ["line #{line + 1}"], mask.name) { File.write(path, changed) }
+      probe(:masked, :summary, 'SUMMARY.md', ["line #{line + 1}"], mask.name, masks: with_mask(mask)) do
+        File.write(path, changed)
+      end
     end
 
     def outside_payload_probe(mask)
       stray = File.join(@copy, 'self_check_stray.json')
-      probe(:masked, :outside_payload, File.basename(stray), [], mask.name, cleanup: stray) do
+      probe(:masked, :outside_payload, File.basename(stray), [], mask.name, masks: with_mask(mask), cleanup: stray) do
         File.write(stray, '{}')
       end
     end
@@ -374,9 +427,37 @@ module IndexComparison
       relative = payload_files.select { |file| artifact_of(file) == :unit }.min
       document = read(relative)
       reordered = document.to_a.reverse.to_h
-      probe(:masked, :json, relative, [], mask.name) do
+      probe(:masked, :json, relative, [], mask.name, masks: with_mask(mask)) do
         File.write(File.join(@payload, relative), JSON.pretty_generate(reordered))
       end
+    end
+
+    # ── Detached ─────────────────────────────────────────────────────────
+
+    # A key mask over documents no index holds, probed on one built from its
+    # path beside one other key: a change at the path is hidden by the mask
+    # and shown without it, and a change beside it is shown under the mask.
+    def detached_probes(mask)
+      return [] unless mask.width == :key
+
+      path = mask.path.map { |step| step == '*' ? 'self_check' : step }
+      document = nested(path, 0).merge('self_check_beside' => 0)
+      changed = nested(path, 1).merge('self_check_beside' => 0)
+      [detached_probe(:masked, mask, path, [document, changed], applied: true),
+       detached_probe(:lifted, mask, path, [document, changed], applied: false),
+       detached_probe(:unmasked, mask, ['self_check_beside'], [document, document.merge('self_check_beside' => 1)],
+                      applied: true)]
+    end
+
+    def detached_probe(kind, mask, path, pair, applied:)
+      left, right = applied ? pair.map { |document| IndexComparison.mask(mask.name, document) } : pair
+      found = left == right ? [] : ["#{IndexComparison::ARTIFACTS.fetch(mask.artifact)}: #{left} != #{right}"]
+      Probe.new(kind: kind, artifact: mask.artifact, file: '(built from the mask path)', path: path,
+                mask: (mask.name unless kind == :unmasked), found: found)
+    end
+
+    def nested(path, value)
+      path.reverse.reduce(value) { |inner, step| { step => inner } }
     end
 
     # ── Membership ───────────────────────────────────────────────────────
@@ -446,15 +527,21 @@ module IndexComparison
       path.size >= pattern.size && pattern.each_with_index.all? { |step, index| ['*', path[index]].include?(step) }
     end
 
-    # Every existing path in +document+ that +pattern+ names, `*` expanded.
+    # Every existing path in +document+ that +pattern+ names, `*` expanded
+    # over the members of a Hash or an Array, as {IndexComparison.drop_path} reads it.
     def concrete_paths(document, pattern, prefix = [])
       return [prefix] if pattern.empty?
 
       step, *rest = pattern
+      step_members(document, step).flat_map { |key, value| concrete_paths(value, rest, prefix + [key]) }
+    end
+
+    # The `[key, value]` pairs one pattern step names.
+    def step_members(document, step)
+      return document.each_with_index.map { |value, index| [index, value] } if step == '*' && document.is_a?(Array)
       return [] unless document.is_a?(Hash)
 
-      keys = step == '*' ? document.keys : [step] & document.keys
-      keys.flat_map { |key| concrete_paths(document[key], rest, prefix + [key]) }
+      step == '*' ? document.to_a : document.slice(step).to_a
     end
 
     # Paths to every scalar under +value+, and to every empty container.

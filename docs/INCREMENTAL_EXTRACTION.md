@@ -388,6 +388,16 @@ step before it.
    genuine simultaneous source owners still abort before publication.
 3. **Re-extract the rest of the blast radius**: units whose own file did not
    change but which depend on something that did.
+
+   A reference resolves by name against the loaded constants, so an edit in another file can move it.
+   Adding `Billing::ReconcileJob` retargets an unchanged `Billing::Invoice` that enqueues `ReconcileJob`.
+   No graph edge leads there, so such units join the blast radius by name.
+   `RenderScope` reads the constants each changed Ruby file adds, removes or redefines, as in step 4.
+   Every unit whose source holds a reference through one of those names is re-extracted.
+   The preceding generation's source-reference cache lists the references, so no source is parsed again.
+   A method body edit touches no constant and adds no unit.
+   An edit the syntax tree cannot read counts every constant the file declares.
+   A constant created only by name at run time (`const_set`) is not followed.
 4. **Reconcile class-based types** against each extractor's
    `#discoverable_classes`, classes added since the last extraction, and
    classes the graph still holds that the set no longer contains. Exact by
@@ -1127,12 +1137,18 @@ edit does not establish that a day of commits is below the crossover.
   other files. The same holds for the node attributes `commit_count` and
   `change_frequency` that feed the `volatile_dependencies` report.
 - **The commit table follows HEAD on every run.** `git_commits.json` is not
-  patched per unit: an incremental or refresh run compares the published
-  table's `head`, `since`, bounds and indexed-path digest with its own and
-  rebuilds the whole table from one history walk when any differs, so it
-  matches a full extraction of the same tree and HEAD even when no indexed file
-  changed. A changed table alone publishes a generation. A run without
-  readable history withdraws the table instead of keeping a stale one. See
+  patched per unit: every run, full, incremental or refresh, compares the
+  published table's `head`, `since`, bounds, indexed-path digest and
+  `history_rewrites` (replace refs and grafts) with its own and rebuilds the
+  whole table from one history walk when any differs, so it matches a full
+  extraction of the same tree and HEAD even when no indexed file changed.
+  A run that cannot read the replace-ref and graft state always walks, and a
+  table written before `history_rewrites` existed is rebuilt once, so the
+  first run after upgrading walks history.
+  A normal `woods:extract` keeps a table that still matches; a clean
+  extraction (`woods:clean` first, or a fresh output directory) forces the
+  walk. A changed table alone publishes a generation. A run without readable
+  history withdraws the table instead of keeping a stale one. See
   [Index layout](INDEX_LAYOUT.md#commit-table).
 - **View partial targets are fixed when the rendering template is extracted.**
   A render edge is resolved against the partial files on disk and the

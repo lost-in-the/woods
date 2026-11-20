@@ -58,7 +58,7 @@ module Woods
 
       sites = Hash.new { |hash, key| hash[key] = [] }
       collect(parsed.value, 0, sites)
-      MethodTable.blocks(source.lines(chomp: true)).each do |first_line, text|
+      MethodTable.source_blocks(source).each do |first_line, text, _name|
         block = Woods::ParseCache.parse(text)
         collect(block.value, first_line - 1, sites) if block.errors.empty?
       end

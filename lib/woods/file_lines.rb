@@ -46,7 +46,7 @@ module Woods
         @composite = !fragments.empty?
         @primary = primary
         @identity_lines = identity_lines
-        @blocks = source.is_a?(String) ? MethodTable.block_ranges(source.lines(chomp: true)) : []
+        @blocks = source.is_a?(String) ? MethodTable.ranges(MethodTable.source_blocks(source)) : []
       end
 
       # Add file coordinates to an entry keyed `line` and `end_line`.

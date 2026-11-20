@@ -347,6 +347,44 @@ RSpec.describe IndexComparison do
       end
     end
 
+    # An opt-in mask is one an example adds to the default set, so it is
+    # probed that way: hidden under the defaults plus it, reported under the
+    # defaults alone. An empty array an order mask covers is planted in both
+    # copies first; a mask over documents no index holds is probed on one built
+    # from its path.
+    it 'probes every opt-in mask, hidden with the default set plus it and reported with it lifted' do
+      Dir.mktmpdir('woods-index-comparison') do |root|
+        dir = reference(root)
+        inputs = { 'generation' => 1, 'key_id' => 'k', 'identities' => [], 'unverified_scopes' => [],
+                   'errors' => [], 'scopes' => {} }
+        File.write(File.join(dir, 'source_inputs.json'), JSON.generate(inputs))
+        File.write(File.join(dir, 'source_references.json'),
+                   JSON.generate('files' => {}, 'owners' => [{ 'identifier' => 'A', 'added' => [] }]))
+        check = described_class.new(dir, File.join(root, 'scratch').tap { |path| FileUtils.mkdir_p(path) }, seed: 1)
+        opt_in = IndexComparison::MASKS.reject(&:default?).map(&:name)
+
+        expect(opt_in).to include(:source_inputs_errors_order, :source_reference_added_credit,
+                                  :impact_item_generation)
+        expect(check.failures).to be_empty, check.failures.join("\n")
+        expect(check.probes.map { |probe| [probe.mask, probe.kind] }).to include(*opt_in.product(%i[masked lifted]))
+        expect(check.unexercised_masks).not_to include(*opt_in)
+        expect(check.key_mask_shares.fetch(:source_reference_added_credit)).to be > 0
+        expect(File.read(File.join(dir, 'source_inputs.json'))).to eq(JSON.generate(inputs))
+      end
+    end
+
+    it 'names a declared mask no probe reaches, opt-in or not' do
+      unreached = IndexComparison::Mask.new(name: :flow_unreached, artifact: :flow, width: :key, path: %w[absent],
+                                            default: false, reason: 'reaches nothing in the fixture')
+      stub_const('IndexComparison::MASKS', IndexComparison::MASKS + [unreached])
+      Dir.mktmpdir('woods-index-comparison') do |root|
+        check = described_class.new(reference(root), File.join(root, 'scratch').tap { |dir| FileUtils.mkdir_p(dir) },
+                                    seed: 1)
+
+        expect(check.unexercised_masks).to include(:flow_unreached)
+      end
+    end
+
     it 'names a file no artifact or mask accounts for' do
       Dir.mktmpdir('woods-index-comparison') do |root|
         dir = reference(root)
