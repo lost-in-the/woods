@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'io/wait'
+require 'rbconfig'
 require 'tmpdir'
 require 'woods'
 require 'woods/coordination/pipeline_lock'
@@ -523,6 +524,125 @@ RSpec.describe Woods::Coordination::PipelineLock do
 
       expect(repair.retire_stale).to eq(:not_stale)
       expect(JSON.parse(File.read(lock_path)).fetch('token')).to eq(successor_token)
+    end
+  end
+
+  # The launcher that killed its watcher retires that watcher's lock, judged
+  # by identity and liveness, never by age.
+  describe '#retire_gone_holder' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+    let(:host) { Woods::Watch::Status.host_identity }
+    let(:stopped) { dead_pid }
+    let(:launcher) { described_class.for_index(lock_dir) }
+
+    def dead_pid
+      pid = fork { exit!(0) }
+      Process.wait(pid)
+      pid
+    end
+
+    def write_lock(age: 0, **fields)
+      File.write(lock_path, JSON.generate({ locked_at: Time.now.iso8601, name: 'extraction', token: 'held' }
+                                            .merge(fields)))
+      File.utime(Time.now - age, Time.now - age, lock_path)
+      File.binread(lock_path)
+    end
+
+    def retire(pid: stopped, &gone)
+      launcher.retire_gone_holder(pid: pid, host: host, &gone)
+    end
+
+    it 'clears a fresh lock recorded on this host by the stopped pid, keeping the guard' do
+      write_lock(pid: stopped, host: host)
+
+      expect(retire).to eq(:cleared)
+      expect(File.exist?(lock_path)).to be(false)
+      expect(File.file?(guard_path)).to be(true)
+      expect(Dir.children(lock_dir)).to eq([File.basename(guard_path)])
+    end
+
+    it 'keeps a lock recorded on another host by that pid, even an old one, without asking about the group' do
+      bytes = write_lock(pid: stopped, host: "#{host}-elsewhere", age: 3600)
+      asked = false
+
+      expect(retire { asked = true }).to eq(:other_holder)
+      expect(asked).to be(false)
+      expect(File.binread(lock_path)).to eq(bytes)
+    end
+
+    it 'keeps a lock recorded by another pid, even an old one' do
+      bytes = write_lock(pid: dead_pid, host: host, age: 3600)
+
+      expect(retire).to eq(:other_holder)
+      expect(File.binread(lock_path)).to eq(bytes)
+    end
+
+    it 'keeps a corrupt lock' do
+      File.write(lock_path, '{torn')
+
+      expect(retire).to eq(:other_holder)
+      expect(File.binread(lock_path)).to eq('{torn')
+    end
+
+    it 'keeps the lock of a holder that is still alive' do
+      holder = Process.spawn(RbConfig.ruby, '-e', 'sleep 30')
+      bytes = write_lock(pid: holder, host: host)
+
+      expect(retire(pid: holder)).to eq(:alive)
+      expect(File.binread(lock_path)).to eq(bytes)
+    ensure
+      Process.kill('KILL', holder)
+      Process.wait(holder)
+    end
+
+    it 'keeps the lock while the holder group is still present' do
+      bytes = write_lock(pid: stopped, host: host)
+
+      expect(retire { false }).to eq(:alive)
+      expect(File.binread(lock_path)).to eq(bytes)
+    end
+
+    it 'restores a successor lock that replaced the stopped one before the capture' do
+      write_lock(pid: stopped, host: host)
+      original_rename = File.method(:rename)
+      allow(File).to receive(:rename).and_call_original
+      allow(File).to receive(:rename).with(lock_path, kind_of(String)) do |source, destination|
+        File.write(source, JSON.generate(pid: Process.pid, host: host, token: 'fresh-successor'))
+        original_rename.call(source, destination)
+      end
+
+      expect(retire).to eq(:other_holder)
+      expect(JSON.parse(File.read(lock_path)).fetch('token')).to eq('fresh-successor')
+      expect(Dir.children(lock_dir)).to contain_exactly('extraction.lock', File.basename(guard_path))
+    end
+
+    it 'reports a missing lock without creating its directory or guard' do
+      absent = File.join(lock_dir, 'never-created')
+
+      expect(described_class.for_index(absent).retire_gone_holder(pid: stopped, host: host) { true }).to eq(:missing)
+      expect(File.exist?(absent)).to be(false)
+    end
+
+    it 'gives up within its guard wait while another process holds the guard' do
+      bytes = write_lock(pid: stopped, host: host)
+      File.open(guard_path, File::RDWR | File::CREAT) do |guard|
+        guard.flock(File::LOCK_EX)
+        thread = Thread.new { retire }
+
+        expect(thread.join(2)&.value).to eq(:busy)
+      end
+      expect(File.binread(lock_path)).to eq(bytes)
+    end
+
+    context 'when the stopped holder was never reaped', if: UnreapedChild::SUPPORTED do
+      it 'clears its lock, as Liveness counts a zombie gone' do
+        UnreapedChild.with_zombie do |zombie|
+          write_lock(pid: zombie, host: host)
+
+          expect(retire(pid: zombie)).to eq(:cleared)
+          expect(File.exist?(lock_path)).to be(false)
+        end
+      end
     end
   end
 

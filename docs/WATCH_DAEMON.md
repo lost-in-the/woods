@@ -197,6 +197,75 @@ empty and whitespace-only idle-timeout values behave as unset in the task,
 launcher and installer. Earlier builds accepted an empty value in managed
 validation but crashed during task startup; unset it when using those builds.
 
+### Stop timing and the claim
+
+A managed watcher releases its extraction lock when its cycle ends, and its claim as the last step of its own shutdown.
+A watcher in the middle of an extraction cannot reach that step quickly: the cycle in flight is not interrupted.
+When the launcher has to kill its watcher, it retires that watcher's extraction lock and then its claim itself.
+
+The stop sequence, with its bounds (seconds after each process receives TERM):
+
+| Step | Who | Bound |
+|---|---|---|
+| Finish the cycle in flight, then join the watcher, heartbeat and retry threads, persist pending paths, publish `stopped`, release the claim | watcher | each join up to 2 s; the cycle is unbounded |
+| KILL the watcher's process group if it has not exited | watcher's guardian | `--shutdown-timeout`, default 10 s |
+| Wait for that guardian, then KILL both groups if it is still running | launcher | shutdown timeout + 1 s, then 1 s more |
+| Wait for the watcher's group to vanish | launcher | 1 s |
+| Retire the extraction lock | launcher | up to 0.5 s for the lock's guard, then milliseconds |
+| Retire the claim | launcher | milliseconds |
+| KILL the launcher if it has not exited | launcher's guardian (Puma mode) | `PumaChild::STOP_GRACE`, 15 s |
+| Wait for that guardian, then KILL it | Puma's `after_stopped` hook | 15 s + 1 s, then 1 s more |
+
+The launcher's worst case is the shutdown timeout plus 3.5 s: 13.5 s with the default, inside the 15 s Puma allows it.
+Puma's stop hook returns within 17 s, usually about 10 s after a forced kill.
+
+**Included in Woods 2.2:** the launcher retires the extraction lock and the claim of a watcher it stopped.
+
+The lock goes first.
+A successor that finds no claim must not then wait for a dead watcher's lock.
+From another host it can judge that lock only by its age, 600 s.
+Each step is tried even when the other fails.
+
+The launcher retires `extraction.lock` only when every check holds, under the lock's own guard:
+
+- the lock records this host and the watcher pid this attempt reported;
+- that pid is gone (on Linux, an unreaped zombie counts as gone) and so is its process group;
+- the lock it moved aside to check is the one it removes; a lock a successor wrote meanwhile is put back.
+
+A lock naming another host or pid is left silently, however old: age-based takeover stays with the writers.
+When the lock names this watcher but a check fails or its guard is busy, the launcher leaves it and prints why.
+The guard file `.extraction.lock.guard` is never removed.
+
+It retires the claim only when every check holds, under the claim coordination lock:
+
+- the claim was recorded on this host, as a version 2 claim;
+- its pid is the watcher pid this attempt reported through the launcher's private event stream;
+- that watcher's guardian has exited and no live process remains in its group;
+- the lease lock is free, and the claim names the id inside that lease;
+- the claim bytes did not change between the check and the removal.
+
+A claim from another host or pid, a version 1 claim and a claim replaced meanwhile are left silently.
+When the claim names this watcher but a later check fails, the launcher leaves it and prints why, never its token.
+The launcher never creates, replaces or removes `watch_claim.json.lease` or `watch_claim.json.lock`.
+
+Give the outer supervisor a longer stop grace than this budget.
+Docker Compose and `docker stop` allow 10 s by default, which is shorter than Woods' own budget.
+For a container whose Puma runs the plugin, allow Puma's own shutdown time plus 17 s, for example
+`stop_grace_period: 30s`.
+For Foreman, pass `-t` with at least the shutdown timeout plus 3.5 s, for example `-t 15`.
+
+The lock and the claim still stay in these cases:
+
+- The outer supervisor kills everything first.
+  On the same host, the next start reclaims the claim once its pid is gone, and the next writer takes over the lock.
+  A replacement container waits for the lock's 600 s stale window, and its watcher reports `contended` meanwhile.
+  A replacement container parks with `owner_on_other_host`; follow
+  [When the owner was a removed container](#when-the-owner-was-a-removed-container).
+- A process in the watcher's group is still running after the KILL.
+  On Linux, members left only as unreaped zombies count as gone, since they cannot write.
+  Elsewhere any remaining member keeps the claim; Compose `init: true` reaps orphans when Puma is PID 1.
+- A process that left the watcher's group still holds the lease lock (the claim only).
+
 ### Recovering an abandoned managed claim
 
 **Included in Woods 2.1; verify `woods-watch --help` before using this command.**
@@ -1035,7 +1104,7 @@ and a hook-triggered `woods:incremental`. They share the existing file-based
 | Daemon cycle while another writer holds the lock | Daemon yields, publishes a `contended` degraded status, and **carries its paths into the next cycle** so nothing is lost |
 | Manual `woods:extract` / `woods:incremental` / `woods:refresh` (including `woods:extract_framework`) | Waits up to `LOCK_STALE_TIMEOUT` (600 s; override with `WOODS_LOCK_WAIT`) for the lock, saying once which pid, host and lock time it is waiting on, then **exits non-zero** rather than proceeding unlocked. It also exits non-zero with a typed error when the final generation marker cannot be published; the previous generation remains readable. A storm-triggered `extract_all` can hold the lock for minutes on a large host, and two concurrent writers rewrite the dependency graph from divergent copies, so the loser's work is silently discarded under a generation that says "fresh" |
 | Hook sync on a tree a daemon is already watching | Skips entirely: the daemon has already seen those changes. `WOODS_IGNORE_WATCH=1` overrides |
-| A writer was killed mid-run (container restart, `SIGKILL`, OOM) | The lock records the holder's pid and host. A lock written on this host by a pid that no longer exists, or (on Linux) by one that `/proc` reports as a zombie (exited, never reaped), is stale at once, so the next writer takes it over without waiting for `LOCK_STALE_TIMEOUT`. When the holder's liveness is unknown — a lock from another host, from a version that recorded no host, or a pid that answers `EPERM` with no readable `/proc` status — the lock is judged by its age alone, because unknown is never a reason to take over. As with [cross-host liveness](#cross-host-liveness), a hostname shared by two live containers cannot prove pid-namespace identity |
+| A writer was killed mid-run (container restart, `SIGKILL`, OOM) | The lock records the holder's pid and host. A lock written on this host by a pid that no longer exists, or (on Linux) by one that `/proc` reports as a zombie (exited, never reaped), is stale at once, so the next writer takes it over without waiting for `LOCK_STALE_TIMEOUT`. When the holder's liveness is unknown — a lock from another host, from a version that recorded no host, or a pid that answers `EPERM` with no readable `/proc` status — the lock is judged by its age alone, because unknown is never a reason to take over. As with [cross-host liveness](#cross-host-liveness), a hostname shared by two live containers cannot prove pid-namespace identity. A managed watcher its launcher had to kill is the exception that does not wait for a successor: the launcher retires that watcher's lock itself, on the host and before the container goes, so a replacement container is not held for the stale window. See [stop timing and the claim](#stop-timing-and-the-claim) |
 | A writer paused past its lease (laptop sleep, a stopped container) resumes after another writer took over | It finishes its work in its own private stage, then stops at publication: promotion, the generation marker, retention and each `woods:clean` deletion run only while it proves it still owns the lock, under the lock's guard. The successor's generation is never changed. See [writer stages and lock takeover](INDEX_LAYOUT.md#writer-stages-and-lock-takeover) |
 | A contender while a holder is inside that guarded step | `acquire` polls the guard without blocking, so it gives up within its own wait (2 s for the MCP operator tools and `woods_reload`, `WOODS_LOCK_WAIT` for rake writers) instead of hanging on a stopped holder |
 
