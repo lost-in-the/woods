@@ -94,6 +94,36 @@ RSpec.describe Woods::Coordination::LockHeartbeat do
 
       expect(Thread.list.size).to be <= before
     end
+
+    # The block sleeps long enough for the thread to be inside its wait, so the
+    # stop has to wake it rather than find it before its first wait.
+    it 'returns well inside one tick once the block ends' do
+      lock = build_lock(stale_timeout: 600)
+      lock.acquire
+      clock = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+      block_ended = nil
+
+      described_class.run(lock, tick: 2.0) do
+        sleep 0.2
+        block_ended = clock.call
+      end
+
+      expect(clock.call - block_ended).to be < 0.5
+    end
+
+    it 'writes no beat after run returns' do
+      lock = build_lock(stale_timeout: 0.03)
+      lock.acquire
+      beats = 0
+      allow(lock).to receive(:touch) { beats += 1 }
+
+      described_class.run(lock, tick: 0.01) { sleep 0.1 }
+      beats_at_return = beats
+      sleep 0.1
+
+      expect(beats_at_return).to be_positive
+      expect(beats).to eq(beats_at_return)
+    end
   end
 
   describe 'pacing' do
