@@ -27,8 +27,8 @@ RSpec.describe 'Fresh-process lazy route extraction', :booted_app do
       full_graph = artifact(full, 'dependency_graph.json')
       expect(inc_graph).to eq(full_graph)
       expect(inc_graph.fetch('reverse').fetch('PostsController')).to include('posts/index.html.erb')
-      expect(artifact(incremental, 'graph_analysis.json').except('generated_at')).to eq(
-        artifact(full, 'graph_analysis.json').except('generated_at')
+      expect(IndexComparison.mask(:analysis_generated_at, artifact(incremental, 'graph_analysis.json'))).to eq(
+        IndexComparison.mask(:analysis_generated_at, artifact(full, 'graph_analysis.json'))
       )
     end
   end

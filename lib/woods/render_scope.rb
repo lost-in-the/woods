@@ -26,7 +26,10 @@ module Woods
   # The file before the edit is recovered from the published units that
   # recorded it. A part of a file no unit holds is read as new, which can only
   # make an edit look larger.
-  class RenderScope
+  #
+  # The same touched names select every other unit whose references resolve
+  # by name ({#touched_leaves}).
+  class RenderScope # rubocop:disable Metrics/ClassLength -- one footprint memo serves render and reference selection
     # Component-family refresh keeps its conservative fallback outside app/.
     # Controllers can narrow library edits with a retained source baseline.
     APP_PATH = %r{(?:\A|/)app/}
@@ -70,6 +73,21 @@ module Woods
       ids.select { |id| controller_reached?(id, touched, leaves, ancestors_of) }
     rescue StandardError, ScriptError
       ids
+    end
+
+    # Last segments of the constants the run's Ruby edits add, remove or
+    # redefine. Any reference resolved by name can move with them, not only a
+    # render. Where the tree cannot read an edit, every constant the file
+    # declares before or after it counts; a constant created only by name at
+    # run time (`const_set`) is not seen.
+    # @return [Set<String>]
+    def touched_leaves
+      @change_set.absolute_paths.select { |path| path.end_with?('.rb') }.each_with_object(Set.new) do |path, leaves|
+        before, after = footprints(path)
+        names = Extractors::ConstantFootprint.touched_constants(before, after, existing: method(:defined_before?)) ||
+                (before.definitions.keys | after.definitions.keys)
+        leaves.merge(names.map { |name| name.split('::').last }.grep(/\A[[:upper:]]/))
+      end
     end
 
     private
