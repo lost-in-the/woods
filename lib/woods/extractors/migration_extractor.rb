@@ -298,7 +298,7 @@ module Woods
 
       # @return [TableCatalog]
       def table_catalog
-        @table_catalog ||= TableCatalog.from_runtime
+        @table_catalog ||= TableCatalog.from_runtime(consumer: self)
       end
 
       # Extract columns added via add_column and create_table block columns.

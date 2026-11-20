@@ -94,6 +94,7 @@ require_relative 'extraction/manifest_facts'
 require_relative 'extraction/git_capture'
 require_relative 'extraction/extractor_timings'
 require_relative 'extraction/flow_reach'
+require_relative 'extraction/served_pools'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -606,15 +607,18 @@ module Woods
       # Eager load once — all extractors need loaded classes for introspection.
       profile_phase('eager load') { safe_eager_load! }
       profile_phase('component load') { load_runtime_discovery_files }
-      @schema_readability = profile_phase('schema readability') { read_schema_readability }
+      Extraction::ServedPools.during do |served|
+        @schema_readability = profile_phase('schema readability') { read_schema_readability }
 
-      # Phase 1: Extract all units
-      profile_phase('extraction') do
-        if Woods.configuration.concurrent_extraction
-          extract_all_concurrent
-        else
-          extract_all_sequential
+        # Phase 1: Extract all units
+        profile_phase('extraction') do
+          if Woods.configuration.concurrent_extraction
+            extract_all_concurrent
+          else
+            extract_all_sequential
+          end
         end
+        raise_on_schema_read_failure!(served.method(:served?))
       end
 
       # Phase 1.2: Owned files whose owners emitted nothing go to the PORO path.
@@ -849,8 +853,9 @@ module Woods
       end
 
       # Ahead of the extraction-failure refusal: an unreadable database is
-      # the cause of the model failures it would report.
-      raise_on_unreadable_schema!(affected_types)
+      # the cause of the model failures it would report. A type whose
+      # extractor failed wrote nothing, so it is not in +affected_types+.
+      raise_on_unreadable_schema!(affected_types.to_a | @failed_consumers.to_a)
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
       touched.merge(profile_phase('doc references') { enrich_doc_references_incremental(affected_types) })
@@ -1426,6 +1431,29 @@ module Woods
       raise Woods::ExtractionError,
             "Extraction failed for #{@failed_consumers.to_a.sort.join(', ')}; " \
             'the previous generation remains active. Fix the logged source errors and retry the complete batch.'
+    end
+
+    # A full run publishes past an extractor's handled source errors, and past
+    # a database no read can reach (it warns), but not past a schema read that
+    # failed on a database the run could otherwise read: a checkout that timed
+    # out, or a connection that failed, on a pool that answered another of
+    # the run's queries, or a refused statement
+    # ({SourceInputs::ConsumerErrors.schema_failed?}). What that
+    # extractor built would pass for a database without tables. The run
+    # raises before any unit is written, and the previous generation stays
+    # active. Incremental and refresh runs already refuse every handled
+    # failure through {#raise_on_handled_extraction_failure!}.
+    #
+    # @param readable [#call] pool => whether the run could read it
+    # @return [void]
+    # @raise [Woods::ExtractionError] when an extractor recorded such a read
+    def raise_on_schema_read_failure!(readable)
+      failed = @extractors.select { |_type, extractor| SourceInputs::ConsumerErrors.schema_failed?(extractor, readable) }
+      return if failed.empty?
+
+      raise Woods::ExtractionError,
+            "Database reads failed for #{failed.keys.map(&:to_s).sort.join(', ')}; the previous generation " \
+            'remains active. Check the logged connection errors and retry the complete batch.'
     end
 
     # A partial run that rewrites models, table or view units reads them from
@@ -2125,7 +2153,7 @@ module Woods
         drain.call
       else
         Rails.logger.info "[Woods] Concurrent extraction: #{queue.size} extractors on #{workers} threads"
-        Array.new(workers) { Thread.new(&drain) }.each(&:join)
+        Array.new(workers) { Extraction::ServedPools.thread(&drain) }.each(&:join)
       end
 
       # Fail closed, matching sequential extraction: a raise there aborts
@@ -2144,13 +2172,13 @@ module Woods
     end
 
     # How many worker threads {#extract_all_concurrent} starts: the number of
-    # extractors, capped at the pool connections nobody holds right now, so
-    # every worker can check one out at once. The pool's size is its total
-    # capacity; a connection this thread (or another) already leases is not
-    # available to a worker, and counting it let a worker wait out
-    # `checkout_timeout` while the caller sat in `join` holding the only
-    # connection. Zero means run on the calling thread. Without ActiveRecord
-    # there is nothing to cap on.
+    # extractors, capped at the connections nobody holds right now in the
+    # scarcest pool a worker can reach, so every worker can check one out of
+    # each pool at once. A pool's size is its total capacity; a connection
+    # this thread (or another) already leases is not available to a worker,
+    # and counting it let a worker wait out `checkout_timeout` while the
+    # caller sat in `join` holding the only connection. Zero means run on the
+    # calling thread. Without ActiveRecord there is nothing to cap on.
     #
     # @param extractor_count [Integer]
     # @return [Integer] 0 (run on the calling thread) up to +extractor_count+
@@ -2161,19 +2189,64 @@ module Woods
       [extractor_count, available].min.clamp(0, extractor_count)
     end
 
-    # @return [Integer, nil] pool connections not currently leased; nil
-    #   without ActiveRecord or a pool to ask
+    # @return [Integer, nil] connections not currently leased in the
+    #   scarcest pool; nil without ActiveRecord or a pool to ask
     def available_pool_connections
       pool = configured_connection_pool
       return nil unless pool
 
+      worker_pools(pool).filter_map { |candidate| free_connections(candidate) }.min
+    rescue StandardError
+      nil
+    end
+
+    # The default pool and every writable pool the connection handler lists.
+    # A model on a second database reads its schema through that database's
+    # pool, and a connection a worker takes there stays with the worker's
+    # thread, so a second pool smaller than the worker count leaves a worker
+    # waiting on it until `checkout_timeout`.
+    #
+    # @param default_pool [Object] {#configured_connection_pool}
+    # @return [Array<Object>] distinct pools, the default one first
+    def worker_pools(default_pool)
+      [default_pool, *listed_connection_pools.reject { |pool| replica_pool?(pool) }].uniq
+    end
+
+    # @return [Integer, nil] the pool's connections nobody leases, nil when
+    #   it reports no usable size
+    def free_connections(pool)
       size = pool.size
       return nil unless size.is_a?(Integer) && size.positive?
 
       busy = pool.respond_to?(:stat) ? pool.stat[:busy].to_i : 0
       [size - busy, 0].max
+    end
+
+    # Every role's pools on Rails 7.1 and later, where a call without a role
+    # is deprecated on 7.1; the current role's pools before that, and on 6.0,
+    # whose list takes no role. A handler that cannot list leaves the
+    # default pool alone to size by.
+    #
+    # @return [Array<Object>]
+    def listed_connection_pools
+      return [] unless ActiveRecord::Base.respond_to?(:connection_handler)
+
+      handler = ActiveRecord::Base.connection_handler
+      return handler.connection_pool_list if handler.method(:connection_pool_list).arity.zero?
+      return handler.connection_pool_list(:all) if ActiveRecord.version >= Gem::Version.new('7.1')
+
+      handler.connection_pool_list
     rescue StandardError
-      nil
+      []
+    end
+
+    # @return [Boolean] whether the pool connects to a replica, which no
+    #   extractor reads
+    def replica_pool?(pool)
+      config = pool.respond_to?(:db_config) ? pool.db_config : nil
+      return false unless config.respond_to?(:replica?)
+
+      config.replica? == true
     end
 
     # Hold one pool connection for exactly one extractor, and give it back

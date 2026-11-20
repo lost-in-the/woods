@@ -225,5 +225,76 @@ RSpec.describe Woods::Extractor, 'concurrent extraction' do
       hide_const('ActiveRecord') if defined?(ActiveRecord)
       expect(extractor.send(:concurrent_extraction_workers, 7)).to eq(7)
     end
+
+    describe 'with the pools the connection handler lists' do
+      def pool(size:, busy: 0, replica: false)
+        double('pool', size: size, stat: { busy: busy }, db_config: double('db_config', replica?: replica))
+      end
+
+      # A handler whose list takes no role, as on Rails 6.0.
+      def stub_handler(default, listed)
+        handler = Object.new
+        handler.define_singleton_method(:connection_pool_list) { listed }
+        stub_const('ActiveRecord::Base', double('AR', connection_pool: default, connection_handler: handler))
+      end
+
+      it 'sizes by the default pool when it is the only one listed' do
+        default = pool(size: 4, busy: 1)
+        stub_handler(default, [default])
+        expect(extractor.send(:concurrent_extraction_workers, 7)).to eq(3)
+      end
+
+      it 'sizes by the second pool when it has fewer free connections' do
+        stub_handler(pool(size: 5), [pool(size: 5), pool(size: 2)])
+        expect(extractor.send(:concurrent_extraction_workers, 7)).to eq(2)
+      end
+
+      it 'sizes by the scarcest of mixed pools, counting the connections already leased' do
+        stub_handler(pool(size: 5, busy: 1), [pool(size: 3, busy: 1), pool(size: 6)])
+        expect(extractor.send(:concurrent_extraction_workers, 7)).to eq(2)
+      end
+
+      it 'starts no worker when a second pool has no free connection' do
+        stub_handler(pool(size: 5), [pool(size: 1, busy: 1)])
+        expect(extractor.send(:concurrent_extraction_workers, 7)).to eq(0)
+      end
+
+      it 'leaves a replica pool out, since no extractor reads it' do
+        stub_handler(pool(size: 5), [pool(size: 1, busy: 1, replica: true)])
+        expect(extractor.send(:concurrent_extraction_workers, 7)).to eq(5)
+      end
+
+      it 'sizes by the default pool when the handler cannot list its pools' do
+        handler = Object.new
+        handler.define_singleton_method(:connection_pool_list) { raise ArgumentError, 'no list' }
+        stub_const('ActiveRecord::Base', double('AR', connection_pool: pool(size: 3), connection_handler: handler))
+        expect(extractor.send(:concurrent_extraction_workers, 7)).to eq(3)
+      end
+
+      it 'runs every extractor on the calling thread when a second pool has no free connection' do
+        Woods.configure { |c| c.concurrent_extraction = true }
+        allow(Woods::ModelNameCache).to receive_messages(model_names: [], model_names_regex: /(?!)/)
+        default = pool(size: 5)
+        allow(default).to receive(:with_connection) { |&block| block.call }
+        stub_handler(default, [default, pool(size: 1, busy: 1)])
+        allow(Woods::Extractors::TableCatalog).to receive(:schema_readability).and_return([])
+
+        threads = Queue.new
+        Woods::Extractor::EXTRACTORS.each_value do |klass|
+          extractor_double = double(package_roots: [])
+          allow(extractor_double).to receive(:extract_all) do
+            threads << Thread.current
+            []
+          end
+          allow(klass).to receive(:new).and_return(extractor_double)
+        end
+
+        extractor.extract_all
+
+        seen = Array.new(threads.size) { threads.pop }
+        expect(seen).not_to be_empty
+        expect(seen.uniq).to eq([Thread.current])
+      end
+    end
   end
 end

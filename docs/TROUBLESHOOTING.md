@@ -585,6 +585,18 @@ earlier log line naming the failed extractor, fix its cause, then retry the
 complete changed-file list or refresh selection. Preserve the published index;
 deleting it does not repair the failing extractor.
 
+### Full extraction reports "Database reads failed for ..."
+
+An extractor could not read the schema of a database the same run read from.
+A checkout timed out or a connection failed on a pool that answered another of the run's queries.
+Or the database refused a statement.
+Its result would pass for a database without tables, so the run published nothing and readers keep the prior generation.
+A database no read in the run reaches does not stop it: no connection, no database, or a pool held elsewhere all run.
+Such a run publishes, and `source_inputs.json` lists the extractor under `unverified_scopes`.
+The earlier log lines name the database error.
+A pool whose connections other threads take between reads times out this way, for example a pool of one.
+Free the connection or enlarge that database's `pool`, then run `woods:extract` again.
+
 ### Incremental extraction reports "Restart-sensitive inputs"
 
 On revisions containing #588 (included in Woods 2.1), the direct incremental

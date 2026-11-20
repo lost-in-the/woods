@@ -1893,7 +1893,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       stub_const('Rails', double('Rails'))
       allow(Rails).to receive(:logger).and_return(double('Logger').as_null_object)
 
-      model = double('Model', name: 'BrokenModel')
+      model = double('Model', name: 'BrokenModel', connection_pool: nil)
       allow(extractor).to receive(:source_file_for).and_raise(StandardError, 'bad path')
 
       extractor.send(:extract_model, model)
@@ -1934,6 +1934,9 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     let(:index) { double('Index', name: 'index_invoices_on_account_id', columns: %w[account_id], unique: false) }
     let(:foreign_key) { double('ForeignKey', from_table: 'invoices', column: 'account_id', to_table: 'accounts') }
 
+    # A failed read is logged.
+    before { stub_const('Rails', double('Rails', logger: double('Logger').as_null_object)) }
+
     def invoice_model
       model = stub_bare_model('Invoice')
       allow(model).to receive_messages(table_name: 'invoices', table_exists?: true, columns: [column])
@@ -1970,6 +1973,116 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
       expect(comment_lines(model).last(3)).to eq(['# Indexes: unknown (could not be read)', '#',
                                                   '# Foreign Keys: unknown (could not be read)'])
+      expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(true)
+    end
+
+    describe 'a failed index or foreign key read, for the full-run check' do
+      let(:not_established) { stub_const('ActiveRecord::ConnectionNotEstablished', Class.new(StandardError)) }
+      let(:checkout_timeout) { stub_const('ActiveRecord::ConnectionTimeoutError', Class.new(not_established)) }
+      let(:statement_invalid) { stub_const('ActiveRecord::StatementInvalid', Class.new(StandardError)) }
+      let(:model) { invoice_model }
+      let(:unserved) { ->(_pool) { false } }
+
+      def failing(reader, error)
+        connection = double('Connection', indexes: [index], foreign_keys: [foreign_key])
+        allow(connection).to receive(reader).and_raise(error)
+        stub_pool_connection(model, connection)
+      end
+
+      def schema_failed?(readable)
+        Woods::SourceInputs::ConsumerErrors.schema_failed?(extractor, readable)
+      end
+
+      it 'refuses an index read the database refused, keeping the section unknown' do
+        failing(:indexes, statement_invalid.new('permission denied'))
+
+        expect(comment_lines(model)).to include('# Indexes: unknown (could not be read)')
+        expect(schema_failed?(unserved)).to be(true)
+      end
+
+      it 'refuses a foreign key read that timed out on the model pool, when that pool answered another read' do
+        pool = failing(:foreign_keys, checkout_timeout.new('could not obtain a connection'))
+
+        expect(extractor.send(:table_foreign_keys, model)).to be_nil
+        expect(schema_failed?(->(candidate) { candidate.equal?(pool) })).to be(true)
+        expect(schema_failed?(unserved)).to be(false)
+      end
+
+      it 'refuses an index read that timed out on the model pool, when that pool answered another read' do
+        pool = failing(:indexes, checkout_timeout.new('could not obtain a connection'))
+
+        expect(comment_lines(model)).to include('# Indexes: unknown (could not be read)')
+        expect(schema_failed?(->(candidate) { candidate.equal?(pool) })).to be(true)
+      end
+
+      it 'refuses a table presence check the database refused before the foreign key read' do
+        stub_pool_connection(model, double('Connection', foreign_keys: [foreign_key]))
+        allow(model).to receive(:table_exists?).and_raise(statement_invalid.new('permission denied'))
+
+        expect(extractor.send(:table_foreign_keys, model)).to be_nil
+        expect(schema_failed?(unserved)).to be(true)
+      end
+
+      def extract_with_failing_columns(error)
+        allow(model).to receive(:columns).and_raise(error)
+        allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                             source_file_for: nil)
+        stub_pool_connection(model, double('Connection', indexes: [index], foreign_keys: [foreign_key]))
+      end
+
+      it "refuses a column read that timed out outside the schema readers, on the model's own pool" do
+        pool = extract_with_failing_columns(checkout_timeout.new('could not obtain a connection'))
+
+        expect(extractor.extract_model(model)).to be_nil
+        expect(schema_failed?(->(candidate) { candidate.equal?(pool) })).to be(true)
+      end
+
+      it 'records, without refusing, a column read that timed out on a pool that never answered' do
+        extract_with_failing_columns(checkout_timeout.new('could not obtain a connection'))
+
+        expect(extractor.extract_model(model)).to be_nil
+        expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(true)
+        expect(schema_failed?(unserved)).to be(false)
+      end
+
+      def timeout_carrying(pool)
+        checkout_timeout.new('could not obtain a connection').tap do |error|
+          error.define_singleton_method(:connection_pool) { pool }
+        end
+      end
+
+      it "refuses on the pool a failed read carries, not the model's, when only that pool answered" do
+        other = Object.new
+        extract_with_failing_columns(timeout_carrying(other))
+
+        expect(extractor.extract_model(model)).to be_nil
+        expect(schema_failed?(->(candidate) { candidate.equal?(other) })).to be(true)
+      end
+
+      it "lets a failed read carrying an unanswered pool publish, though the model's own pool answered" do
+        pool = extract_with_failing_columns(timeout_carrying(Object.new))
+
+        expect(extractor.extract_model(model)).to be_nil
+        expect(schema_failed?(->(candidate) { candidate.equal?(pool) })).to be(false)
+      end
+
+      it 'records nothing for an index that answered but could not be formatted' do
+        expression = double('Index', name: 'index_invoices_on_lower_number', columns: 'lower(number)', unique: false)
+        stub_pool_connection(model, double('Connection', indexes: [expression], foreign_keys: [foreign_key]))
+
+        comment_lines(model)
+
+        expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be_falsey
+      end
+
+      it 'records nothing when both reads answer' do
+        stub_pool_connection(model, double('Connection', indexes: [index], foreign_keys: [foreign_key]))
+
+        comment_lines(model)
+
+        expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be_falsey
+        expect(schema_failed?(unserved)).to be(false)
+      end
     end
 
     it 'prints neither section for a table that has no indexes or foreign keys' do

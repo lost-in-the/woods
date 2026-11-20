@@ -130,7 +130,7 @@ module Woods
         unit
       rescue StandardError => e
         @warnings << "Failed to extract model #{model.name}: #{e.message}"
-        SourceInputs::ConsumerErrors.log(self, "Failed to extract model #{model.name}: #{e.message}")
+        log_schema_read_failure(model, "Failed to extract model #{model.name}: #{e.message}")
         nil
       end
 
@@ -233,7 +233,7 @@ module Woods
 
       # @return [Array<String>, nil] nil when the indexes could not be read
       def format_indexes_comment(model)
-        read_table_schema(model, :indexes).map do |idx|
+        read_table_schema(model, :indexes)&.map do |idx|
           unique = idx.unique ? ' (unique)' : ''
           "#   #{idx.name}: [#{idx.columns.join(', ')}]#{unique}"
         end
@@ -261,7 +261,8 @@ module Woods
         return [] unless model.table_exists?
 
         read_table_schema(model, :foreign_keys)
-      rescue StandardError
+      rescue StandardError => e
+        log_schema_read_failure(model, "Failed to check the table of #{model.name}: #{e.message}")
         nil
       end
 
@@ -274,9 +275,32 @@ module Woods
       #
       # @param model [Class]
       # @param kind [Symbol] +:indexes+ or +:foreign_keys+
-      # @return [Array] what the connection returns for the table
+      # @return [Array, nil] what the connection returns for the table; nil
+      #   when the read failed, which {#log_schema_read_failure} records
       def read_table_schema(model, kind)
         model.connection_pool.with_connection { |connection| connection.public_send(kind, model.table_name) }
+      rescue StandardError => e
+        log_schema_read_failure(model, "Failed to read #{kind} for #{model.name}: #{e.message}")
+        nil
+      end
+
+      # Record the read being rescued, so a full run refuses a read that
+      # failed on a database it otherwise read
+      # ({SourceInputs::ConsumerErrors.schema_failed?}). The pool the error
+      # carries wins; the model's own pool stands in when it carries none.
+      #
+      # @param model [Class]
+      # @param message [String]
+      # @return [void]
+      def log_schema_read_failure(model, message)
+        SourceInputs::ConsumerErrors.log(self, message, pool: model_pool(model))
+      end
+
+      # @return [Object, nil] the model's connection pool, nil when it has none
+      def model_pool(model)
+        model.connection_pool
+      rescue StandardError
+        nil
       end
 
       # Read model source and inline all included concerns.
@@ -961,7 +985,7 @@ module Woods
         deps.concat(through_chain_dependencies(model, deps))
 
         # The table unit this model reads, when the live schema has it.
-        table = (@table_catalog ||= TableCatalog.from_runtime).for_model(model)
+        table = (@table_catalog ||= TableCatalog.from_runtime(consumer: self)).for_model(model)
         deps << { type: :database_table, target: table.identifier, via: :table } if table
 
         # Included concerns add instance-level behavior
