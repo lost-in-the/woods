@@ -111,6 +111,40 @@ RSpec.describe 'Source-reference extraction integration' do
       'target_type' => 'poro', 'kind' => 'constant', 'confidence' => 'verified', 'method' => 'new' }
   end
 
+  describe 'the record a unit enters the reference pass as' do
+    let(:extractor) { Woods::Extractor.new(output_dir: @output) }
+    let(:record_unit) do
+      unit('RefIntegrationCaller', 'caller').tap do |value|
+        value.metadata.merge!(callbacks: [{ type: :before_save, filter: :stamp }], scopes: [{ name: :recent }],
+                              associations: [{ name: :target, class_name: 'RefIntegrationTarget' }],
+                              filters: [], source_line_map: [[2, 1, 3]], source_contributors_version: 1)
+      end
+    end
+
+    def record_of(value)
+      extractor.send(:reference_record, value)
+    end
+
+    it 'carries, in JSON form, only the metadata the pass reads' do
+      expect(record_of(record_unit)['metadata']).to eq(
+        'callbacks' => [{ 'type' => 'before_save', 'filter' => 'stamp' }], 'scopes' => [{ 'name' => 'recent' }],
+        'associations' => [{ 'name' => 'target', 'class_name' => 'RefIntegrationTarget' }], 'filters' => [],
+        'source_line_map' => [[2, 1, 3]], 'source_contributors_version' => 1
+      )
+    end
+
+    it 'is not changed by a later mutation of the unit' do
+      record = record_of(record_unit)
+      before = JSON.generate(record)
+
+      record_unit.metadata[:callbacks].first[:filter] = :other
+      record_unit.metadata[:scopes] << { name: :late }
+      record_unit.dependencies << expected_edge
+
+      expect(JSON.generate(record)).to eq(before)
+    end
+  end
+
   it 'projects full references after source mapping and keeps unproven summaries empty' do
     proven = full(proven: true)
     expect(read_unit(proven, 'RefIntegrationCaller').dig('metadata', 'references')).to eq([expected_span])
