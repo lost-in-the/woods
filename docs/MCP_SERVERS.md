@@ -699,6 +699,20 @@ inlined from a concern (and through which superclass), or from a module the owne
 An answer from a superclass's own body names that unit in `inherited_from`; `member_of` stays the asked owner, and
 the entry's `unit` names the published source its `line` counts in.
 `other_definitions` lists the definitions the answer overrides.
+Definitions of the name in one body that the published source does not order are never one answer.
+These are the bodies of an `if` and its `else`, the branches of a `case`, a modifier `def`, or a `def` in a block of
+a call, together with the earlier definition they would replace.
+The answer then has no `member`: a statement that Woods cannot tell which one Ruby calls, and `candidates` in source
+order, each with its `note` ("defined under a condition").
+A controller action is the exception: its `action_sources` line, recorded from the running application, picks the
+one Ruby installs, and the statement says so.
+A definition on such a path with no other definition in its body to fall back to stays the answer, with a caveat
+that Ruby may not define the name there.
+Where every branch of an `if`, `unless` or `case` with an `else` defines the name, an earlier definition in that
+body is always replaced and moves to `other_definitions`.
+Where Ruby may run none of the conditional definitions, a caveat names the next definition Ruby then calls, and
+that definition is not listed as overridden.
+Sequential redefinition (`def a` twice) is one answer: the later definition.
 A class nested in the body of another class (its own superclass, for example) and published as its own lexical
 range, as a nested job or PORO is, answers from the definitions in that range, not the enclosing class's.
 Such a range carries no `source_line_map`, so its file lines are reported as not mapped.

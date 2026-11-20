@@ -121,6 +121,21 @@ RSpec.describe Woods::RubyAnalyzer::MethodAnalyzer do
       )
     end
 
+    it 'keeps calls on absolute constants in the call graph' do
+      source = <<~RUBY
+        class Loader
+          def load
+            ::Parser::CurrentRuby.parse('')
+          end
+        end
+      RUBY
+
+      unit = analyzer.analyze(source: source, file_path: '/app/loader.rb').first
+
+      expect(unit.metadata[:call_graph]).to eq([{ target: '::Parser::CurrentRuby', method: 'parse', line: 3 }])
+      expect(unit.dependencies).to eq([{ type: :ruby_class, target: '::Parser::CurrentRuby', via: :method_call }])
+    end
+
     it 'generates dependencies from call graph receivers' do
       source = <<~RUBY
         class Processor
@@ -193,6 +208,60 @@ RSpec.describe Woods::RubyAnalyzer::MethodAnalyzer do
 
       expect(units.size).to eq(2)
       expect(units.map(&:identifier)).to contain_exactly('Foo#foo_method', 'Bar#bar_method')
+    end
+  end
+
+  describe 'definitions that share one line' do
+    [true, false].each do |use_prism|
+      context "with Prism=#{use_prism}" do
+        before { allow_any_instance_of(Woods::Ast::Parser).to receive(:prism_available?).and_return(use_prism) }
+
+        def bodies(source)
+          analyzer.analyze(source: source, file_path: '/app/line.rb').to_h do |unit|
+            [unit.identifier, [unit.source_code, unit.metadata[:call_graph].map { |call| call[:target] }]]
+          end
+        end
+
+        it 'keeps an instance and a singleton method of one name apart' do
+          source = "class A; def a; Left.call; end; def self.a; Right.call; end; end\n"
+
+          expect(bodies(source)).to eq('A#a' => ['def a; Left.call; end', ['Left']],
+                                       'A.a' => ['def self.a; Right.call; end', ['Right']])
+        end
+
+        it 'keeps the methods of two owners on one line apart' do
+          source = "class A; def a; Left.call; end; end; class B; def a; Right.call; end; end\n"
+
+          expect(bodies(source)).to eq('A#a' => ['def a; Left.call; end', ['Left']],
+                                       'B#a' => ['def a; Right.call; end', ['Right']])
+        end
+
+        it 'holds the later of two definitions on one line, the body Ruby calls' do
+          source = "class A; def a; Left.call; end; def a; Right.call; end; end\n"
+          namespace = Module.new
+          { Left: :left, Right: :right }.each do |name, result|
+            namespace.const_set(name, Module.new.tap { |target| target.define_singleton_method(:call) { result } })
+          end
+          namespace.module_eval(source)
+
+          expect(namespace::A.new.a).to eq(:right)
+          expect(bodies(source)).to eq('A#a' => ['def a; Right.call; end', ['Right']])
+        end
+      end
+    end
+
+    it 'keeps the whole lines of a definition no other definition shares' do
+      source = "class A\n  private def a\n    Left.call\n  end\nend\n"
+
+      expect(analyzer.analyze(source: source, file_path: '/app/line.rb').first.source_code)
+        .to eq("  private def a\n    Left.call\n  end\n")
+    end
+
+    it 'publishes no join key in the method table' do
+      source = "class A; def a; end; def self.a; end; end\n"
+
+      expect(Woods::MethodTable.call(source).flat_map(&:keys).uniq)
+        .to match_array(%w[name kind line end_line visibility owner])
     end
   end
 end

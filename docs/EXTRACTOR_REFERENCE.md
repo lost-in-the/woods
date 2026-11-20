@@ -161,6 +161,23 @@ published `source_code` coordinates, sorted by line.
 - A `module_function` entry stands for a private instance method and a singleton copy; its `visibility` is the copy's.
   A later `public :name` or `protected :name` splits it into an `instance` and a `singleton` entry.
 - A name passed before its definition (Ruby raises) leaves the entry as its definition reads.
+- A `def` passed to any other call (`memoize def total`, `memoize private def total`) is read as a plain `def` at
+  that point. A `begin` body and its `ensure` are read as run.
+  Passed through such calls to a visibility call (`private memoize def total`, `private memoize cache def total`),
+  it takes the visibility that call names, as it does when each wrapper returns the name it is given.
+  A wrapper that returns something else leaves the method at the visibility in force, and the table cannot see that.
+- An entry for a `def` Ruby runs only on one path carries `candidate`; entries without the key are definite.
+  - `conditional`: an `if`, `unless`, `elsif` or `else` branch, a modifier (`def x if flag`), a `when` or `in`
+    branch of a `case` or its `else`, or a `begin`'s `rescue` or `else`.
+  - `block`: a block of a call in the body (`included do`, `Plugin.create do`), which may run elsewhere or never.
+  - A candidate sits beside what is already held, and a later definite `def` replaces it.
+    A later candidate in the same branch, or in a branch that encloses it, replaces it too.
+  - A visibility call on such a path acts on that path's candidates only: those of the branches that enclose it
+    or are nested in its own, never another branch's. A bare `private` there lasts to the end of its branch.
+    It skips an enclosing branch's candidate that a nested branch around the call redefines on the side the call
+    acts on:
+    Ruby holds that outer definition only when the nested branch does not run, and then the call does not run either.
+  - `module_function :a` makes each alternative of `a` a module function where it stands.
 - The table holds the methods Ruby holds once the body has run, one entry per method and side.
   A later definition replaces an earlier one on the same side (`def a` twice keeps the later, with the visibility in
   force where it is written), so a superseded definition has no entry.

@@ -276,7 +276,7 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         end
       end
     RUBY
-    'class-method visibility around module functions' => <<~RUBY
+    'class-method visibility around module functions' => <<~RUBY,
       module Util
         module_function
         def a; end
@@ -291,12 +291,71 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         module_function :c
       end
     RUBY
+    'definitions under conditional and begin wrappers' => <<~RUBY,
+      class Account
+        if true
+          def a; end
+        end
+        unless false
+          def b; end
+        end
+        begin
+          def c; end
+        end
+        def d; end if true
+        flag = true
+        def e; end unless flag.nil?
+        private
+        if true
+          def f; end
+        end
+      end
+    RUBY
+    'a definition passed to a method that is not a visibility call' => <<~RUBY,
+      class Account
+        def self.memoize(name)
+          name
+        end
+        memoize def total; end
+        private
+        memoize def hidden; end
+      end
+    RUBY
+    'a definition in a wrapper that returns its name, passed to a visibility call' => <<~RUBY,
+      module Util
+        def self.memoize(name)
+          name
+        end
+
+        def self.cache(name)
+          name
+        end
+        private memoize def total; end
+        private memoize cache def deep; end
+        module_function cache def tool; end
+        private_class_method memoize def self.build; end
+        protected
+        public(memoize(def shown; end))
+      end
+    RUBY
+    'a conditional inside class << self' => <<~RUBY
+      class Account
+        class << self
+          if true
+            def a; end
+          end
+          private def b; end
+        end
+      end
+    RUBY
   }.freeze
 
   # [owner, side, name] => [visibility, definition line], from the table.
   # Two entries for one method (a dead definition beside the live one) fail.
-  def table_facts(source)
-    described_class.call(source).each_with_object({}) do |entry, facts|
+  def table_facts(source, lines: nil)
+    entries = described_class.call(source)
+    entries = entries.select { |entry| lines.include?(entry['line']) } if lines
+    entries.each_with_object({}) do |entry, facts|
       owner, name, visibility, line = entry.values_at('owner', 'name', 'visibility', 'line')
       sides = { 'instance' => { instance: visibility }, 'singleton' => { singleton: visibility },
                 'module_function' => { instance: 'private', singleton: visibility } }.fetch(entry['kind'])
@@ -389,5 +448,112 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
       expect { namespace.module_eval(source) }.to raise_error(NameError, /helper/)
       expect(table_facts(source)).to eq(defined_facts(namespace))
     end
+  end
+
+  # Alternatives are two entries for one method, so each is compared with
+  # Ruby on the branch that defines it: FLAG chooses the branch.
+  {
+    'a visibility call in one branch of an if' => [<<~RUBY, { true => [3], false => [5] }],
+      class Post
+        if FLAG
+          def x; end
+        else
+          private def x; end
+        end
+      end
+    RUBY
+    'module_function after alternatives' => [<<~RUBY, { true => [3, 8], false => [5, 8] }],
+      module Util
+        if FLAG
+          def x; end
+        else
+          def x; end
+        end
+        module_function :x
+        def y; end
+      end
+    RUBY
+    'later definitions in the same and an enclosing branch' => [<<~RUBY, { true => [7, 8], false => [10] }],
+      class Post
+        if FLAG
+          if FLAG
+            def x; end
+          end
+          def a; end
+          def a; end
+          def x; end
+        else
+          def a; end
+        end
+      end
+    RUBY
+    # FLAG :outer runs the outer branch only, :inner both.
+    'a visibility call in a nested branch after a redefinition there' =>
+      [<<~RUBY, { outer: [2, 4, 5, 6, 7], inner: [2, 9, 10, 12, 13] }],
+        class Post
+          def self.memoize(name) = name
+          if FLAG
+            def x; end
+            def y; end
+            def z; end
+            def self.w; end
+            if FLAG == :inner
+              private def x; end
+              def y; end
+              private :y
+              private memoize def z; end
+              private_class_method def self.w; end
+            end
+          end
+        end
+      RUBY
+    'module_function def in a nested branch after a definition in the enclosing one' =>
+      [<<~RUBY, { outer: [3], inner: [5] }]
+        module Util
+          if FLAG
+            def x; end
+            if FLAG == :inner
+              module_function def x; end
+            end
+          end
+        end
+      RUBY
+  }.each do |label, (source, taken)|
+    it "agrees with Ruby on each branch for #{label}, and lists no definition Ruby holds on no branch" do
+      taken.each do |flag, lines|
+        namespace = Module.new
+        namespace.const_set(:FLAG, flag)
+        namespace.module_eval(source)
+
+        expect(table_facts(source, lines: lines)).to eq(defined_facts(namespace))
+      end
+      expect(described_class.call(source).map { |entry| entry['line'] }.uniq.sort).to eq(taken.values.flatten.uniq.sort)
+    end
+  end
+
+  # The nested `def x` replaces only the instance side of the outer module
+  # function, so `public` there reaches no instance body of the outer branch.
+  it 'leaves the instance side of an outer module function private when a nested branch redefines it public' do
+    source = <<~RUBY
+      module Util
+        if FLAG
+          module_function def x; end
+          if FLAG == :inner
+            public def x; end
+          end
+        end
+      end
+    RUBY
+    held = lambda do |flag|
+      namespace = Module.new
+      namespace.const_set(:FLAG, flag)
+      namespace.module_eval(source)
+      defined_facts(namespace)
+    end
+
+    expect(table_facts(source, lines: [3])).to eq(held.call(:outer))
+    expect(held.call(:inner)).to eq({ ['Util', :instance, 'x'] => ['public', 5],
+                                      ['Util', :singleton, 'x'] => ['public', 3] })
+    expect(table_facts(source, lines: [5])).to eq({ ['Util', :instance, 'x'] => ['public', 5] })
   end
 end

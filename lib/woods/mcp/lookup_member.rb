@@ -103,9 +103,13 @@ module Woods
         result = { 'identifier' => reference.identifier, 'member_of' => owner }
         possible = resolution.chosen&.origin == :possible_macro
         if resolution.ambiguous
-          result['statement'] = ambiguous_statement(reference, unit, resolution)
+          result['statement'] = if resolution.ambiguity == :paths
+                                  alternatives_statement(reference, unit, resolution)
+                                else
+                                  ambiguous_statement(reference, unit, resolution)
+                                end
           result['candidates'] = resolution.ambiguous.map do |candidate|
-            definition(candidate, resolution, concern_file)
+            path_noted(definition(candidate, resolution, concern_file), candidate)
           end
         elsif possible
           result['statement'] = statement(reference, unit, resolution)
@@ -172,7 +176,45 @@ module Woods
         head = "#{reference.identifier} is a #{entry['visibility']} " \
                "#{KIND_LABELS.fetch(entry['kind'], reference.kind_label)}"
         "#{head}#{origin_clause(unit, chosen, resolution.chain[chosen.level])}" \
-          "#{overrides(reference, resolution)} #{not_a_unit(unit)}"
+          "#{overrides(reference, resolution)}#{installed_clause(resolution)} #{not_a_unit(unit)}"
+      end
+
+      # Where Ruby defines the member, when the extractor's runtime record
+      # chose it among definitions the source does not order.
+      def installed_clause(resolution)
+        record = resolution.installed
+        return '' unless record
+
+        " Ruby installs the definition at line #{record['line']} of #{record['file']}, as the extractor " \
+          'recorded from the running application (action_sources).'
+      end
+
+      # A candidate defined on a path Ruby may not run says so in its note.
+      def path_noted(shown, candidate)
+        reason = candidate.entry[MethodTable::CANDIDATE]
+        reason ? shown.merge('note' => "defined #{Resolution::Alternatives.where(reason)}") : shown
+      end
+
+      # @return [String] the statement of an answer whose definitions of one
+      #   body the published source does not order
+      def alternatives_statement(reference, unit, resolution)
+        found = resolution.ambiguous
+        level = resolution.chain[found.first.level]
+        lines = found.map { |candidate| candidate.entry['line'] }
+        listed = "#{lines[0...-1].join(', ')} and #{lines.last}"
+        "#{reference.identifier}: #{alternatives_owner(unit, found.first, level)} defines the " \
+          "#{reference.kind_label} #{reference.name} #{found.size} times in its own body " \
+          "(lines #{listed} of its published source), under conditions the published " \
+          'source does not settle, so Woods cannot tell which one Ruby calls. Each definition is listed under ' \
+          "candidates.#{overrides(reference, resolution, 'They override')} #{not_a_unit(unit)}"
+      end
+
+      def alternatives_owner(unit, candidate, level)
+        owner = "#{unit['type']} unit #{unit['identifier']}"
+        return "concern #{candidate.concern}, inlined into #{owner}," if candidate.concern
+        return owner if candidate.level.zero?
+
+        "#{level['type']} unit #{level['identifier']}, a superclass of #{owner},"
       end
 
       # How the chosen definition reaches the owner.
@@ -321,13 +363,12 @@ module Woods
       # methods of the including unit; for a concern unit's own body
       # ({.own_lines}), class methods it gives to its includers and does not
       # respond to itself. Read by a Prism walk of each decoded block
-      # ({Woods::MethodTable.named_blocks}). Only a definition written
-      # directly in that block (or as `private def`) counts; a block that does
-      # not parse contributes nothing, so its singletons are not members.
+      # ({Woods::MethodTable.named_blocks}). A definition in a branch, a
+      # block or a call argument in that block counts, as the method table
+      # reads it; a block that does not parse contributes nothing, so its
+      # singletons are not members.
       # `module ClassMethods` is not read: its methods are not answered.
       module ConcernClassMethods
-        VISIBILITY = %i[private protected public].freeze
-
         module_function
 
         # @param source [String, nil] the unit's published source
@@ -386,14 +427,15 @@ module Woods
             node.block.is_a?(Prism::BlockNode)
         end
 
+        # A `def` without a receiver at any depth: in a branch, a block, or
+        # an argument of a call (`private def x`, `memoize def x`). A nested
+        # class, module or `class << self`, and a method body, are left out:
+        # their definitions are another object's, or run only when called.
         def definition_lines(node)
           case node
           when Prism::DefNode then node.receiver ? [] : [node.location.start_line]
-          when Prism::CallNode
-            return [] unless node.receiver.nil? && VISIBILITY.include?(node.name)
-
-            node.arguments&.arguments.to_a.flat_map { |argument| definition_lines(argument) }
-          else []
+          when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then []
+          else node.compact_child_nodes.flat_map { |child| definition_lines(child) }
           end
         end
 
