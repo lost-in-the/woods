@@ -10,7 +10,8 @@
 require_relative '../lib/woods/mcp/served_identity'
 
 USAGE = 'Usage: woods-mcp-start [--allow-mismatch] [--await-index] [--client-root PATH] ' \
-        '[--client-root-map HOST=CONTAINER ...] (--checkout | /path/to/index_dir)'
+        '[--client-root-map HOST=CONTAINER ...] [--client-identity main|linked:HEAD:branch] ' \
+        '(--checkout | /path/to/index_dir)'
 
 def usage_error(message)
   warn "Error: #{message}"
@@ -79,6 +80,20 @@ else
     usage_error("--client-root-map (#{client_root_map_env}): #{e.message}")
   end
   ENV[client_root_map_env] = map_value unless map_value.empty?
+end
+
+# `--client-identity main|linked:HEAD:branch` (or WOODS_MCP_CLIENT_IDENTITY)
+# is what the client's checkout is, with no path in it: a container launch
+# with no map cannot read the client root, and compares this instead.
+client_identity_env = Woods::MCP::ServedIdentity::CLIENT_IDENTITY_ENV
+client_identity = take_option('--client-identity')
+ENV[client_identity_env] = client_identity if client_identity
+declared_identity = ENV.fetch(client_identity_env, '').strip
+unless declared_identity.empty?
+  usage_error("--client-identity needs --client-root (#{client_root_env})") if declared_client_root.empty?
+  unless declared_identity.match?(Woods::MCP::ServedIdentity::CLIENT_IDENTITY)
+    usage_error("--client-identity must be main|linked:HEAD:branch, got #{declared_identity}")
+  end
 end
 
 # `--checkout` (or WOODS_MCP_CHECKOUT=1) takes no index path: it serves the

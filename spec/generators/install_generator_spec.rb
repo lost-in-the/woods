@@ -243,6 +243,11 @@ RSpec.describe 'Install generator' do
     # and rewrites `${...}` in args from its own, so the entry reads it in sh.
     let(:project_dir) { 'if [ -n "$CLAUDE_PROJECT_DIR" ]; then cd "$CLAUDE_PROJECT_DIR" || exit 1; fi; ' }
     let(:launch) { 'bundle exec woods-mcp-start --checkout --await-index' }
+    # What the client's checkout is, with no path: worktree kind, HEAD, branch.
+    let(:client_identity) do
+      'id="$(test -f "$(git rev-parse --show-toplevel 2>/dev/null)/.git" && echo linked || echo main)' \
+        ':$(git rev-parse --verify -q HEAD 2>/dev/null):$(git branch --show-current 2>/dev/null)"; '
+    end
     let(:host_entry) { { 'type' => 'stdio', 'command' => 'sh', 'args' => ['-c', "#{project_dir}exec #{launch}"] } }
 
     it 'prints the host entry and writes no .mcp.json by default' do
@@ -272,9 +277,9 @@ RSpec.describe 'Install generator' do
       entry = mcp_json.dig('mcpServers', 'woods')
       expect(entry).to eq(
         'type' => 'stdio', 'command' => 'sh',
-        'args' => ['-c', "#{project_dir}exec docker compose exec -T " \
+        'args' => ['-c', "#{project_dir}#{client_identity}exec docker compose exec -T " \
                          '-e WOODS_MCP_CLIENT_ROOT_MAP="$WOODS_MCP_CLIENT_ROOT_MAP" web ' \
-                         "#{launch} --client-root \"$PWD\""]
+                         "#{launch} --client-root \"$PWD\" --client-identity \"$id\""]
       )
       expect(entry).not_to have_key('cwd')
       expect(strings_in(entry).join).not_to include('${')

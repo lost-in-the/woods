@@ -181,7 +181,7 @@ machine. See [managed configuration](AGENT_SETUP.md#managed-claude-code-configur
     "woods": {
       "type": "stdio",
       "command": "sh",
-      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; id=\"$(test -f \"$(git rev-parse --show-toplevel 2>/dev/null)/.git\" && echo linked || echo main):$(git rev-parse --verify -q HEAD 2>/dev/null):$(git branch --show-current 2>/dev/null)\"; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\" --client-identity \"$id\""]
     }
   }
 }
@@ -189,16 +189,22 @@ machine. See [managed configuration](AGENT_SETUP.md#managed-claude-code-configur
 
 - `sh -c` turns `$PWD` into the session's directory, handed to the server as the client root.
   The server refuses an index that belongs to another checkout instead of answering from it.
-- A host path does not exist inside the container, so without a mount map every launch starts with one warning
-  that the client's checkout cannot be determined.
+- A host path does not exist inside the container. Without a mount map, the entry hands over what the session's
+  checkout is instead (worktree kind, HEAD and branch, no path): a session in a linked worktree, or on another
+  commit or branch, is refused rather than served the mounted checkout's index; a session in the mounted checkout
+  starts with one warning that its checkout cannot be read.
   Each developer can export their own map, for example `WOODS_MCP_CLIENT_ROOT_MAP=/host/src=/app`;
   the entry passes it through and stays free of host paths.
   See [the Docker process and path rule](MCP_SERVERS.md#docker-process-and-path-rule).
 - Compose finds the project from the session's directory and names it after that directory.
   A session in a linked worktree reaches the running service only when the project name is pinned,
   with a top-level `name:` in the Compose file or `COMPOSE_PROJECT_NAME`.
-- `--checkout` needs the checkout's `.git` entry inside the container.
-  A service that mounts only the application directory has none, and the launch is refused.
+- `--checkout` needs the checkout's `.git` entry inside the container. A service that mounts only the application
+  directory (for example `.:/app` from the application root of a repository that holds more than the application)
+  has no `.git`, so `--checkout` finds no checkout there. The launch is refused, which is the expected answer:
+  `--checkout serves the current checkout's index, but /app is not inside a git checkout.`
+  Use the explicit form below, which names the index path, or mount the checkout root, with its `.git`, and set
+  `working_dir` to the application.
 - The entry passes no `-w`, so the server starts in the service's `working_dir`.
   That must be the application root inside the container, in a mount of the whole checkout.
   For an application below its checkout root, it is the application directory (for example `/app/apps/web` with
@@ -217,9 +223,14 @@ A bundle volume installed for another application path makes every `bundle exec`
 Either remedy works: remove the `BUNDLE_BIN` directory from `PATH` in the service's environment,
 or use one bundle volume per application layout.
 
-The generated entry was run with a stand-in `docker` that runs the inner command in place, or in a given service
-working directory (`spec/integration/generated_mcp_entry_spec.rb`).
-A real `docker compose exec` with this entry was not run.
+Checked with Claude Code 2.1.325 and Docker Compose: see
+[the Docker process and path rule](MCP_SERVERS.md#docker-process-and-path-rule) for what each case does.
+With the application below the checkout root, the whole checkout mounted and `working_dir` at the application,
+the generated entry served the application's index unchanged to sessions opened at the checkout root, in the
+application and in a sibling directory (`client_matches` was `true` with a map).
+A service that mounts only the application directory was refused at launch, as described above.
+`spec/integration/generated_mcp_entry_spec.rb` runs the entry through a stand-in `docker`, in place or in a given
+service working directory.
 
 Before Woods `2.2.0`, or without the checkout's `.git` in the container, name the host application root.
 Compose must be able to resolve the project, so set `cwd` to the host application root.
@@ -456,7 +467,7 @@ the deprecated Console entry still names the host application root, so this file
     "woods": {
       "type": "stdio",
       "command": "sh",
-      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; id=\"$(test -f \"$(git rev-parse --show-toplevel 2>/dev/null)/.git\" && echo linked || echo main):$(git rev-parse --verify -q HEAD 2>/dev/null):$(git branch --show-current 2>/dev/null)\"; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\" --client-identity \"$id\""]
     },
     "woods-console": {
       "command": "docker",
@@ -479,7 +490,7 @@ launcher, replace the `woods-console` entry:
     "woods": {
       "type": "stdio",
       "command": "sh",
-      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; id=\"$(test -f \"$(git rev-parse --show-toplevel 2>/dev/null)/.git\" && echo linked || echo main):$(git rev-parse --verify -q HEAD 2>/dev/null):$(git branch --show-current 2>/dev/null)\"; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\" --client-identity \"$id\""]
     },
     "woods-console": {
       "command": "woods-console-mcp"
@@ -561,6 +572,27 @@ Docker:  "args": ["exec", "-i", "container-name", ...]
 **Symptom:** `Error response from daemon: No such container: ...`
 
 **Fix:** Check the actual name with `docker ps --format '{{.Names}}'` and update your `.mcp.json` or `console.yml`.
+
+### `woods-mcp-start` fails with `Bundler::GemfileNotFound`
+
+**Symptom:** The container entry exits at startup with `Bundler::GemfileNotFound`, though the service's
+`working_dir` holds a `Gemfile`.
+
+**Cause:** The image puts a shared `BUNDLE_BIN` directory first on `PATH`. The `woods-mcp-start` binstub there
+hardcodes the `Gemfile` path it was generated for, and a different `working_dir` does not have it.
+
+**Fix:** Regenerate the binstubs for the application, or put the gem's own `bin` directory ahead of the shared
+one on the service's `PATH`.
+
+### `--checkout` refuses with "is not inside a git checkout"
+
+**Symptom:** `--checkout serves the current checkout's index, but /app is not inside a git checkout.`
+
+**Cause:** The service mounts only the application directory, so the container has no `.git`.
+
+**Fix:** Use the explicit form, which names the index path (`/app/tmp/woods`), or mount the checkout root with
+its `.git` and set `working_dir` to the application.
+See [the default container launch](#default-run-it-through-the-application-container).
 
 ### Path confusion between host and container
 

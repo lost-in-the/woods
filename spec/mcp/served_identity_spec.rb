@@ -614,6 +614,234 @@ RSpec.describe 'Served index identity' do
     end
   end
 
+  # A container launch with no mount map cannot read the client's checkout:
+  # the host path does not exist here. The wrapper hands over what the
+  # client's checkout is instead, with no path in it: worktree kind, HEAD and
+  # branch, as "kind:sha:branch". A difference from the checkout this server
+  # serves is a mismatch; agreement serves as before, with the warning.
+  describe 'the client identity a container launch hands over' do
+    let(:sha) { 'a' * 40 }
+
+    def with_env(values)
+      saved = values.keys.to_h { |key| [key, ENV.fetch(key, nil)] }
+      values.each { |key, value| ENV[key] = value }
+      yield
+    ensure
+      saved.each { |key, value| ENV[key] = value }
+    end
+
+    def at_head(root, sha, branch: 'main', packed: false)
+      git = File.join(root, '.git')
+      File.write(File.join(git, 'HEAD'), branch ? "ref: refs/heads/#{branch}\n" : "#{sha}\n")
+      return unless branch
+
+      if packed
+        File.write(File.join(git, 'packed-refs'),
+                   "# pack-refs with: peeled fully-peeled sorted\n#{sha} refs/heads/#{branch}\n")
+      else
+        FileUtils.mkdir_p(File.join(git, 'refs', 'heads'))
+        File.write(File.join(git, 'refs', 'heads', branch), "#{sha}\n")
+      end
+    end
+
+    def identity(alpha, declared)
+      with_env('WOODS_MCP_CLIENT_ROOT' => '/host-only/checkout-x', 'WOODS_MCP_CLIENT_ROOT_MAP' => nil,
+               'WOODS_MCP_CLIENT_IDENTITY' => declared) do
+        Woods::MCP::ServedIdentity.read(index_of(alpha))
+      end
+    end
+
+    it 'serves as before when the client is the same kind of checkout at the same HEAD and branch' do
+      alpha = checkout('checkout-alpha')
+      at_head(alpha, sha)
+
+      result = identity(alpha, "main:#{sha}:main")
+
+      expect([result.client_matches, result.match_reason]).to eq([nil, 'client_root_unresolved'])
+      expect(result.to_h).to include(client_branch: 'main', client_identity: { worktree: 'main', head: sha,
+                                                                               branch: 'main' })
+    end
+
+    it 'says the identity agreed, in the warning and in woods_status, keeping the reason' do
+      alpha = checkout('checkout-alpha')
+      at_head(alpha, sha)
+
+      result = identity(alpha, "main:#{sha}:main")
+      report = with_env('WOODS_MCP_CLIENT_ROOT' => '/host-only/checkout-x', 'WOODS_MCP_CLIENT_ROOT_MAP' => nil,
+                        'WOODS_MCP_CLIENT_IDENTITY' => "main:#{sha}:main") do
+        status(build_server(index_of(alpha))).fetch('identity')
+      end
+
+      expect(result.client_identity_agrees).to be(true)
+      expect(result.warnings.first).to include('/host-only/checkout-x', 'agrees', 'a main checkout on main at aaaaaaa')
+      expect(result.warnings.first).not_to include('is unknown', 'does not resolve')
+      expect(report).to include('client_match_reason' => 'client_root_unresolved', 'client_matches' => nil,
+                                'client_identity_agrees' => true)
+    end
+
+    it 'says the client checkout is unknown when no identity was sent' do
+      alpha = checkout('checkout-alpha')
+      at_head(alpha, sha)
+
+      result = identity(alpha, nil)
+
+      expect([result.match_reason, result.client_identity_agrees]).to eq(['client_root_unresolved', nil])
+      expect(result.to_h).to include(client_identity: nil, client_identity_agrees: nil)
+      expect(result.warnings.first).to include("the client's checkout is unknown", 'does not resolve')
+    end
+
+    it 'agrees with nothing when the served checkout has neither HEAD nor branch to compare' do
+      unreadable = checkout('checkout-unreadable')
+      File.delete(File.join(unreadable, '.git', 'HEAD'))
+
+      result = identity(unreadable, "main:#{sha}:main")
+
+      expect([result.match_reason, result.client_identity_agrees]).to eq(['client_root_unresolved', nil])
+    end
+
+    # Outside any git checkout the wrapper's git calls print nothing, so it
+    # sends a kind with neither HEAD nor branch. That identifies nothing.
+    it 'reads an identity with neither HEAD nor branch as no identity, never as agreement or a mismatch' do
+      linked = checkout('checkout-linked')
+      gitdir = File.join(@base, 'common', 'worktrees', 'linked')
+      FileUtils.mkdir_p(gitdir)
+      File.write(File.join(gitdir, 'HEAD'), "#{sha}\n")
+      FileUtils.rm_rf(File.join(linked, '.git'))
+      File.write(File.join(linked, '.git'), "gitdir: #{gitdir}\n")
+
+      %w[main:: linked::].each do |declared|
+        expect(Woods::MCP::ServedIdentity.parse_client_identity(declared)).to be_nil
+        result = identity(linked, declared)
+        expect([result.client_matches, result.match_reason, result.client_identity_agrees])
+          .to eq([nil, 'client_root_unresolved', nil])
+        expect(result.to_h).to include(client_identity: nil)
+      end
+    end
+
+    it 'agrees through a packed ref, a detached client and a detached served checkout' do
+      packed = checkout('checkout-packed')
+      at_head(packed, sha, packed: true)
+      detached = checkout('checkout-detached', branch: nil)
+      at_head(detached, sha, branch: nil)
+
+      expect(identity(packed, "main:#{sha}:main").match_reason).to eq('client_root_unresolved')
+      expect(identity(packed, "main:#{sha}:").match_reason).to eq('client_root_unresolved')
+      expect(identity(detached, "main:#{sha}:topic").match_reason).to eq('client_root_unresolved')
+    end
+
+    it 'reads a packed ref under a POSIX locale, past a multibyte branch name and at one' do
+      other = 'b' * 40
+      packed = "# pack-refs with: peeled fully-peeled sorted\n#{other} refs/heads/café\n^#{'d' * 40}\n" \
+               "#{sha} refs/heads/main\n"
+      plain = checkout('checkout-plain')
+      accented = checkout('checkout-accented', branch: 'café')
+      [plain, accented].each { |root| File.binwrite(File.join(root, '.git', 'packed-refs'), packed) }
+
+      heads = with_posix_default_external do
+        [plain, accented].map { |root| Woods::MCP::ServedIdentity.checkout_head(root) }
+      end
+
+      expect(heads).to eq([sha, other])
+    end
+
+    {
+      'a linked worktree against the main checkout' => ->(sha) { "linked:#{sha}:main" },
+      'another HEAD' => ->(_sha) { "main:#{'b' * 40}:main" },
+      'another branch at the same HEAD' => ->(sha) { "main:#{sha}:topic" }
+    }.each do |label, declared|
+      it "refuses #{label}, naming the map and the override" do
+        alpha = checkout('checkout-alpha')
+        at_head(alpha, sha)
+
+        result = identity(alpha, declared.call(sha))
+
+        expect([result.client_matches, result.match_reason]).to eq([false, 'client_identity_differs'])
+        expect(result.refusal_message).to include('/host-only/checkout-x', 'WOODS_MCP_CLIENT_ROOT_MAP',
+                                                  '--allow-mismatch', alpha)
+      end
+    end
+
+    it 'compares nothing when the served application has no .git, as in a mount of the app directory alone' do
+      app = checkout('app-only')
+      FileUtils.rm_rf(File.join(app, '.git'))
+
+      result = identity(app, "main:#{sha}:main")
+
+      expect(result.client_matches).to be_nil
+      expect(result.match_reason).not_to eq('client_identity_differs')
+    end
+
+    it 'compares nothing for a malformed identity, or when the client root resolves' do
+      alpha = checkout('checkout-alpha')
+      at_head(alpha, sha)
+      resolved = with_env('WOODS_MCP_CLIENT_ROOT' => alpha, 'WOODS_MCP_CLIENT_IDENTITY' => "linked:#{sha}:x") do
+        Woods::MCP::ServedIdentity.read(index_of(alpha))
+      end
+
+      expect(identity(alpha, 'nonsense').match_reason).to eq('client_root_unresolved')
+      expect(resolved.match_reason).to eq('same_checkout')
+    end
+
+    describe 'woods-mcp-start --client-identity' do
+      let(:wrapper) { File.expand_path('../../exe/woods-mcp-start', __dir__) }
+
+      def launch(index_dir, cwd:, args: [])
+        harness = <<~RUBY
+          wrapper, *argv = ARGV
+          ARGV.replace(argv)
+          Kernel.define_method(:exec) { |*| exit 42 }
+          load wrapper
+        RUBY
+        env = { 'WOODS_MCP_ALLOW_MISMATCH' => nil, 'WOODS_MCP_CLIENT_ROOT' => nil, 'WOODS_MCP_CLIENT_ROOT_MAP' => nil,
+                'WOODS_MCP_CLIENT_IDENTITY' => nil }
+        _out, errors, status = Open3.capture3(env, RbConfig.ruby, '-e', harness, wrapper, *args, index_dir,
+                                              chdir: cwd)
+        [status.exitstatus, errors]
+      end
+
+      it 'refuses a differing client and serves an agreeing one' do
+        alpha = checkout('checkout-alpha')
+        at_head(alpha, sha)
+        client = ['--client-root', '/host-only/checkout-x']
+
+        refused, refusal = launch(index_of(alpha), cwd: alpha, args: [*client, '--client-identity', "linked:#{sha}:"])
+        served, warning = launch(index_of(alpha), cwd: alpha, args: [*client, "--client-identity=main:#{sha}:main"])
+        allowed, = launch(index_of(alpha), cwd: alpha,
+                                           args: ['--allow-mismatch', *client, '--client-identity', "linked:#{sha}:"])
+
+        expect(refused).to eq(1), refusal
+        expect(refusal).to include('WOODS_MCP_CLIENT_ROOT_MAP', '--allow-mismatch')
+        expect(served).to eq(42), warning
+        expect(allowed).to eq(42)
+      end
+
+      it 'serves a client outside any git checkout, which sends neither HEAD nor branch' do
+        alpha = checkout('checkout-alpha')
+        at_head(alpha, sha)
+
+        client = ['--client-root', '/host-only/x', '--client-identity', 'main::']
+
+        served, warning = launch(index_of(alpha), cwd: alpha, args: client)
+
+        expect(served).to eq(42), warning
+        expect(warning).to include("the client's checkout is unknown")
+      end
+
+      it 'refuses a malformed identity and one without a client root' do
+        alpha = checkout('checkout-alpha')
+
+        malformed, malformed_error = launch(index_of(alpha), cwd: alpha,
+                                                             args: ['--client-root', '/host-only/x',
+                                                                    '--client-identity', 'sideways:zz:main'])
+        orphan, orphan_error = launch(index_of(alpha), cwd: alpha, args: ['--client-identity', 'main::'])
+
+        expect([malformed, orphan]).to eq([1, 1])
+        expect(malformed_error).to include('--client-identity', 'main|linked')
+        expect(orphan_error).to include('--client-identity needs --client-root')
+      end
+    end
+  end
+
   describe 'writer and reader builds' do
     # Corrupt one unit the way a payload format change would look to this
     # reader: its identity guard rejects the unit.

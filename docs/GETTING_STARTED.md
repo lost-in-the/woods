@@ -146,7 +146,8 @@ In an application installed earlier, run `bin/rails generate woods:install --mcp
 without `--skip` a non-interactive run overwrites an edited initializer.
 The `sh` line changes into `CLAUDE_PROJECT_DIR`, which Claude Code sets in the server's environment to the project root;
 a client that does not set it starts the server where it starts it.
-The variables are written `$NAME`, not `${NAME}`: Claude Code rewrites `${NAME}` in `args` from its own environment.
+The variables are written `$NAME`, not `${NAME}`: Claude Code rewrites `${NAME}` in `args` from its own environment
+(both checked with Claude Code 2.1.325).
 For an application below its checkout root, the entry also changes into the application directory from the checkout
 root (`git rev-parse --show-toplevel`): Bundler looks for the Gemfile up from the working directory, never down.
 The entry needs `sh` on the machine that runs the client; without one, use the explicit form below.
