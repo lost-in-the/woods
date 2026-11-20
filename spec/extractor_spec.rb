@@ -3028,8 +3028,8 @@ RSpec.describe Woods::Extractor do
       extractor.send(:write_unit_file, target, unit)
 
       # The *older* stamp stays on disk — deliberately. The equivalence
-      # oracle (spec/support/index_comparison.rb) lists extracted_at in
-      # VOLATILE_UNIT_KEYS: an untouched unit keeping an older stamp is
+      # oracle (spec/support/index_comparison.rb) masks extracted_at
+      # (unit_extracted_at): an untouched unit keeping an older stamp is
       # inside the contract.
       expect(JSON.parse(Woods::AtomicFile.read(target))['extracted_at']).to eq(base_time.iso8601)
     end

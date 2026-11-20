@@ -417,7 +417,7 @@ module Woods
 
         # Enhance with runtime introspection if available
         base_metadata[:job_type] = runtime_job_type(job_class) || :unknown if base_metadata[:job_type] == :unknown
-        base_metadata[:queue] ||= job_class.queue_name if job_class.respond_to?(:queue_name)
+        base_metadata[:queue] ||= runtime_queue(job_class, nil)
         adapter = queue_adapter_override(job_class)
         base_metadata[:queue_adapter] = adapter if adapter
 

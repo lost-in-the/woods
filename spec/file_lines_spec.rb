@@ -160,6 +160,40 @@ RSpec.describe Woods::FileLines do
                   'line' => file_line_of(file, 'before_save') + 5)
   end
 
+  describe 'inside one extraction run' do
+    def composite_model
+      class_line, rest = file.split("\n", 2)
+      concern = concern_file.sub('def rounded_total', "included { after_save :round }\n\n      def rounded_total")
+      model("#{header}#{class_line}\n\n#{concern_block('Billing::Rounding', concern)}\n#{rest}").tap do |unit|
+        unit.metadata[:callbacks] = [{ type: :before_save, filter: 'stamp' }, { type: :after_save, filter: 'round' }]
+      end
+    end
+
+    def record_tables(unit)
+      Woods::MethodTable.record(unit)
+      Woods::CallbackSites.record(unit)
+      unit
+    end
+
+    it 'decodes the inlined concern blocks of a unit once for its method table and callback sites' do
+      allow(Woods::MethodTable).to receive(:named_blocks).and_call_original
+
+      Woods::ParseCache.with { record_tables(composite_model) }
+
+      expect(Woods::MethodTable).to have_received(:named_blocks).once
+    end
+
+    it 'records the same method table and declarations as outside a run' do
+      inside = Woods::ParseCache.with { record_tables(composite_model) }
+      outside = record_tables(composite_model)
+
+      expect(inside.metadata[:methods]).to eq(outside.metadata[:methods])
+      expect(inside.metadata[:callbacks]).to eq(outside.metadata[:callbacks])
+      expect(inside.metadata[:callbacks].map { |callback| callback[:declaration]&.fetch('file_unit', nil) })
+        .to eq([nil, 'Billing::Rounding'])
+    end
+  end
+
   it 'reports no file line for a line Woods added' do
     unit = model(header + file)
     locator = described_class.for(unit)

@@ -10,6 +10,13 @@ module Woods
     # publication in one generation. A reference-only rewrite is not extraction
     # and must not refresh runtime metadata, timestamps or Git facts.
     module Extraction # rubocop:disable Metrics/ModuleLength -- shared full/incremental atomic publication hooks
+      # The metadata the pass reads: {Declarations} confirms macros against
+      # associations, callbacks, filters and scopes, {SourceContributors}
+      # places a unit built from several files, and {Projector} reads the line
+      # map. Copying the rest of a unit's metadata cost more than the pass.
+      REFERENCE_METADATA_KEYS = %w[associations callbacks filters scopes source_contributors
+                                   source_contributors_version source_line_map].freeze
+
       private
 
       def enrich_source_references_full
@@ -36,7 +43,7 @@ module Woods
           key = [unit.type.to_s, unit.identifier]
           raw = @source_reference_occurrences&.fetch(key, []) || []
           # The projector answers [] for no occurrences without reading the
-          # record, and building one deep-copies the unit's whole metadata.
+          # record, and building one deep-copies part of the unit's metadata.
           unit.metadata[:references] = raw.empty? ? [] : projector.call(reference_record(unit), raw)
         end
       end
@@ -52,8 +59,9 @@ module Woods
       end
 
       def reference_record(unit)
+        metadata = unit.metadata.select { |key, _value| REFERENCE_METADATA_KEYS.include?(key.to_s) }
         { 'type' => unit.type.to_s, 'identifier' => unit.identifier, 'file_path' => unit.file_path,
-          'source_code' => unit.source_code, 'metadata' => JSON.parse(JSON.generate(unit.metadata)),
+          'source_code' => unit.source_code, 'metadata' => JSON.parse(JSON.generate(metadata)),
           'dependencies' => JSON.parse(JSON.generate(unit.dependencies)) }
       end
 
@@ -136,6 +144,30 @@ module Woods
         end
         write_source_reference_cache(result)
         touched
+      end
+
+      # Units of the preceding generation whose source holds a constant
+      # reference with a segment in +leaves+, read off the baseline cache
+      # without parsing. A unit counts for every file its source inlines.
+      # @param leaves [Set<String>] constant name segments
+      # @return [Array<String>] identifiers
+      def source_reference_owners_naming(leaves)
+        paths = source_reference_paths_naming(leaves)
+        return [] if paths.empty?
+
+        @source_reference_baseline.fetch('owners').filter_map do |owner|
+          owner['identifier'] if (owner['file_paths'] || [owner['file_path']]).any? { |path| paths.include?(path) }
+        end.uniq
+      end
+
+      # @param leaves [Set<String>] constant name segments
+      # @return [Set<String>] cached source paths holding such a reference
+      def source_reference_paths_naming(leaves)
+        files = @source_reference_baseline&.fetch('files') || {}
+        files.filter_map do |path, entry|
+          references = entry.dig('analysis', 'references')
+          path if references.any? { |reference| reference['name'].split('::').any? { |name| leaves.include?(name) } }
+        end.to_set
       end
 
       def source_reference_unchanged?(data, edges, references)
