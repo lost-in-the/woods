@@ -471,8 +471,10 @@ module Woods
           lines.concat(traversal_coverage_lines(data))
           lines.concat(dependent_counts_lines(data))
 
-          nodes.each do |id, info|
-            depth = fetch_key(info, :depth) || 0
+          # Each row under a listed parent, not under the row printed before it (#1041).
+          TraversalTree.rows(nodes).each do |row|
+            id = row.id
+            info = row.info
             deps = fetch_key(info, :deps, [])
             # Present only where one identifier names units of several types,
             # so the reader is told rather than shown one of them silently.
@@ -480,10 +482,11 @@ module Woods
             # Likewise for the database: the reader sets it only in a graph
             # spanning more than one.
             database = fetch_key(info, :database)
-            indent = '  ' * depth
+            indent = '  ' * row.level
             suffix = types ? " (#{Array(types).join(', ')})" : ''
             suffix += " [#{database}]" if database
             suffix += mapped_test_suffix(info)
+            suffix += " (depth #{TraversalTree.depth(info)})" if row.detached
             lines << "#{indent}- **#{id}**#{suffix}"
             deps.each { |d| lines << "#{indent}  - #{d}" }
           end
