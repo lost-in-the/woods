@@ -43,10 +43,30 @@ RSpec.describe 'CI matrix cancellation' do
                                                    'if' => "${{ env.WOODS_CI_ROW_ACTIVE == 'true' && " \
                                                            "(!cancelled() && matrix.ruby-version == '3.3') }}"))
     commands = jobs.fetch('rails-required').fetch('steps').filter_map { |step| step['run'] }.join("\n")
-    expect(commands).to include('spec/integration/library_contributors_spec.rb',
-                                'spec/integration/incremental_runtime_spec.rb',
-                                'spec/integration/state_machine_forms_spec.rb',
-                                'spec/integration/component_ownership_spec.rb')
+    expect(commands).to include('spec/integration/library_contributors_spec.rb')
+    fixtures = jobs.fetch('rails-fixtures').fetch('steps')
+    fixture_commands = fixtures.filter_map { |step| step['run'] }.join("\n")
+    expect(fixture_commands).to include('spec/integration/incremental_runtime_spec.rb',
+                                        'spec/integration/state_machine_forms_spec.rb',
+                                        'spec/integration/component_ownership_spec.rb')
+  end
+
+  # The fixture bundles run beside the Rails 7.2 row, not after it. Outside a
+  # matrix no sibling's failure cancels them, and every event runs them, as
+  # the Rails 7.2 row they came from runs on every event.
+  it 'runs the Rails 7.2 fixture bundles in their own job on every event' do
+    job = jobs.fetch('rails-fixtures')
+    expect(job).not_to have_key('strategy')
+    expect(job).not_to have_key('needs')
+    expect(job).not_to have_key('if')
+    expect(job.fetch('name')).to eq('Rails fixture bundles (Ruby 3.3 / Rails 7.2)')
+    expect(job.fetch('env')).to eq('WOODS_RUN_BOOTED_APP' => '1')
+    gemfiles = job.fetch('steps').filter_map { |step| step.dig('env', 'BUNDLE_GEMFILE') }.uniq
+    expect(gemfiles).to contain_exactly('gemfiles/serializers.gemfile', 'gemfiles/state_machines.gemfile',
+                                        'gemfiles/components.gemfile')
+    expect(job.fetch('steps').filter_map { |step| step['if'] }).to be_empty
+    rails = jobs.fetch('rails-required').fetch('steps').filter_map { |step| step.dig('env', 'BUNDLE_GEMFILE') }
+    expect(rails & gemfiles).to be_empty
   end
 
   it 'fails the coverage check unless both unit jobs succeed' do

@@ -23,6 +23,7 @@ REQUIRED_CI_JOBS = {
   'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache + Redis)',
   'http-transport' => 'MCP transports (official clients)',
   'minimum-dependencies' => 'Minimum runtime dependencies (Ruby 3.0)',
+  'rails-fixtures' => 'Rails fixture bundles (Ruby 3.3 / Rails 7.2)',
   'coverage' => 'coverage',
   'security' => 'security',
   'lint' => 'lint',

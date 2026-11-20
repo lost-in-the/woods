@@ -104,6 +104,7 @@ RSpec.describe 'release validation' do
     {
       'test' => 'Unit specs (Ruby 4.0)',
       'rails-matrix' => 'Booted extraction (Ruby 4.0 / Rails 8.1)',
+      'rails-fixtures' => 'Rails fixture bundles (Ruby 3.3 / Rails 7.2)',
       'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache + Redis)',
       'http-transport' => 'MCP transports (official clients)',
       'minimum-dependencies' => 'Minimum runtime dependencies (Ruby 3.0)',
