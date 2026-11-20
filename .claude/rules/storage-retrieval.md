@@ -9,7 +9,9 @@ paths:
 Rules:
 - Every storage adapter (vector, metadata, graph) implements a common interface. See `docs/INTERNALS.md` — "What storage backends are available?" for the interface contracts.
 - Shipped backends: vector stores are in-memory, pgvector, and Qdrant; metadata stores are in-memory and SQLite; the graph store is in-memory. Anything else raises from `Builder`. Do not document or code against adapters that do not exist.
-- The **host app's** database must stay agnostic (MySQL or PostgreSQL): any SQL the Console layer or extractors run against the host must work on both. Woods' own stores are the fixed set above.
+- The **host app's** database must stay agnostic (MySQL or PostgreSQL):
+  any SQL the extractors run against the host must work on both.
+  Woods' own stores are the fixed set above.
 - Durable stores (pgvector, Qdrant) implement `each_id`, not `each_entry`. Never detect either with `respond_to?` — the Interface defines both as raising stubs. Use ownership checks (`implements_own?` pattern, B-108).
 - `MetadataStore::Interface#snapshot_version` is a real default (nil, "tracks no changes"), not a raising stub. Every in-place write on the in-memory adapter must advance it; the retriever's scope corpus (`Retrieval::ScopeCorpus`, kept per pipeline by `ScopeCorpusCell`) is valid only while it matches. Never return a version that can stand across a content change.
 - All retrieval operations produce a `RetrievalTrace` object for observability. Never return bare results without trace metadata.

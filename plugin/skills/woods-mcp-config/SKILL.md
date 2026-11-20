@@ -1,6 +1,6 @@
 ---
 name: woods-mcp-config
-description: Connect MCP clients (.mcp.json, Claude Code) to a Rails app's Woods index, or keep a deprecated Console.
+description: Connect MCP clients (.mcp.json, Claude Code) to a Rails app's Woods index.
 ---
 
 # Woods MCP configuration
@@ -12,13 +12,6 @@ before relying on this. Keep the supporting executable for update/removal before
 a permanent downgrade; never delete a receipt to bypass a conflict. Use a private
 real directory for plan files when the system temporary path is a symlink. Follow
 the [portability guidance](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_SETUP.md#managed-claude-code-configuration).
-
-For builds containing #597's launcher repair (included in Woods 2.1; not included in
-`2.0.1`),
-`config/console.yml` must be a supported top-level mapping with string keys and
-mode-appropriate options. Nested or unsupported configuration is refused before
-launch rather than silently selecting local mode. Check the installed revision
-and follow the [Console configuration guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONSOLE_MCP_SETUP.md).
 
 ## Managed configuration availability
 
@@ -43,15 +36,12 @@ bin/rails woods:stats
 
 This skill describes the Woods 2.x line; the authoritative minimum version lives in the marketplace entry. Operate only against capabilities the recorded installed version provides. Detect the MCP client, app root, host vs Docker Rails process, the filesystem context that contains the application bundle and index, and whether live-data access is actually required.
 
-Default to Index-only.
+Configure the Index Server only.
 It reads generated code context and exposes 16 tools (15 before Woods `2.2.0`, which adds `path`).
-Do not offer Console MCP for a new setup, even when the user needs live data.
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-For a runtime observation, suggest `bin/rails runner` or a focused spec.
-For live data, suggest an agent owned by the application, with its own limited permissions.
-Shapes 2 and 3 below maintain an existing Console configuration.
-Console MCP boots Rails and reads live data; ask before changing it.
+The Console MCP server was removed in Woods 2.2.0; never configure it, on any version.
+When a client already has a Console entry, offer to remove it as the
+[removal page](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_REMOVED.md#cleaning-up-after-an-upgrade)
+describes, and keep the Index Server entry.
 
 Initialization guidance (#402) is available in Woods `2.0.0.beta3`; check the
 installed gem before expecting MCP `instructions`. Supporting servers provide
@@ -66,8 +56,7 @@ The packaged Index process does not load Rails initializers. Session and Notion
 tool registration requires an explicitly configured custom/embedded process;
 application configuration alone does not wire them into a separate executable.
 Use `bin/rails woods:notion_sync` for ordinary application export and verify
-`tools/list` for custom capabilities. For a custom Console path, configure it
-before Railtie initialization and restart. See the
+`tools/list` for custom capabilities. See the
 [process boundaries](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/MCP_SERVERS.md#conditional-index-capabilities).
 
 ## Shape 1: Index-only
@@ -205,79 +194,14 @@ offering `WOODS_WATCH_TRUST_FOREIGN_HOST=1` in the MCP environment. It makes
 `woods_status.watch.alive` use the same bounded freshness policy as task readers;
 see [cross-host liveness](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md#cross-host-liveness).
 
-## Shape 2: Index plus an existing Console (deprecated)
-
-For an existing, authorized Console setup only.
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-The live-data master switch stays on in the Rails initializer; the process exits while it is false:
-
-```ruby
-Woods.configure do |config|
-  config.console_mcp_enabled = true
-  config.console_mcp_token = ENV["WOODS_CONSOLE_MCP_TOKEN"]
-end
-```
-
-The token authenticates HTTP requests and is not sent by a stdio client.
-Before suggesting `console_mcp_http_enabled = false`, verify that the installed
-version supports it: the option is available in Woods `2.0.0.beta3`. Supported
-stdio-only hosts can set it to `false` and omit the HTTP token; older
-versions require the token at production boot whenever Console is enabled.
-For HTTP, retain a strong token, allowed origins and TLS. Use installed-version
-tagged documentation; the [canonical Console guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONSOLE_MCP_SETUP.md)
-is pinned to Woods 2.1; use the installed version's tag when it differs.
-
-Prefer the automatic Rails middleware mount. Per-instance guards for legacy
-manual mounts are included in Woods `2.0.1` and `1.6.4`; verify the installed
-version, loaded gem path and any Git revision before relying on them. A plugin
-update does not patch the server. Follow the installed version's Console guide
-and leave HTTP disabled for stdio-only use.
-
-Then add a direct Console process:
-
-```json
-"woods-console": {
-  "command": "bundle",
-  "args": ["exec", "woods-console-mcp"],
-  "cwd": "/absolute/path/to/app"
-}
-```
-
-For Docker/SSH, configure `~/.woods/console.yml` or `WOODS_CONSOLE_CONFIG`; the launcher owns process replacement. Direct Docker stdio uses `docker exec -i`, or `docker compose exec -T` to disable Compose's pseudo-TTY while retaining stdin.
-
-Woods 2.1 prefers the selected app's executable
-`bin/rake` in direct mode. A relative `directory` in `console.yml` is relative to
-the launcher's initial `cwd`. Record the installed revision before relying on
-this preference; explicit commands still win.
-
-Reserve stdout for MCP. Through Woods `2.0.0.beta4`, configure the Console
-process's Rails logger to use stderr or a file, including logs during queries.
-Runtime stdout isolation is included in Woods `2.0.0`; verify the installed
-revision before relying on it. Use the rake entry point to capture Rails boot
-output as well.
-
-Console registers nine default tools. `config.console_embedded_read_tools = true` explicitly adds `console_sql` and `console_query` for eleven total. Tier 2, Tier 3, and `console_eval` are inventory-only in supported packaged modes.
-
-## Shape 3: Authenticated Console HTTP (deprecated)
-
-Use only for an existing Console setup, after authorization and server-side setup:
-
-```json
-"woods-console": {
-  "type": "streamable-http",
-  "url": "https://app.example.test/mcp/console",
-  "headers": { "Authorization": "Bearer <token>" }
-}
-```
-
-Require `console_mcp_enabled`, a strong token, allowed origins, TLS, and the Console security controls. Never commit the token or expose an unauthenticated listener.
-
 ## Verify
 
-Reconnect through the client so it performs its supported MCP negotiation. Clients on current MCP protocol revisions use per-request metadata/discovery; older clients initialize first — the server supports both. Call `woods_status`, `search`, and `lookup`. For Console, inspect the registered list and call `console_status` only in the authorized environment.
+Reconnect through the client so it performs its supported MCP negotiation.
+Clients on current MCP protocol revisions use per-request metadata/discovery; older clients initialize first — the
+server supports both.
+Call `woods_status`, `search`, and `lookup`.
 
-Do not use an isolated raw JSON-RPC request as proof of MCP health. Do not claim conditional Index or inventory-only Console schemas are callable.
+Do not use an isolated raw JSON-RPC request as proof of MCP health. Do not claim conditional Index schemas are callable.
 
 Canonical guide: [MCP_SERVERS.md](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/MCP_SERVERS.md).
 

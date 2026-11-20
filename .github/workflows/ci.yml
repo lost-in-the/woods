@@ -248,7 +248,6 @@ jobs:
           spec/integration/concurrent_extraction_pool_spec.rb
           spec/integration/writer_fencing_booted_spec.rb
           spec/integration/declaration_identity_spec.rb
-          spec/integration/console_credential_rotation_spec.rb
           spec/integration/session_controller_identity_spec.rb
           spec/integration/flow_action_owner_spec.rb
           spec/integration/multi_database_extraction_spec.rb
@@ -259,21 +258,11 @@ jobs:
           spec/integration/source_output_spec.rb
           spec/integration/source_manifest_capacity_spec.rb
           spec/integration/worktree_seed_task_spec.rb
-          spec/console/transport_boot_spec.rb
-          spec/console/stdio_e2e_spec.rb
-          spec/console/collection_redaction_spec.rb
-          spec/console/association_count_runtime_spec.rb
-          spec/console/http_eager_load_failure_spec.rb
           spec/extractors/flow_incremental_spec.rb
           spec/integration/watch_daemon_spec.rb
           spec/generators/install_generator_spec.rb
           spec/integration/watch_startup_spec.rb
           spec/integration/managed_watch_spec.rb
-          spec/integration/console_sqlite_policy_spec.rb
-          spec/integration/console_typed_eav_policy_spec.rb
-          spec/integration/console_sqlite_keyword_functions_spec.rb
-          spec/integration/console_resolved_relation_policy_spec.rb
-          spec/integration/console_credential_serialization_spec.rb
           spec/integration/multi_worktree_spec.rb
           spec/integration/inflected_naming_spec.rb
           spec/integration/assigned_value_classes_spec.rb
@@ -436,9 +425,6 @@ jobs:
         run: >-
           bundle exec rspec
           spec/integration/live_backends_spec.rb
-          spec/integration/console_sql_dialects_spec.rb
-          spec/integration/console_collection_redaction_spec.rb
-          spec/integration/console_mysql_collection_redaction_spec.rb
           spec/integration/solid_cache_compatibility_spec.rb
           spec/cache/redis_cache_store_live_spec.rb
           spec/session_tracer/redis_store_live_spec.rb

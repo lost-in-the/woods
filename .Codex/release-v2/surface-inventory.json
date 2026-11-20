@@ -972,166 +972,6 @@
       }
     ]
   },
-  "console_mcp": {
-    "schemas": [
-      {
-        "name": "console_aggregate",
-        "tier": 1
-      },
-      {
-        "name": "console_association_count",
-        "tier": 1
-      },
-      {
-        "name": "console_cache_stats",
-        "tier": 3
-      },
-      {
-        "name": "console_channel_status",
-        "tier": 3
-      },
-      {
-        "name": "console_check_eligibility",
-        "tier": 2
-      },
-      {
-        "name": "console_check_policy",
-        "tier": 2
-      },
-      {
-        "name": "console_check_setting",
-        "tier": 2
-      },
-      {
-        "name": "console_count",
-        "tier": 1
-      },
-      {
-        "name": "console_data_snapshot",
-        "tier": 2
-      },
-      {
-        "name": "console_decorate",
-        "tier": 2
-      },
-      {
-        "name": "console_diagnose_model",
-        "tier": 2
-      },
-      {
-        "name": "console_error_rates",
-        "tier": 3
-      },
-      {
-        "name": "console_eval",
-        "tier": 4
-      },
-      {
-        "name": "console_find",
-        "tier": 1
-      },
-      {
-        "name": "console_job_failures",
-        "tier": 3
-      },
-      {
-        "name": "console_job_find",
-        "tier": 3
-      },
-      {
-        "name": "console_job_queues",
-        "tier": 3
-      },
-      {
-        "name": "console_job_schedule",
-        "tier": 3
-      },
-      {
-        "name": "console_pluck",
-        "tier": 1
-      },
-      {
-        "name": "console_query",
-        "tier": 4
-      },
-      {
-        "name": "console_recent",
-        "tier": 1
-      },
-      {
-        "name": "console_redis_info",
-        "tier": 3
-      },
-      {
-        "name": "console_sample",
-        "tier": 1
-      },
-      {
-        "name": "console_schema",
-        "tier": 1
-      },
-      {
-        "name": "console_slow_endpoints",
-        "tier": 3
-      },
-      {
-        "name": "console_sql",
-        "tier": 4
-      },
-      {
-        "name": "console_status",
-        "tier": 1
-      },
-      {
-        "name": "console_throughput",
-        "tier": 3
-      },
-      {
-        "name": "console_update_setting",
-        "tier": 2
-      },
-      {
-        "name": "console_validate_record",
-        "tier": 2
-      },
-      {
-        "name": "console_validate_with",
-        "tier": 2
-      }
-    ],
-    "tiers": {
-      "1": 9,
-      "2": 9,
-      "3": 10,
-      "4": 3
-    },
-    "executable_modes": {
-      "embedded": [
-        "console_aggregate",
-        "console_association_count",
-        "console_count",
-        "console_find",
-        "console_pluck",
-        "console_recent",
-        "console_sample",
-        "console_schema",
-        "console_status"
-      ],
-      "embedded_read": [
-        "console_aggregate",
-        "console_association_count",
-        "console_count",
-        "console_find",
-        "console_pluck",
-        "console_query",
-        "console_recent",
-        "console_sample",
-        "console_schema",
-        "console_sql",
-        "console_status"
-      ]
-    }
-  },
   "tasks_methods": [
     "build_embed_indexer",
     "build_resolved_config",
@@ -1190,9 +1030,6 @@
   ],
   "counts": {
     "configuration_attributes": 174,
-    "console_mcp_default_tools": 9,
-    "console_mcp_read_tools": 11,
-    "console_mcp_schemas": 31,
     "executables": 9,
     "extractor_registrations": 42,
     "index_mcp_resource_templates": 2,
@@ -1224,12 +1061,8 @@
       }
     ],
     "docs/CONSOLE_MCP_SETUP.md": [],
-    "docs/DOCKER_SETUP.md": [
-      {
-        "surface": "console_mcp_read_tools",
-        "count": 11
-      }
-    ],
+    "docs/CONSOLE_REMOVED.md": [],
+    "docs/DOCKER_SETUP.md": [],
     "docs/EMBEDDING_MODELS.md": [],
     "docs/EVALUATION.md": [],
     "docs/EXTRACTOR_REFERENCE.md": [
@@ -1284,10 +1117,6 @@
       {
         "surface": "unit_types",
         "count": 47
-      },
-      {
-        "surface": "console_mcp_read_tools",
-        "count": 11
       }
     ],
     "docs/MARKDOWN_EXPORT.md": [],
@@ -1296,18 +1125,6 @@
       {
         "surface": "index_mcp_tools",
         "count": 32
-      },
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
-      },
-      {
-        "surface": "console_mcp_default_tools",
-        "count": 9
-      },
-      {
-        "surface": "console_mcp_read_tools",
-        "count": 11
       }
     ],
     "docs/MCP_TOOL_COOKBOOK.md": [],

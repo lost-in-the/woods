@@ -215,7 +215,6 @@ Lint/DuplicateBranch:
 Lint/UnusedBlockArgument:
   Exclude:
     - 'lib/woods/mcp/server.rb'
-    - 'lib/woods/console/server.rb'
 
 # Top-level module docs already in CLAUDE.md/README
 Style/Documentation:

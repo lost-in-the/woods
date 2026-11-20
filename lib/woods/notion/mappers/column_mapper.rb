@@ -89,8 +89,8 @@ module Woods
 
         def scanner
           @scanner ||= begin
-            require 'woods/console/credential_scanner'
-            Woods::Console::CredentialScanner.new
+            require 'woods/credential_scanner'
+            Woods::CredentialScanner.new
           end
         end
 

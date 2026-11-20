@@ -53,7 +53,6 @@ Create a branch from current `main`. Keep each pull request to one logical chang
 |---|---|
 | `lib/woods/extractor.rb`, `lib/woods/extractors/` | Runtime Rails extraction pipeline and extractors |
 | `lib/woods/mcp/` | Read-only Index MCP server and protocol behavior |
-| `lib/woods/console/` | Live Rails Console MCP and safeguards |
 | `lib/woods/storage/`, `lib/woods/embedding/`, `lib/woods/retrieval/` | Persistence, vectors, and semantic retrieval |
 | `lib/tasks/` | Rails/Rake operational interface |
 | `spec/` | Unit, contract, and opt-in integration specs |
@@ -212,13 +211,13 @@ version/platform list, lockfile, candidate gem and SHA-256 under the
 The probe exercises lexical retrieval and typed lookup over a synthetic published
 index, MCP SDK dispatch, Prism parsing, and MessagePack snapshots. It also boots
 an actual Rails 6.0.0 API-style app, loads Woods tasks, and checks the real Rails
-middleware stack for disabled Console passthrough, authorized requests, missing
+middleware stack for the removed Console's refusal, authorized requests, missing
 and incorrect token refusal, and forbidden origins. Static serving is explicitly
 disabled: Rails 6.0.0's own Static middleware predates Ruby 3 keyword forwarding.
 This is a bounded Woods runtime-floor contract, not evidence that arbitrary
 Rails 6.0.0 applications boot on Ruby 3. The booted Rails matrix uses compatible
-patch releases and covers full extraction; enabled database-backed Console and
-optional storage/provider combinations remain in their separate lanes.
+patch releases and covers full extraction; optional storage/provider
+combinations remain in their separate lanes.
 
 The exact-floor job is required by release CI validation. Changing a runtime
 lower bound requires updating its explicit pin and retaining a successful
@@ -233,10 +232,12 @@ The opt-in `live-backends` lane verifies behavior against PostgreSQL/pgvector an
 ```bash
 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile bundle install
 WOODS_RUN_LIVE_BACKENDS=1 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile \
-  bin/rspec spec/integration/live_backends_spec.rb spec/integration/console_sql_dialects_spec.rb
+  bin/rspec spec/integration/live_backends_spec.rb spec/integration/solid_cache_compatibility_spec.rb
 ```
 
-The lane expects reachable PostgreSQL/pgvector, MySQL, and Qdrant services. Configure endpoints with `WOODS_PG_URL`, `WOODS_MYSQL_URL`, and `WOODS_QDRANT_URL`. The Console contracts exercise blocked-table enforcement and legitimate SQL on both database dialects. New adapter behavior that depends on a real server belongs in this lane.
+The lane expects reachable PostgreSQL/pgvector, MySQL, and Qdrant services.
+Configure endpoints with `WOODS_PG_URL`, `WOODS_MYSQL_URL`, and `WOODS_QDRANT_URL`.
+New adapter behavior that depends on a real server belongs in this lane.
 
 ### Solid Cache session compatibility
 
@@ -348,7 +349,7 @@ Update the canonical owner for any changed contract:
 | Configuration key/default | `docs/CONFIGURATION_REFERENCE.md` |
 | MCP setup or registered tools | `docs/MCP_SERVERS.md` |
 | Agent query workflow | `docs/AGENT_GUIDE.md` |
-| Console security/transport | `docs/CONSOLE_MCP_SETUP.md` |
+| Console removal | `docs/CONSOLE_REMOVED.md` |
 | Major-version behavior | `docs/UPGRADING_TO_2.md` |
 | Failure diagnosis | `docs/TROUBLESHOOTING.md` |
 

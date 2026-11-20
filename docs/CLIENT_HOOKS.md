@@ -44,7 +44,7 @@ export WOODS_HOOKS_ENABLED=1
 export WOODS_OUTPUT=tmp/woods
 ```
 
-`WOODS_HOOKS_DISABLED=1` always wins. Enablement does not authorize Console MCP,
+`WOODS_HOOKS_DISABLED=1` always wins. Enablement does not authorize
 provider calls, user configuration writes, or daemon lifecycle changes.
 
 ## OpenCode project registration

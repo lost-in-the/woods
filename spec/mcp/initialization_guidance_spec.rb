@@ -54,9 +54,10 @@ RSpec.describe 'Index MCP initialization guidance' do
     expect(text).not_to include('provider unavailable')
   end
 
-  it 'does not grant Console or maintenance authorization' do
+  it 'does not grant live data or maintenance authorization' do
     expect(initialize_result(build).fetch('instructions'))
-      .to include('Registration does not authorize extraction, configuration changes, or live Console access')
+      .to include('Registration does not authorize extraction, configuration changes, ' \
+                  'or access to live application data')
   end
 
   it 'lists only registered tools, including every combination of specialized wiring' do

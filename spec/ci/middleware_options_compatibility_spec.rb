@@ -2,8 +2,6 @@
 
 require 'spec_helper'
 require 'woods'
-require 'woods/console/rack_middleware'
-require 'woods/console/server'
 require 'woods/mcp/bearer_auth'
 require 'woods/mcp/origin_guard'
 
@@ -41,22 +39,7 @@ RSpec.describe 'Rails positional middleware options' do
     expect(middleware.call('HTTP_ORIGIN' => 'http://localhost', 'HTTP_HOST' => 'localhost').first).to eq(200)
   end
 
-  it 'preserves explicit false and nil Console keyword values through server construction' do
-    pool = double('pool')
-    base = class_double('ActiveRecord::Base', connection_pool: pool, descendants: []).as_stubbed_const
-    expect(base).not_to receive(:connection)
-    allow(Woods::Console::Server).to receive(:build_embedded)
-    middleware = Woods::Console::RackMiddleware.new(
-      app, { embedded_read_tools: true, unsafe_eval_confirmation: Object.new, unsafe_eval_audit_log_path: '/old' },
-      embedded_read_tools: false, unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil
-    )
-    middleware.send(:build_embedded_server)
-    expect(Woods::Console::Server).to have_received(:build_embedded).with(
-      hash_including(read_tools_enabled: false, unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil)
-    )
-  end
-
-  [Woods::MCP::BearerAuth, Woods::MCP::OriginGuard, Woods::Console::RackMiddleware].each do |middleware_class|
+  [Woods::MCP::BearerAuth, Woods::MCP::OriginGuard].each do |middleware_class|
     it "rejects unknown positional and explicit options for #{middleware_class}" do
       required = middleware_class == Woods::MCP::BearerAuth ? { token: token } : {}
       expect { middleware_class.new(app, required.merge(typo: true)) }.to raise_error(ArgumentError, /unknown keyword/)

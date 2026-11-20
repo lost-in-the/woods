@@ -4,7 +4,8 @@ Reference for `exe/woods-mcp-http`, the Index Server's HTTP transport, for hosts
 
 ## What's shipped
 
-- **`exe/woods-mcp-http`**: the only HTTP entry point. There is no `--http` flag on `woods-mcp` and no `Woods::MCP::RackMiddleware` for the Index Server (the Console Server has its own separate `RackMiddleware`, see [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md)).
+- **`exe/woods-mcp-http`**: the only HTTP entry point.
+  There is no `--http` flag on `woods-mcp` and no `Woods::MCP::RackMiddleware` for the Index Server.
 - Built on `MCP::Server::Transports::StreamableHTTPTransport` from the `mcp` gem (`>= 1.2, < 2.0`), which implements MCP protocol version 2026-07-28 (legacy `initialize` still served for older clients).
 - **Stateless by default.** `WOODS_MCP_HTTP_STATELESS=0` restores legacy session mode.
 - **Bearer auth** (`WOODS_MCP_HTTP_TOKEN`) and an **origin guard** (`WOODS_MCP_HTTP_ALLOWED_ORIGINS`), see [Security](#security).
@@ -130,9 +131,9 @@ entry when refusing malformed origin configuration, including under a POSIX
 Configured origins are literal values, with lowercasing, one trailing slash
 removed and HTTP(S) default-port normalization. Wildcard-looking hostnames are
 literal hostnames, not patterns. A nonempty explicit list replaces browser-origin
-defaults, including loopback; add the loopback browser origins you need. Console's
-configured defaults are HTTP loopback; the Index defaults include HTTP and HTTPS
-loopback. Loopback **Host** acceptance is separate from browser-origin acceptance.
+defaults, including loopback; add the loopback browser origins you need.
+The Index defaults include HTTP and HTTPS loopback.
+Loopback **Host** acceptance is separate from browser-origin acceptance.
 
 Ruby-configured 2.x origin entries reject surrounding whitespace; 1.6.4 trims it.
 The `woods-mcp-http` comma-separated environment setting trims each entry on both
@@ -143,7 +144,7 @@ or arbitrary cross-port access.
 The guards read the actual `Origin` and `Host`; `Forwarded` and
 `X-Forwarded-*` do not replace them. Preserve the public Host through a proxy.
 A genuinely absent Host is accepted by the Host policy, but any supplied Origin
-must still pass its own check. Console requests and token-configured Index
+must still pass its own check. Token-configured Index
 requests still require bearer authentication before dispatch. The loopback-only
 Index mode without a token retains its documented unauthenticated behavior;
 CORS preflights do not dispatch tools.

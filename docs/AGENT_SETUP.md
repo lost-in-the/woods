@@ -3,8 +3,7 @@
 Use this runbook when a coding agent installs or configures Woods 2.0 in an existing Rails repository.
 The goal is a small, reviewable change and a working structural Index Server.
 Semantic retrieval is a separate opt-in.
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
+The Console MCP server was removed in Woods 2.2.0. See [CONSOLE_REMOVED.md](CONSOLE_REMOVED.md).
 
 ## Default decision
 
@@ -14,7 +13,6 @@ Install the structural index only unless the user explicitly asks for another ca
 |---|---:|---|
 | Extract Rails code and schema structure | On | No |
 | Local or hosted embeddings | Off | Yes: adds a service, credentials, cost, or generated vectors |
-| Console MCP (deprecated, removed in Woods 3.0) | Off; never enabled in a new setup | Existing setups only: changing one boots Rails and can read live application data |
 | HTTP MCP transport | Off | Yes: expands network exposure |
 | Purging or rebuilding durable stores | Off | Yes: can remove Woods-owned data |
 
@@ -50,12 +48,9 @@ If the user wants ranked discovery through `codebase_retrieve`, offer [explicit 
 
 For semantic matching, discuss local Ollama or hosted OpenAI and the appropriate vector store separately; adding a provider still requires authorization. See [Backend matrix](BACKEND_MATRIX.md).
 
-Do not configure Console MCP in a new setup, even when the user needs live data.
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
-For an existing Console configuration, do not infer permission to change it from “set up Woods” or “set up MCP.”
-The Index Server reads generated code context; the Console Server can read live data.
+The Console MCP server no longer exists; never set up live data access without the user's authorization.
+Remove a Console entry left in an MCP client configuration, and keep the Index Server entry.
+The Index Server reads generated code context only.
 
 ## 3. Install on a branch
 
@@ -348,8 +343,7 @@ Report these boundaries in the handoff:
 
 Get explicit user approval before:
 
-- changing an existing Console MCP configuration, or granting access to a live database;
-- enabling `console_embedded_read_tools`, `console_sql`, or `console_query`;
+- granting access to a live database;
 - adding an API key, hosted embedding provider, Qdrant, pgvector, or Ollama service;
 - exposing MCP over HTTP, selecting bind addresses, or configuring bearer tokens;
 - overriding a purge guard or deleting/rebuilding Woods durable data;
@@ -381,7 +375,6 @@ Verified capabilities:
 - woods_status current: yes/no
 - search/lookup/dependents checked: yes/no
 - retrieval: disabled/lexical/semantic (provider when semantic)
-- Console MCP: not configured / existing setup kept (authorization)
 - automatic structural updates: disabled/enabled (owner and actual startup command)
 - served root/index and completed startup catch-up:
 - edit and planned restart observed through existing MCP connection:
@@ -395,7 +388,15 @@ Never report a capability as enabled solely because its schema exists in source.
 
 ## Copyable prompt for an installation agent
 
-> Install Woods 2.x in this Rails repository using https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md. Select a published version and follow that version's tag documentation and supported capabilities. Start with read-only preflight and preserve unrelated changes. Default to the structural Index Server; do not enable embeddings, Console MCP, HTTP transport, secrets, or purge overrides without asking me. Inspect generated files before migrating, run extraction and validation in the app's normal execution environment, configure a project-scoped MCP server in the same filesystem context as the application bundle and index, and verify `woods_status`, `search`, `lookup` with the discovered identifier and type, and `dependents`. Finish with the runbook's handoff report.
+> Install Woods 2.x in this Rails repository using https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md.
+> Select a published version and follow that version's tag documentation and supported capabilities.
+> Start with read-only preflight and preserve unrelated changes.
+> Default to the structural Index Server; do not enable embeddings, HTTP transport, secrets, or purge overrides without
+> asking me.
+> Inspect generated files before migrating, run extraction and validation in the app's normal execution environment,
+> configure a project-scoped MCP server in the same filesystem context as the application bundle and index, and verify
+> `woods_status`, `search`, `lookup` with the discovered identifier and type, and `dependents`.
+> Finish with the runbook's handoff report.
 
 ## Related guides
 

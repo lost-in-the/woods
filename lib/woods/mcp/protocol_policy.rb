@@ -2,7 +2,7 @@
 
 module Woods
   module MCP
-    # Protocol-level policy shared by both MCP servers (index and console).
+    # Protocol-level policy of the Index Server.
     #
     # Everything here is a decision the MCP 2026-07-28 revision asks a server to
     # make but the SDK cannot make for us: how long a list/read result stays

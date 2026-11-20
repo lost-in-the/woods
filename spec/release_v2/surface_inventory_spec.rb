@@ -80,47 +80,12 @@ RSpec.describe 'release-v2 public-surface inventory' do
       .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, %r{docs/MCP_SERVERS\.md})
   end
 
-  it 'rejects a drifted Console MCP heading count in the current guide' do
-    documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
-    original = File.read(documentation_path, encoding: Encoding::UTF_8)
-    changed = original.sub(
-      '### Tool inventory (31 schemas; 9 registered by default)',
-      '### Tool inventory (30 schemas; 9 registered by default)'
-    )
-    expect(changed).not_to eq(original)
+  it 'inventories no Console MCP surface beyond its removal tombstones' do
+    inventory = surface_inventory.inventory
 
-    allow(surface_inventory).to receive(:read_utf8).with(Pathname.new(documentation_path)).and_return(changed)
-
-    expect { surface_inventory.verify! }
-      .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, /MCP_SERVERS\.md/)
-  end
-
-  it 'rejects a drifted Console MCP default registration count in the current guide' do
-    documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
-    original = File.read(documentation_path, encoding: Encoding::UTF_8)
-    changed = original.sub(
-      '### Tool inventory (31 schemas; 9 registered by default)',
-      '### Tool inventory (31 schemas; 8 registered by default)'
-    )
-    expect(changed).not_to eq(original)
-
-    allow(surface_inventory).to receive(:read_utf8).with(Pathname.new(documentation_path)).and_return(changed)
-
-    expect { surface_inventory.verify! }
-      .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, /MCP_SERVERS\.md/)
-  end
-
-  it 'derives each Console executable mode from the registration contract' do
-    modes = surface_inventory.inventory.fetch('console_mcp').fetch('executable_modes')
-
-    expect(modes.fetch('embedded')).to contain_exactly(
-      *Woods::Console::Server::TIER1_TOOLS.map { |name| "console_#{name}" }
-    )
-    expect(modes.fetch('embedded_read')).to contain_exactly(
-      *Woods::Console::Server::TIER1_TOOLS.map { |name| "console_#{name}" },
-      'console_sql',
-      'console_query'
-    )
+    expect(inventory).not_to have_key('console_mcp')
+    expect(inventory.fetch('counts').keys.grep(/console/)).to eq([])
+    expect(inventory.fetch('executables')).to include('woods-console', 'woods-console-mcp')
   end
 
   it 'derives current guides from the documentation index' do

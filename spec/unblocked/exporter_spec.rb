@@ -727,7 +727,7 @@ RSpec.describe Woods::Unblocked::Exporter do
 
       it 'records an error and does not overwrite the remote doc with an empty body' do
         stub_single_user
-        allow(Woods::Console::CredentialScanner).to receive(:new).and_raise(StandardError, 'scanner broken')
+        allow(Woods::CredentialScanner).to receive(:new).and_raise(StandardError, 'scanner broken')
 
         stats = exporter.sync_all
         expect(client).not_to have_received(:put_document)

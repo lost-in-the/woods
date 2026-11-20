@@ -13,7 +13,6 @@ against 1.6.x is assessed against `main` first; if the current release line is
 unaffected, the 1.6.x backport is still issued until the date above.
 A backport to 1.6.x is issued for a vulnerability, as defined under
 [What Counts as a Vulnerability](#what-counts-as-a-vulnerability).
-Console hardening is not backported.
 
 Upgrading from 1.x to 2.0 requires one clean re-index, see the Upgrade Notes in
 [CHANGELOG.md](CHANGELOG.md) and [docs/UPGRADING_TO_2.md](docs/UPGRADING_TO_2.md).
@@ -48,45 +47,27 @@ The lists below are examples of that test, not the whole of it.
 These get a private fix, a patch release and a published advisory:
 
 - Reaching an MCP server without the authentication it requires, or from a host it refuses to bind.
-- Reaching the Console when it is disabled, or a Console tool the operator did not opt in to.
+- On 2.1.x or 1.6.x, reaching the Console when it is disabled, or a Console tool the operator did not opt in to.
 - A write, eval or shell capability reachable in a supported packaged mode.
 - Code execution, or a file read or write outside the configured output directory.
 - One client receiving another client's data.
 
-Gaps in the Console's best-effort protections are hardening, not vulnerabilities.
-They are fixed in public and ship in the next ordinary release:
-
-- Redaction, masking or the credential scanner missing a value, in a response or in a log.
-- The SQL policy admitting a read it was meant to refuse.
-- Rollback not undoing something, including inside a host's own transaction.
-- Missing limits on result size, time or memory.
-
-The vulnerability rule wins when a report fits both lists.
-A gap that also crosses one of the boundaries above is a vulnerability, even when it matches a hardening example.
+The Console Server was removed in Woods 2.2.0 instead of being hardened further.
+On 2.1.x and 1.6.x, a gap in its best-effort protections is not a vulnerability and gets no fix:
+redaction, masking or the credential scanner missing a value, the SQL policy admitting a read, rollback not undoing
+something, or a missing limit on result size, time or memory.
+Turn the Console off there; see [docs/CONSOLE_REMOVED.md](docs/CONSOLE_REMOVED.md).
+A gap that also crosses one of the boundaries above is a vulnerability.
 Report privately when you are not sure which it is.
-A report stays private while its impact is unclear, and is treated as public hardening
-only after the maintainer confirms that it crosses none of those boundaries.
-
-The reason is the trust model.
-The Console gives an agent live access to a Rails application, and only an operator can turn it on.
-Its protections reduce accidental disclosure.
-They do not make that access safe, as [Limits of the Console protections](#limits-of-the-console-protections) states.
-
-You may still report a hardening gap privately if you prefer.
-It is fixed the same way, and credited the same way.
-
-When a hardening fix changes what a configured redaction or table block hides,
-the release notes call it out under "Security hardening", so operators who rely on it know to upgrade.
 
 ## What to Expect
 
 - **Acknowledgment** within 48 hours of your report
-- **Assessment** within 1 week, we'll confirm whether it is a vulnerability or hardening, and its severity
+- **Assessment** within 1 week, we'll confirm whether it is a vulnerability, and its severity
 - **Fix timeline** for a vulnerability depends on severity:
   - **Critical** (remote code execution, authentication bypass): Patch within 7 days
   - **High** (a write or eval capability, another client's data): Patch within 14 days
   - **Medium/Low**: Patch in the next release
-- **Console hardening**: fixed on `main` in public, shipped in the next ordinary release
 
 ## Disclosure Timeline
 
@@ -102,7 +83,6 @@ Woods runs inside your Rails application and has access to:
 - **Database schema**: column names, types, indexes, and foreign keys (no row data)
 - **Git metadata**: commit history, contributors, file change frequency
 - **Optional session traces**: session/trace identifiers, request paths and controller/action timelines when session tracing is configured
-- **Live database rows** (Console MCP Server), queries within a rolled-back transaction
 
 ### Output Directory
 
@@ -110,13 +90,10 @@ Extracted data is written to `tmp/woods/` by default. This directory contains yo
 
 ### Console Server
 
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0; until then this policy still covers it.
-
-The Console MCP Server provides live database access through a five-layer defense-in-depth stack (feature gate, blocked tables, credential scanner, column redaction, and SqlValidator + rolled-back transactions). Only 9 read-only tools register by default; the optional Tier 4 read tools (`console_sql`, `console_query`) require explicit opt-in via `console_embedded_read_tools` and are constrained by `SqlValidator`'s read-only function allowlist, rolled-back transactions and a default 100-row cap on `console_sql` results (host-configurable, truncation reported). No executable tool requires confirmation or writes a privileged audit log, the confirmation/audit contracts belong to Tier 2/3 and `console_eval`, which are inventory-only and never registered. Rolled-back transactions do not undo async side effects (`perform_later`, `deliver_later`, HTTP egress), so treat the Console Server as an admin-trust boundary, not a sandbox. It is an optional development/staging capability: keep `console_mcp_enabled` false in production. Running it in production is at the operator's own risk. See [docs/CONSOLE_MCP_SETUP.md. Safety Model](docs/CONSOLE_MCP_SETUP.md#safety-model) for the full breakdown.
-
-#### Limits of the Console protections
-
-The Console can expose live data, including credentials, to the agent that uses it. Woods makes a best effort to reduce accidental disclosure (column and key/value redaction, a credential scanner, table blocking, SQL validation, and rolled-back transactions), but these are not guarantees. They cover known columns, known credential formats and the Rails credentials available at boot. Unknown, custom, shorter or transformed secrets may not be recognized, and rollback does not stop callbacks, other connections or external effects. Woods and its developers and contributors do not accept responsibility for data an agent reads because an operator enabled the Console and let it. Woods is provided "as is", without warranty of any kind, under the MIT License (see [LICENSE.txt](LICENSE.txt)). Use a least-privilege database role, enable the Console only where you are authorized to disclose the data it can reach, and prefer the Index Server for structural questions.
+The Console Server, which gave an agent live database access, was removed in Woods 2.2.0.
+On 2.1.x and 1.6.x it is off by default; the
+[2.1.0 security policy](https://github.com/lost-in-the/woods/blob/v2.1.0/SECURITY.md#console-server)
+describes the limits of its protections.
 
 ### MCP Transport
 
@@ -128,15 +105,24 @@ If extraction output leaks, what can an attacker do with it?
 
 **What the output contains.** Application source code (inlined concerns, callback-resolved behavior), database schema (column names, types, indexes, foreign keys), route tables, migration history, gem versions, and git metadata (commit history, contributor emails, file change frequency).
 
-**Structural extraction boundaries.** Structural extraction collects schema rather than dumping live database rows, and does not intentionally collect environment variables or the Rails encrypted credential store. This is not a guarantee that output is free of secrets or customer information: extracted source can contain hardcoded values, comments or examples, and Index tools can return that source. Console redaction and export-specific scrubbing do not sanitize the structural index.
+**Structural extraction boundaries.** Structural extraction collects schema rather than dumping live database rows, and
+does not intentionally collect environment variables or the Rails encrypted credential store.
+This is not a guarantee that output is free of secrets or customer information: extracted source can contain hardcoded
+values, comments or examples, and Index tools can return that source.
+Export-specific scrubbing does not sanitize the structural index.
 
-**Optional session data.** When configured, session tracing records session/trace identifiers, request paths and controller/action timelines. Request paths and identifiers can contain sensitive user information. The configured session store controls where these records live; configured Index session tools can return them. Session storage and access need their own retention and authorization controls. Console MCP is a separate live-data boundary described above.
+**Optional session data.** When configured, session tracing records session/trace identifiers, request paths and
+controller/action timelines.
+Request paths and identifiers can contain sensitive user information.
+The configured session store controls where these records live; configured Index session tools can return them.
+Session storage and access need their own retention and authorization controls.
 
 | Leak scenario | Attacker gains | Attacker does not gain |
 |---|---|---|
 | `tmp/woods/` directory exfiltrated | Source code, schema and metadata, including sensitive values present in source; session records if their store is configured here | No additional live database or shell access merely from possessing these files |
 | MCP Index Server token leaked (HTTP transport) | Access to published source/metadata and configured session tools, including sensitive content they contain | The packaged default does not boot Rails or provide live database queries or shell execution; custom tool wiring has its own access boundary |
 | Notion sync database compromised | Model and column summaries synced to Notion | Anything not mirrored, source code stays local |
-| Console MCP Server exposed (dev/staging) | Live database access constrained by TableGate, credential scanning, Redactor and SqlValidator; this remains admin-trust access | Supported packaged modes expose no write or eval tools; rollback and redaction have the limits described in the Console guide |
 
-**Mitigation.** Treat `tmp/woods/` as source-equivalent, keep it out of world-readable directories and public container images. Rotate `WOODS_MCP_HTTP_TOKEN` on compromise. Keep `console_mcp_enabled = false` in production regardless of environment, since the console layers are defense-in-depth and not primary controls.
+**Mitigation.** Treat `tmp/woods/` as source-equivalent, keep it out of world-readable directories and public container
+images.
+Rotate `WOODS_MCP_HTTP_TOKEN` on compromise.

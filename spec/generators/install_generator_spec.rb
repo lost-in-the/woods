@@ -72,20 +72,8 @@ RSpec.describe 'Install generator initializer template' do
     expect(content).to include('configure_with_preset')
   end
 
-  it 'template covers console_mcp options' do
-    expect(content).to include('console_mcp_enabled')
-    expect(content).to include('console_redacted_columns')
-  end
-
-  it 'template keeps console MCP disabled by default' do
-    # The enable line must be commented out
-    expect(content).to match(/^\s*#\s*config\.console_mcp_enabled\s*=\s*false/)
-  end
-
-  it 'template mentions all three defense layers' do
-    expect(content).to include('Layer 1')
-    expect(content).to include('Layer 2')
-    expect(content).to include('Layer 3')
+  it 'template offers no setting of the Console removed in 2.2.0' do
+    expect(content).not_to match(/console_|Console/)
   end
 
   # F8: TokenCounter is exact only with an injected, model-matched tokenizer;

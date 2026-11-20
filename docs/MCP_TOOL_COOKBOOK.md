@@ -34,14 +34,6 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 - ["Which associations cross a database boundary?"](#which-associations-cross-a-database-boundary)
 - ["What do we depend on that changes faster than we do?"](#what-do-we-depend-on-that-changes-faster-than-we-do)
 - ["How does Rails implement has_many?"](#how-does-rails-implement-has_many)
-**Data Exploration (Console Server)**
-- [Scope predicates](#scope-predicates)
-- ["How many active users do we have?"](#how-many-active-users-do-we-have)
-- ["Show me a sample order"](#show-me-a-sample-order)
-- ["What's the User table schema?"](#whats-the-user-table-schema)
-- ["What are the average order totals by status?"](#what-are-the-average-order-totals-by-status)
-- ["Find all email addresses for users who joined last month"](#find-all-email-addresses-for-users-who-joined-last-month)
-- ["Run a custom SQL query"](#run-a-custom-sql-query)
 **Semantic Search**
 - ["Find code related to subscription billing"](#find-code-related-to-subscription-billing)
 **Pipeline Management**
@@ -72,7 +64,9 @@ A tool that is not registered is absent from `tools/list`; clients see “tool n
 
 `codebase_retrieve` is always registered (no `retrieve` alias exists). Default semantic mode requires an embedding provider and a completed `woods:embed` run. Explicit `WOODS_RETRIEVAL_MODE=lexical` ranks published extraction units without a provider or embeddings; set it in the MCP process environment and restart the server. See [embedding-free lexical retrieval](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval).
 
-If an agent reports a missing tool, compare its request with the connected server's registered list and [MCP server boundaries](MCP_SERVERS.md#conditional-index-capabilities). The normal packaged executable does not wire operator or feedback collaborators. **Console Server tools are not all unconditionally registered**: 31 tool schemas exist as an inventory, but only the 9 Tier 1 tools are executable by default, or 11 with `console_embedded_read_tools: true` (adds `console_sql`/`console_query`). Tier 2, Tier 3, and `console_eval` are schema-only in every supported mode; there is no bridge or confirmation flow that unlocks them. See [MCP servers](MCP_SERVERS.md#console-server) for the supported inventory.
+If an agent reports a missing tool, compare its request with the connected server's registered list and [MCP server
+boundaries](MCP_SERVERS.md#conditional-index-capabilities).
+The normal packaged executable does not wire operator or feedback collaborators.
 
 ---
 
@@ -628,7 +622,7 @@ Every flow continues across async hops: a `perform_later` into the job's `perfor
 
 ### "Why is this page slow?"
 
-`console_slow_endpoints` is Tier 3, schema-only, not executable in any supported mode (see [Conditional Tools & Wiring](#conditional-tools--wiring)). Trace the code path directly instead:
+Woods does not measure runtime performance. Trace the code path directly instead:
 
 **Tool:** `trace_flow` (Index Server)
 
@@ -821,144 +815,6 @@ It is a sorted list of action names, present only when at least one of the contr
 ```
 
 **What you'll get:** Relevant Rails source units matching the keyword, the actual implementation from the installed gem. Useful for understanding framework behavior without leaving your AI tool.
-
----
-
-## Data Exploration (Console Server)
-
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-These recipes are for existing setups; see [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
-
-### Scope predicates
-
-Tools that accept a `scope` parameter (`console_count`, `console_sample`, `console_pluck`, `console_aggregate`, `console_association_count`, `console_recent`) support Ransack-style predicate suffixes on hash keys. Plain keys are treated as equality, suffixed keys build safe Arel predicates. Column names are validated against the model's schema, SQL injection via column names is not possible.
-
-| Suffix | SQL equivalent | Example |
-|--------|----------------|---------|
-| `_eq` | `col = value` | `{ "status_eq": "paid" }` |
-| `_not_eq` | `col != value` | `{ "status_not_eq": "cancelled" }` |
-| `_gt` | `col > value` | `{ "total_cents_gt": 1000 }` |
-| `_gteq` | `col >= value` | `{ "created_at_gteq": "2026-01-01" }` |
-| `_lt` | `col < value` | `{ "total_cents_lt": 5000 }` |
-| `_lteq` | `col <= value` | `{ "created_at_lteq": "2026-12-31" }` |
-| `_in` | `col IN (…)` | `{ "status_in": ["paid", "refunded"] }` |
-| `_not_in` | `col NOT IN (…)` | `{ "status_not_in": ["cancelled"] }` |
-| `_null` | `col IS NULL` (value: `true`) / `IS NOT NULL` (value: `false`) | `{ "deleted_at_null": true }` |
-| `_not_null` | `col IS NOT NULL` (value: `true`) / `IS NULL` (value: `false`) | `{ "email_not_null": true }` |
-| `_present` | `col IS NOT NULL AND col != ''` (value: `true`) | `{ "name_present": true }` |
-| `_blank` | `col IS NULL OR col = ''` (value: `true`) | `{ "notes_blank": true }` |
-| `_matches` | `col LIKE value` | `{ "email_matches": "%@example.com" }` |
-
-Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equality. You can mix both in a single scope:
-
-```json
-{ "status": "paid", "total_cents_gt": 1000, "created_at_gteq": "2026-01-01" }
-```
-
----
-
-### "How many active users do we have?"
-
-**Tool:** `console_count` (Console Server)
-
-```json
-{
-  "model": "User",
-  "scope": { "active": true }
-}
-```
-
-**What you'll get:** An integer count. The `scope` hash maps directly to ActiveRecord `where` conditions.
-
----
-
-### "Show me a sample order"
-
-**Tool:** `console_sample` (Console Server)
-
-```json
-{
-  "model": "Order",
-  "limit": 1
-}
-```
-
-**What you'll get:** A random order record with all columns. To focus on specific fields:
-
-```json
-{
-  "model": "Order",
-  "limit": 3,
-  "columns": ["id", "status", "total_cents", "created_at"],
-  "scope": { "status": "pending" }
-}
-```
-
----
-
-### "What's the User table schema?"
-
-**Tool:** `console_schema` (Console Server)
-
-```json
-{
-  "model": "User",
-  "include_indexes": true
-}
-```
-
-**What you'll get:** Column names, types, nullability, defaults, and (with `include_indexes: true`) all defined indexes. Reflects the live database schema, not migrations.
-
----
-
-### "What are the average order totals by status?"
-
-**Tool:** `console_aggregate` (Console Server)
-
-```json
-{
-  "model": "Order",
-  "function": "average",
-  "column": "total_cents",
-  "scope": { "status": "completed" }
-}
-```
-
-**What you'll get:** A single aggregate value. Functions: `sum`, `average`, `minimum`, `maximum`, `count`. The `column` parameter is required for every function except `count`, where it may be omitted to count all matching rows.
-
----
-
-### "Find all email addresses for users who joined last month"
-
-**Tool:** `console_pluck` (Console Server)
-
-```json
-{
-  "model": "User",
-  "columns": ["email"],
-  "scope": { "created_at_gteq": "2025-01-01" },
-  "limit": 100,
-  "distinct": true
-}
-```
-
-**What you'll get:** An array of email values. `distinct: true` removes duplicates.
-
----
-
-### "Run a custom SQL query"
-
-**Tool:** `console_sql` (Console Server, requires `console_embedded_read_tools: true`; see [MCP servers](MCP_SERVERS.md#console-server))
-
-```json
-{
-  "sql": "SELECT status, COUNT(*) as count FROM orders GROUP BY status ORDER BY count DESC",
-  "limit": 50
-}
-```
-
-**What you'll get:** Query results as an array of row hashes. Only `SELECT` and `WITH...SELECT` queries are permitted, all writes are rejected at the validator level before reaching the database.
 
 ---
 

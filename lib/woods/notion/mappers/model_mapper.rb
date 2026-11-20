@@ -88,8 +88,7 @@ module Woods
         # integration URLs with embedded passwords, or TODO references to
         # internal secrets. Without redaction those land verbatim in a
         # third-party SaaS database. This uses the same {CredentialScanner}
-        # that protects the Console MCP so Notion export inherits the same
-        # defenses.
+        # that redacts extracted configuration source.
         #
         # @return [String]
         def extract_description(source_code)
@@ -127,8 +126,8 @@ module Woods
 
         def scanner
           @scanner ||= begin
-            require 'woods/console/credential_scanner'
-            Woods::Console::CredentialScanner.new
+            require 'woods/credential_scanner'
+            Woods::CredentialScanner.new
           end
         end
 

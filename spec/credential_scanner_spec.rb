@@ -2,9 +2,9 @@
 
 require 'base64'
 require 'spec_helper'
-require 'woods/console/credential_scanner'
+require 'woods/credential_scanner'
 
-RSpec.describe Woods::Console::CredentialScanner do
+RSpec.describe Woods::CredentialScanner do
   subject(:scanner) { described_class.new }
 
   describe '#scan' do
@@ -521,51 +521,6 @@ RSpec.describe Woods::Console::CredentialScanner do
       scanner = described_class.new(disabled_patterns: %w[stripe_secret_key])
       value, = scanner.scan('sk_live_51Sx7cbE0QMvj9FH5xhCjCEIl6TDZXZRpfYE')
       expect(value).to include('sk_live_')
-    end
-  end
-
-  describe 'with a secret_index' do
-    let(:secret_index) do
-      Woods::Console::CredentialIndex.new(
-        secrets: %w[twilio_auth_token_xyzzyplugh hand_rolled_hmac_seed_value]
-      )
-    end
-
-    it 'redacts an indexed secret whose shape matches no pattern' do
-      scanner = described_class.new(secret_index: secret_index)
-      value, counts = scanner.scan('webhook secret = twilio_auth_token_xyzzyplugh today')
-      expect(value).to include('[REDACTED:credential]')
-      expect(value).not_to include('twilio_auth_token_xyzzyplugh')
-      expect(counts[:credential_index]).to eq(1)
-    end
-
-    it 'redacts the whole longer indexed credential in nested response data' do
-      index = Woods::Console::CredentialIndex.new(secrets: %w[synthetic_secret synthetic_secret_suffix])
-      scanner = described_class.new(secret_index: index)
-
-      value, counts = scanner.scan('record' => { 'note' => ['synthetic_secret_suffix'] })
-
-      expect(value).to eq('record' => { 'note' => ['[REDACTED:credential]'] })
-      expect(counts[:credential_index]).to eq(1)
-    end
-
-    it 'still applies shape patterns to other strings in the same scan' do
-      scanner = described_class.new(secret_index: secret_index)
-      value, counts = scanner.scan(
-        twilio: 'twilio_auth_token_xyzzyplugh',
-        stripe: 'sk_live_51Sx7cbE0QMvj9FH5xhCjCEIl6TDZXZRpfYE'
-      )
-      expect(value[:twilio]).to eq('[REDACTED:credential]')
-      expect(value[:stripe]).to eq('[REDACTED]')
-      expect(counts[:credential_index]).to eq(1)
-      expect(counts[:stripe_secret_key]).to eq(1)
-    end
-
-    it 'treats an empty index the same as no index' do
-      empty = Woods::Console::CredentialIndex.new(secrets: [])
-      scanner = described_class.new(secret_index: empty)
-      _, counts = scanner.scan('twilio_auth_token_xyzzyplugh')
-      expect(counts[:credential_index]).to be_nil
     end
   end
 

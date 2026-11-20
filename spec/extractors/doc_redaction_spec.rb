@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'woods/extractors/doc_redaction'
 
 RSpec.describe Woods::Extractors::DocRedaction do
-  # Synthetic values in the shapes the Console scanner knows.
+  # Synthetic values in the shapes the credential scanner knows.
   let(:stripe_key) { "sk_test_#{'a1B2' * 6}" }
   let(:aws_key) { "AKIA#{'ABCD1234' * 2}" }
 
@@ -12,7 +12,7 @@ RSpec.describe Woods::Extractors::DocRedaction do
     described_class.new.call(source, front_matter: front_matter, front_matter_lines: front_matter_lines)
   end
 
-  it 'redacts the credential shapes the Console scanner redacts and counts them' do
+  it 'redacts the credential shapes the credential scanner redacts and counts them' do
     text, counts = redact("# Setup\n\nexport STRIPE=#{stripe_key}\nAWS id `#{aws_key}`\n")
 
     expect(text).to eq("# Setup\n\nexport STRIPE=[REDACTED]\nAWS id `[REDACTED]`\n")

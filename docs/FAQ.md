@@ -23,15 +23,11 @@
 - [Why do some extractor types re-run wholesale on incremental runs?](#why-do-some-extractor-types-re-run-wholesale-on-incremental-runs)
 - [How long does extraction take?](#how-long-does-extraction-take)
 **MCP Servers**
-- [What's the difference between the Index Server and the Console Server?](#whats-the-difference-between-the-index-server-and-the-console-server)
-- [Why do I only see 9 console tools?](#why-do-i-only-see-9-console-tools)
-- [Is the Console Server safe to use?](#is-the-console-server-safe-to-use)
-- [How do I get access to SQL and structured query tools?](#how-do-i-get-access-to-sql-and-structured-query-tools)
+- [What happened to the Console Server?](#what-happened-to-the-console-server)
 - [Why do my parallel tool calls all fail when only one has a bad argument?](#why-do-my-parallel-tool-calls-all-fail-when-only-one-has-a-bad-argument)
 **Docker**
 - [Does extraction run inside or outside the container?](#does-extraction-run-inside-or-outside-the-container)
 - [Why does the Index Server say no published manifest exists after extraction?](#why-does-the-index-server-say-no-published-manifest-exists-after-extraction)
-- [How do I configure the Console Server with Docker?](#how-do-i-configure-the-console-server-with-docker)
 **Storage and Embeddings**
 - [What storage backends does Woods support?](#what-storage-backends-does-woods-support)
 - [What embedding providers does Woods support?](#what-embedding-providers-does-woods-support)
@@ -85,7 +81,10 @@ No. Extraction is entirely read-only. It uses ActiveRecord reflection APIs (`col
 
 ### Can I run Woods in production?
 
-Prefer extraction in development or CI and publish the generated index as a controlled artifact. The Index Server is read-only but its index contains source and schema context; HTTP deployments still require authentication, origin controls, and TLS. Leave the live-data Console Server disabled in production unless a deliberate security review and access policy authorize it. See [MCP HTTP transport](MCP_HTTP_TRANSPORT.md) and [Console MCP setup](CONSOLE_MCP_SETUP.md).
+Prefer extraction in development or CI and publish the generated index as a controlled artifact.
+The Index Server is read-only but its index contains source and schema context; HTTP deployments still require
+authentication, origin controls, and TLS.
+See [MCP HTTP transport](MCP_HTTP_TRANSPORT.md).
 
 ---
 
@@ -196,43 +195,11 @@ There is no reliable application-independent estimate. Rails boot/eager load, fr
 
 ## MCP Servers
 
-### What's the difference between the Index Server and the Console Server?
+### What happened to the Console Server?
 
-The Index Server reads pre-extracted JSON from disk and does not require Rails.
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
-The Console Server connects to a live Rails application and registers 9
-read-only model/schema tools by default, with `console_sql` and `console_query`
-available through explicit read-tool configuration.
-
----
-
-### Why do I only see 9 console tools?
-
-That is the default supported surface: count, sample, find, pluck, aggregate,
-association_count, schema, recent, and status. Enable
-`console_embedded_read_tools` to register SQL and query as well. The remaining
-schemas are inventory only.
-
----
-
-### Is the Console Server safe to use?
-
-The executable tools enforce the feature gate, blocked-table checks,
-credential scanning, configured column/EAV redaction, and rolled-back
-transactions. `console_sql` also runs through `SqlValidator`. These controls
-are defense in depth, not a primary authorization boundary.
-
----
-
-### How do I get access to SQL and structured query tools?
-
-Set `config.console_embedded_read_tools = true` in `Woods.configure`, or pass
-`embedded_read_tools: true` when mounting the Rack middleware. Tier 2, Tier 3,
-and `console_eval` are not registered in a supported mode.
-
-See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for setup details.
+The Console let an agent query a live application through Active Record.
+Keeping that safe is not viable as AI security concerns keep growing, so Woods no longer ships it.
+See [Console removed](CONSOLE_REMOVED.md).
 
 ---
 
@@ -246,14 +213,16 @@ This is an MCP client behavior, not a server bug. Some clients batch parallel to
 
 ### Does extraction run inside or outside the container?
 
-Extraction runs **inside** the container because it requires Rails to be booted. By default, launch the Index Server through the same application container so it can use the installed bundle and container index path; it still reads only static files and does not boot Rails. A host-side Index Server is optional when the host has the application bundle and can read the index volume. The Console Server connects to a booted Rails process inside the container.
+Extraction runs **inside** the container because it requires Rails to be booted.
+By default, launch the Index Server through the same application container so it can use the installed bundle and
+container index path; it still reads only static files and does not boot Rails.
+A host-side Index Server is optional when the host has the application bundle and can read the index volume.
 
 ```
 HOST                           APPLICATION CONTAINER
 ─────────────────              ─────────────────────────
 MCP client ── compose exec ──▶ woods-mcp (reads JSON)
 Rails commands ──────────────▶ rake extract (writes JSON)
-Console client ──────────────▶ rake console (queries Rails)
 ```
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker architecture guide.
@@ -277,37 +246,6 @@ The server is usually running in a different filesystem context from the path yo
 ```
 
 Verify the active v2 generation with `docker compose exec app bundle exec rake woods:validate` and `woods:stats`. Do not require a root `manifest.json`: Woods 2 normally publishes root `generation.json`, which points to the active payload manifest.
-
----
-
-### How do I configure the Console Server with Docker?
-
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-This answer is for existing setups.
-
-First enable the master `console_mcp_enabled` switch after reviewing the
-live-data trust boundary. For stdio-only use, explicitly set
-`console_mcp_http_enabled = false`; HTTP remains enabled by default for
-compatibility and requires its bearer token while enabled. Follow
-[Console MCP setup](CONSOLE_MCP_SETUP.md#option-a-stdio-via-rake-recommended)
-for the configuration. Then point the embedded-mode client (9 Tier 1 tools)
-at `docker compose exec -T` so Compose does not allocate a pseudo-TTY:
-
-```json
-{
-  "mcpServers": {
-    "codebase-console": {
-      "command": "docker",
-      "args": ["compose", "exec", "-T", "app",
-               "bundle", "exec", "rake", "woods:console"],
-      "cwd": "/absolute/host/path/to/app"
-    }
-  }
-}
-```
-
-Compose attaches stdin by default; `-T` disables the pseudo-TTY that would corrupt MCP framing. Plain `docker exec` uses `-i` instead. Enable `console_embedded_read_tools` when SQL/query should also be registered. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete examples.
 
 ---
 
@@ -526,12 +464,6 @@ Exclude a directory from eager loading instead:
 config.eager_load_paths -= [Rails.root.join('app/internal')]
 ```
 
-Use `console_redacted_columns` to redact sensitive column values from Console Server results without excluding extraction:
-
-```ruby
-config.console_redacted_columns = %w[password_digest api_key ssn token]
-```
-
 ---
 
 ## Troubleshooting
@@ -542,6 +474,5 @@ Quick links:
 
 - Extraction produces empty output → [Extraction Problems](TROUBLESHOOTING.md#extraction-produces-empty-or-incomplete-output)
 - "No manifest.json" error → [MCP Server Problems](TROUBLESHOOTING.md#no-manifestjson-error-when-starting-the-index-server)
-- Only 9 console tools visible → [MCP Server Problems](TROUBLESHOOTING.md#a-console-inventory-tool-is-not-listed)
 - Docker path confusion → [Docker Problems](TROUBLESHOOTING.md#path-confusion-index-server-uses-container-path)
 - Dimension mismatch on embeddings → [Embedding Problems](TROUBLESHOOTING.md#dimension-mismatch-error-when-querying-embeddings)

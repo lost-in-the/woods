@@ -583,47 +583,23 @@ and does not import JSON history. A retained JSON history needs an explicit
 `JsonSnapshotStore` reader if SQLite became available. Preserve the original
 backup and verify an old snapshot before resuming writers.
 
-## 5. Check Console separately
-
-For repeated missing-token boot warnings on a stdio-only host, check whether
-its installed version supports `console_mcp_http_enabled = false` before
-suggesting it; this option is available in Woods `2.0.0.beta3`. The default
-preserves HTTP enablement, so selecting stdio as a client alone does not
-suppress HTTP token validation. Never disable authentication on an HTTP
-endpoint to silence this warning.
-
-Console failures are live Rails/config/security failures, not Index failures. Verify authorized environment, Rails boot, `WOODS_CONSOLE_CONFIG` or direct `cwd`, blocked-table policy, credentials, and stderr.
-
-For stdio parse errors or response mismatches during tool calls, check for Rails
-logs on stdout. Through Woods `2.0.0.beta4`, stdout is restored after boot;
-configure the Console process's logger to use stderr or a file. Runtime stdout
-isolation is included in Woods `2.0.0`: verify a patched installed revision
-before relying on it. Prefer `bundle exec rake woods:console`; direct Rails
-runner invocation cannot capture output already emitted during Rails boot.
-See the [Console logging diagnosis](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONSOLE_MCP_SETUP.md#rails-logs-break-mcp-protocol).
-
 A stdio server that exits with status 1 right after one request, with
 `Encoding::CompatibilityError` or `EncodingError` on stderr, received a frame
 that is not valid UTF-8 (a byte-passthrough bridge or a non-conforming client).
-Included in Woods `2.1.1`: both stdio servers answer such a frame with JSON-RPC
+Included in Woods `2.1.1`: the stdio servers answer such a frame with JSON-RPC
 `-32700` plus one `[woods stdio] rejected frame` line on stderr and keep serving;
 verify the installed revision before relying on it, and fix the client either way,
 since the frame is refused, not repaired.
 
-For MySQL SQL refusals, inspect the executing session's `sql_mode` and the installed version's Console guide. Do not change quote modes to bypass a security refusal.
+## 5. Check for a removed Console
 
-For SQLite SQL refusals on `2.0.0.beta4` or a reviewed revision containing its Console corrections, consult the installed Console guide for supported identifier and table-reference syntax. Simplify the query to supported syntax; never relax the blocked-table or function policy. These builds also check resolved default scopes and scan normalized response values. Confirm a patched gem is published before recommending it, and check the installed version’s canonical Console guide; do not infer release availability from this plugin.
-
-Woods `2.0.1` includes per-mount HTTP guards, complete collection-cell redaction,
-longest exact-credential matching, and stricter SQL provenance/grammar checks.
-Verify the installed version, loaded gem path and any Git revision before relying
-on those protections. Keep automatic mounting, configured policies, and credential
-checks intact; use scalar projections or a structured query when SQL cannot
-preserve field identity. On an affected version, disable Console if those controls
-are required. See the
-[2.0.1 correction notes](https://github.com/lost-in-the/woods/blob/v2.0.1/docs/CONSOLE_MCP_SETUP.md#maintenance-policy-corrections).
-
-Nine tools are normal. Eleven appear only with `console_embedded_read_tools`. Do not chase Tier 2/3 or `console_eval`; they do not register in supported packaged modes. Never work around redaction, credential scanning, SQL validation, or a block.
+Woods 2.2.0 removed the Console MCP server; do not diagnose or repair a Console on any version.
+A boot that stops with `The Woods Console MCP server was removed in Woods 2.2.0` comes from a setting that turns
+the Console on (`console_mcp_enabled` or `console_embedded_read_tools`) or a hand-written
+`Woods::Console::RackMiddleware` mount.
+A client entry that runs `woods:console` or `woods-console-mcp` exits 1 with the same line.
+Remove each as the [clean-up steps](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_REMOVED.md#cleaning-up-after-an-upgrade)
+describe, and keep the Index Server entry.
 
 ## Report
 
@@ -822,15 +798,6 @@ for Git/path builds, the loaded revision before using them:
   before downgrading and real parent directories for temporary plans. See
   [managed configuration](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_SETUP.md#managed-claude-code-configuration).
 
-### Console HTTP remains unavailable after a Rails boot error
-
-In builds containing #597's HTTP repair (included in Woods 2.1), an eager-load
-`NameError` makes that worker return a stable, non-cacheable HTTP 503. Reproduce
-the application's eager loading, correct its naming or boot failure, and restart
-the worker; do not keep retrying against a partially loaded model registry or
-relax authentication/table rules. A 401 still indicates authentication failure.
-See [Console startup diagnostics](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONSOLE_MCP_SETUP.md).
-
 ### Missing default or parenthesized state machines
 
 The #594 literal state-machine repair is included in Woods 2.1; verify the
@@ -868,16 +835,3 @@ For reopened `lib/` units, inspect all `source_contributors`; primary `file_path
 is not complete ownership. Full extraction is required to rebuild the upgraded
 reference cache. Missing dependency-owned components/channels are intentional
 in supporting builds; app-owned mailers include parallel base-class branches.
-
-### Console read compatibility in 2.0.1 and 1.6.4
-
-Verify the installed version and loaded gem path, plus the locked revision for
-Git-sourced builds. Woods `2.0.1` and `1.6.4` refuse SQL relation/CTE column alias
-lists while redaction is active; typed EAV matching can intentionally mask extra
-values where tables share a final name or differ only by case. Keep the policy
-enabled and use explicit scalar columns or structured tools. Check exact
-sensitive-key spelling and configure binary secret columns for column redaction.
-Use the installed line's guide for adapter, timeout and projection limits:
-[2.0.1](https://github.com/lost-in-the/woods/blob/v2.0.1/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
-or [1.6.4](https://github.com/lost-in-the/woods/blob/v1.6.4/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility).
-A plugin update does not patch Woods or add 2.1 capabilities to an older gem.

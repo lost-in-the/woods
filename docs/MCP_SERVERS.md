@@ -1,23 +1,8 @@
 # MCP servers
 
-Woods provides two MCP servers with different purposes and trust boundaries.
-Use the Index Server for codebase work.
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
-
-## Choose a server
-
-| Question | Index Server | Console Server |
-|---|---|---|
-| What does it answer? | Code structure, resolved Rails behavior, dependencies, flows, and graph questions | Live model, schema, count, aggregate, sample, and optional read-only query questions |
-| What does it read? | A generated Woods index | A booted Rails app and its database |
-| Does it boot Rails? | No | Yes |
-| Packaged default | 16 tools | 9 tools |
-| Normal setup | Recommended | Deprecated, removed in Woods 3.0; disabled |
-| Main risk | Generated index may contain source and schema details | Responses may contain live application data |
-
-Do not enable Console MCP to compensate for a stale or missing index. Extract or refresh the Index Server instead.
+Woods provides one MCP server, the Index Server, for codebase work.
+The Console MCP server was removed in Woods 2.2.0.
+See [Console removed](CONSOLE_REMOVED.md).
 
 ## Index Server
 
@@ -414,7 +399,7 @@ configuration.
 
 Registration alone does not establish retrieval readiness: check `woods_status`
 before using `codebase_retrieve`, including after reload. The guidance grants
-no extraction, configuration-change, or Console authorization. Detailed usage
+no extraction or configuration-change authorization. Detailed usage
 belongs in the [agent guide](AGENT_GUIDE.md).
 
 This addition is included in Woods `2.0.0`. The SDK omits `instructions`
@@ -1385,89 +1370,13 @@ so a server started on one index cannot lock it while writing another.
 
 Use HTTP only for a deliberate shared or remote deployment. It expands the network boundary and requires authentication, origin restrictions, and TLS termination. Follow [MCP HTTP transport](MCP_HTTP_TRANSPORT.md); do not translate the stdio example into an unauthenticated public listener.
 
-
-## Console Server
-
-> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-> Existing setups keep working; new setups should not enable it.
-> This section is for existing setups; see [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
-
-The Console Server launches a Rails process through direct, Docker, or SSH connection configuration. It reads live data and must be treated as a separate security decision.
-
-### Start with the default mode
-
-Console MCP is disabled by default because it reads live application data. Enable the master switch in the Rails initializer only after reviewing the [Console security controls](CONSOLE_MCP_SETUP.md#configuration-options):
-
-```ruby
-Woods.configure do |config|
-  config.console_mcp_enabled = true
-  config.console_mcp_http_enabled = false # stdio-only
-end
-```
-
-This explicitly disables HTTP Console while retaining stdio access; no HTTP
-token is needed at boot. Existing configurations default to HTTP enabled.
-For HTTP deployment, enable the HTTP flag and configure its token, origins
-and TLS using the [Console setup guide](CONSOLE_MCP_SETUP.md#option-c-http-rack-middleware).
-
-Without a console connection file, the executable then launches the Rails task directly from its `cwd`:
-
-```json
-{
-  "mcpServers": {
-    "woods-console": {
-      "command": "bundle",
-      "args": ["exec", "woods-console-mcp"],
-      "cwd": "/absolute/path/to/your-rails-app"
-    }
-  }
-}
-```
-
-For Docker or SSH, create `~/.woods/console.yml` or set `WOODS_CONSOLE_CONFIG` to a specific YAML file. See [Console MCP setup](CONSOLE_MCP_SETUP.md) for connection examples and safeguards.
-
-### Tool inventory (31 schemas; 9 registered by default)
-
-The packaged default registers these nine tools:
-
-- `console_status`
-- `console_schema`
-- `console_find`
-- `console_count`
-- `console_aggregate`
-- `console_pluck`
-- `console_recent`
-- `console_sample`
-- `console_association_count`
-
-These tools use structured, read-only operations with validation, limits, blocked-table checks, credential scanning, and response redaction.
-
-### Optional embedded read tools (11 total)
-
-There are 11 with read tools enabled.
-
-Setting `console_embedded_read_tools` explicitly adds:
-
-- `console_sql`
-- `console_query`
-
-Both remain subject to Console security policy. SQL validation and rolled-back transactions reduce risk but do not make arbitrary production access a safe default.
-
-### Inventory-only schemas
-
-The source tree contains 31 Console schemas grouped into tiers. The packaged executable registers only the nine default tools or the eleven embedded-read tools above. Tier 2 domain helpers, Tier 3 operational analytics, and `console_eval` do not execute in a supported packaged mode.
-
-This distinction is intentional: schema inventory supports design and compatibility work, while registration defines what an MCP client can actually call.
-
 ## Security checklist
 
-Before enabling either server:
+Before enabling the server:
 
 - treat the generated index as source code and schema metadata;
 - keep project-scoped executable paths pinned to the intended bundle;
 - avoid secrets in command arguments or committed client configuration;
-- require explicit authorization for Console access and optional read tools;
-- use development or purpose-built read-only credentials where possible;
 - verify the callable tool list from the connected server, not from source inventory;
 - apply authentication, origin controls, and TLS before any HTTP exposure.
 

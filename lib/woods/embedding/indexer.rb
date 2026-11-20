@@ -14,8 +14,8 @@ require_relative '../chunking/semantic_chunker'
 require_relative '../util/uuid5'
 
 module Woods
-  # Standalone-require shim (same pattern as Console::Server and
-  # Storage::MetadataStore): ChunkSuffixCollision below inherits Woods::Error,
+  # Standalone-require shim (same pattern as Storage::MetadataStore):
+  # ChunkSuffixCollision below inherits Woods::Error,
   # which lib/woods.rb defines but an isolated require of this file does not.
   class Error < StandardError; end unless defined?(Woods::Error)
 

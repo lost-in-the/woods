@@ -91,8 +91,8 @@ RSpec.describe 'MCP tool structured errors' do
       config = Struct.new(:notion_api_token, :notion_database_ids,
                           :embedding_model, :embedding_provider, :vector_store,
                           :session_tracer_enabled, :enable_snapshots,
-                          :console_mcp_enabled, :session_store, :context_format).new(
-                            nil, {}, nil, nil, nil, false, false, false, nil, :markdown
+                          :session_store, :context_format).new(
+                            nil, {}, nil, nil, nil, false, false, nil, :markdown
                           )
       Woods.configuration = config
     end
@@ -110,8 +110,8 @@ RSpec.describe 'MCP tool structured errors' do
     before do
       config = Struct.new(:session_store, :embedding_model, :embedding_provider,
                           :vector_store, :session_tracer_enabled, :enable_snapshots,
-                          :notion_api_token, :console_mcp_enabled, :context_format).new(
-                            nil, nil, nil, nil, false, false, nil, false, :markdown
+                          :notion_api_token, :context_format).new(
+                            nil, nil, nil, nil, false, false, nil, :markdown
                           )
       Woods.configuration = config
     end

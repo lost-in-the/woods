@@ -7,8 +7,8 @@ require_relative 'input_budget'
 
 module Woods
   # Standalone-load guard — keeps `require 'woods/embedding/provider'`
-  # working without the top-level woods.rb (same pattern as storage/
-  # and console/). {Provider::RequestError} subclasses this at load time.
+  # working without the top-level woods.rb (same pattern as storage/).
+  # {Provider::RequestError} subclasses this at load time.
   class Error < StandardError; end unless defined?(Woods::Error)
 
   module Embedding

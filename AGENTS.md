@@ -20,7 +20,6 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for shared policy and [CLAUDE.md](CLAUDE
 |---|---|
 | Extraction and graph | `lib/woods/extractor.rb`, `lib/woods/extractors/`, `lib/woods/dependency_graph*`, `lib/woods/graph_*` |
 | Index MCP | `lib/woods/mcp/`, `exe/woods-mcp*` |
-| Console MCP | `lib/woods/console/`, `exe/woods-console-mcp` |
 | Storage/retrieval | `lib/woods/storage/`, `lib/woods/embedding/`, `lib/woods/retrieval/` |
 | Operational tasks | `lib/tasks/` |
 | Tests and Rails fixture | `spec/`, `spec/dummy/`, `gemfiles/` |
@@ -105,12 +104,12 @@ Use a supported Ruby (3.0 or later; the repository intentionally has no single v
 - Docker clients must use a path visible to the process that starts MCP. Prefer running MCP through the application container when Woods is installed only there; a host launch requires the host bundle and a host-visible index.
 - Keep stdout protocol-only. Normally leave `MCP_PROTOCOL_VERSION` unset so the SDK negotiates.
 
-### Console MCP
+### Console MCP (removed)
 
-- The Console Server boots Rails and can read live application data; it is optional and disabled by default.
-- Supported packaged modes register nine default tools or eleven with `console_embedded_read_tools`.
-- Tier 2, Tier 3, and `console_eval` are source inventory only and never execute in a supported packaged mode.
-- Do not weaken blocked-table, credential-scan, redaction, SQL-validation, or transaction safeguards to make a query pass.
+- The Console Server was removed in Woods 2.2.0; `docs/CONSOLE_REMOVED.md` says why and lists the cleanup steps.
+- `lib/woods/console.rb` keeps only tombstones: the `console_*` setters, `Woods::Console::RackMiddleware`,
+  `exe/woods-console`, `exe/woods-console-mcp` and `woods:console` stop with `Woods::Console::REMOVED_MESSAGE`.
+- Do not add live-data access back; the credential scanner moved to `lib/woods/credential_scanner.rb`.
 
 ## Public-surface evidence
 
@@ -131,7 +130,7 @@ Do not hand-edit generated evidence to make a check pass.
 - config keys/defaults: `docs/CONFIGURATION_REFERENCE.md`
 - MCP setup and callable surface: `docs/MCP_SERVERS.md`
 - MCP agent behavior: `docs/AGENT_GUIDE.md`
-- Console security: `docs/CONSOLE_MCP_SETUP.md`
+- Console removal: `docs/CONSOLE_REMOVED.md`
 - v1-to-v2 migration: `docs/UPGRADING_TO_2.md`
 - failures: `docs/TROUBLESHOOTING.md`
 - contributor policy: `CONTRIBUTING.md`

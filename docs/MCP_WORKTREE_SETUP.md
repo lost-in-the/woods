@@ -142,12 +142,6 @@ The Woods setup/configuration skills help configure a server; their presence alo
 2. Call the Index Server's `woods_status`. Check `identity` first (`root_name`, `branch`, `generation`, `client_matches`), then `index_dir` and available freshness/provenance information against the intended extraction. A successful connection to the wrong index is still the wrong setup.
 3. Use `search` and typed `lookup` for a known unit from that checkout. When checking a subagent, verify that it can call the inherited tools and is using the same intended index.
 
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-In an existing setup, the Console Server is a separate connection to a booted Rails application.
-Check it with `console_status` and verify its application/container separately.
-Console access is not required to verify the Index Server.
-
 ## Extraction Provenance in Worktrees (`git_branch` / `git_sha`)
 
 The published payload's `manifest.json` records the extraction's `git_branch` and `git_sha`. In a linked worktree, `.git` is a file containing a `gitdir:` pointer, often to an absolute host path. That private worktree directory also refers to the parent repository's shared Git data.
@@ -181,7 +175,3 @@ Inspect its configured bundle, index path, Compose project/service, and containe
 **Two registrations use the same server name**
 
 Check the client's [scope precedence](https://code.claude.com/docs/en/mcp#scope-hierarchy-and-precedence) and the effective connection shown by `/mcp`. Do not assume the two definitions merge or that a project file overrides every other scope.
-
-**Console SQL/query tools are absent or unsupported**
-
-Console read-tool availability is configured separately from registration. Follow [Console MCP setup](CONSOLE_MCP_SETUP.md) for the supported 9-tool default and optional 11-tool mode.
