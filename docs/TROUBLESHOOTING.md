@@ -359,6 +359,12 @@ manifest Git SHA do not establish that per-unit history was available, and
 ### Git enrichment warns that history could not be read completely
 
 Woods 2.0 uses an explicit merge-diff mode requiring **Git 2.31 or newer**.
+On an older git, extraction prints one line on the terminal and publishes the reason `git_too_old`:
+
+```text
+[Woods] Git 2.30.2 is older than 2.31, which git enrichment and git_commits.json need; extraction continues without them.
+```
+
 First confirm the installed Woods version.
 Check `git --version` inside the same container/process environment as extraction,
 and upgrade git if it is older. On a supported version, check that the application's
@@ -413,7 +419,7 @@ manifest carries a `git_enrichment` summary, shown by `woods_status`
 |---|---|
 | `available` | Git worked and every eligible unit has facts |
 | `degraded` | Some eligible units have facts and some do not (for example Git failed during an incremental run and earlier facts were retained) |
-| `unavailable` | No eligible unit has facts (`no_repository`, `head_unresolvable`, `shallow_repository`, `history_read_failed`, `git_executable_missing`) |
+| `unavailable` | No eligible unit has facts (`no_repository`, `head_unresolvable`, `shallow_repository`, `history_read_failed`, `git_executable_missing`, `git_too_old`) |
 | `unknown` | The manifest predates the summary |
 
 `capture.refreshed` counts facts read in this publication; `capture.retained`

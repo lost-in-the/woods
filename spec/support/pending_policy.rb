@@ -87,7 +87,13 @@ module PendingPolicy
       ['spec/integration/multi_database_extraction_spec.rb', "Booted multi-database extraction #{description}",
        'Active Record before 7.2 leases connections in its own schema reads',
        -> { (spec = Gem.loaded_specs['activerecord']) && spec.version < Gem::Version.new('7.2') }]
-    end
+    end,
+    # The real-git example needs a machine whose git predates 2.31; CI images
+    # carry a newer one, where the stubbed-version examples cover the notice.
+    ['spec/integration/git_version_notice_spec.rb',
+     'Git version notice says so with the real git of a machine older than 2.31',
+     'needs a git older than 2.31',
+     -> { !Woods::GitVersion.too_old?(Woods::GitVersion.parse(Open3.capture2('git', '--version').first)) }]
   ].freeze
 
   def self.allowed?(example)

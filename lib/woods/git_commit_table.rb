@@ -160,7 +160,7 @@ module Woods
     rescue StandardError => e
       @logger.warn('[Woods] Git commit table omitted: history could not be read completely. ' \
                    'Git 2.31 or newer is required; check the application repository and git installation. ' \
-                   "(#{e.class})")
+                   "(#{e.class}: #{e.message})")
       nil
     end
 
