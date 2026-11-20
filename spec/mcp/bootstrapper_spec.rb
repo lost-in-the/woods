@@ -447,6 +447,17 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
+    it 'prints a hydration failure without connection details' do
+      Dir.mktmpdir do |dir|
+        allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty).and_raise(
+          RuntimeError, 'unable to open database: dbname=d-fakesecretmarker password=pw-fakesecretmarker'
+        )
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to output(satisfy { |err| err.include?('metadata hydration failed') && !err.include?('fakesecretmarker') })
+          .to_stderr
+      end
+    end
+
     it 'returns a non-nil retriever when metadata hydration raises a transient StandardError' do
       Dir.mktmpdir do |dir|
         allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty).and_raise(
@@ -486,6 +497,78 @@ RSpec.describe Woods::MCP::Bootstrapper do
                                                  ))
         expect { described_class.build_retriever(index_dir: dir) }
           .to raise_error(Woods::MCP::BootstrapError, /Unknown metadata_store: cassandra/)
+      end
+    end
+
+    def write_fake_snapshot(dir)
+      stores = { 'vector_store' => 'in_memory', 'metadata_store' => 'in_memory', 'graph_store' => 'in_memory' }
+      File.write(File.join(dir, 'woods.json'), JSON.generate(
+                                                 'schema_version' => 1, 'gem_version' => Woods::VERSION,
+                                                 'created_at' => '2026-11-16T00:00:00Z', 'stores' => stores,
+                                                 'embedding_provider' => {
+                                                   'class' => 'Woods::Embedding::Provider::Fake',
+                                                   'model' => 'fake', 'dimension' => 4
+                                                 }
+                                               ))
+    end
+
+    it 'reports a store the Builder cannot open as a BootstrapError, not a backtrace' do
+      Woods.configuration.embedding_provider = nil
+      Woods.configuration.embedding_options = nil
+      Dir.mktmpdir do |dir|
+        write_fake_snapshot(dir)
+        allow_any_instance_of(Woods::Builder).to receive(:build_retriever)
+          .and_raise(Woods::Error, 'pgvector schema setup failed (ActiveRecord::ConnectionNotEstablished: refused)')
+
+        expect { described_class.build_retriever(index_dir: dir) }.to raise_error(Woods::MCP::BootstrapError) do |e|
+          expect(e.message).to eq('index stores could not be opened: pgvector schema setup failed ' \
+                                  '(ActiveRecord::ConnectionNotEstablished: refused)')
+          expect(e.details).to eq(stores: { vector_store: :in_memory, metadata_store: :in_memory,
+                                            graph_store: :in_memory })
+        end
+      end
+    end
+
+    it 'reports a store failure without connection details, and without it as the cause' do
+      Woods.configuration.embedding_provider = nil
+      Woods.configuration.embedding_options = nil
+      Dir.mktmpdir do |dir|
+        write_fake_snapshot(dir)
+        allow_any_instance_of(Woods::Builder).to receive(:build_retriever)
+          .and_raise(Woods::Error, "setup failed:\nhost=db-fakesecretmarker password='pw-fakesecretmarker'")
+
+        expect { described_class.build_retriever(index_dir: dir) }.to raise_error(Woods::MCP::BootstrapError) do |e|
+          expect(e.message).to eq('index stores could not be opened: setup failed: host=[REDACTED] password=[REDACTED]')
+          expect(e.cause).to be_nil
+        end
+      end
+    end
+
+    it 'reports an unknown store adapter with no connection detail anywhere in the cause chain' do
+      Woods.configuration.embedding_provider = nil
+      Woods.configuration.embedding_options = nil
+      Dir.mktmpdir do |dir|
+        write_fake_snapshot(dir)
+        allow_any_instance_of(Woods::Builder).to receive(:build_retriever)
+          .and_raise(ArgumentError, 'Unknown vector_store: cassandra (host=db-fakesecretmarker)')
+
+        expect { described_class.build_retriever(index_dir: dir) }.to raise_error(Woods::MCP::BootstrapError) do |e|
+          expect(e.message).to start_with('Unknown vector_store: cassandra (host=[REDACTED]')
+          expect(cause_chain_text(e)).not_to include('fakesecretmarker')
+        end
+      end
+    end
+
+    it 'keeps a ConfigurationError from the Builder as it is, for the exes to print' do
+      Woods.configuration.embedding_provider = nil
+      Woods.configuration.embedding_options = nil
+      Dir.mktmpdir do |dir|
+        write_fake_snapshot(dir)
+        allow_any_instance_of(Woods::Builder).to receive(:build_retriever)
+          .and_raise(Woods::ConfigurationError, 'dimensions disagree')
+
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::ConfigurationError, 'dimensions disagree')
       end
     end
 
@@ -1154,6 +1237,32 @@ RSpec.describe Woods::MCP::Bootstrapper do
         # A and B got their metadata back-filled; D keeps empty hash
         ids = vs.each_entry.map { |id, _, _| id }
         expect(ids).to contain_exactly('A', 'B', 'D')
+      end
+    end
+
+    # A reload error's message is redacted; the error it translates carries
+    # the same text unredacted, so it is not kept as the cause.
+    {
+      'resolving the configuration' => -> { allow(Woods::MCP::ConfigResolver).to receive(:resolve) },
+      'loading the vector candidate' => -> { allow(Woods::Storage::Snapshotter::Vector).to receive(:load_dump_dir) },
+      'loading the metadata candidate' => lambda {
+        allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_dump_dir)
+      },
+      'hydrating the graph candidate' => -> { allow(described_class).to receive(:hydrated_graph_store) }
+    }.each do |step, stub|
+      it "degrades a reload that fails #{step} with no connection detail anywhere in the cause chain" do
+        Dir.mktmpdir do |dir|
+          write_artifact(dir, vector_entries: [['User', [1.0, 0.0, 0.0, 0.0], {}]],
+                              metadata_entries: [['User', { 'type' => 'model' }]])
+          retriever, = described_class.build_retriever(index_dir: dir)
+          instance_exec(&stub).and_raise(RuntimeError, 'failed: host=db-fakesecretmarker password=pw-fakesecretmarker')
+
+          expect { described_class.reload_stores!(retriever, index_dir: dir) }
+            .to raise_error(Woods::MCP::ReloadDegraded) do |error|
+              expect(error.message).to include('host=[REDACTED]')
+              expect(cause_chain_text(error)).not_to include('fakesecretmarker')
+            end
+        end
       end
     end
   end

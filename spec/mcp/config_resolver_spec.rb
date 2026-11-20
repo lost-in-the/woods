@@ -197,6 +197,82 @@ RSpec.describe Woods::MCP::ConfigResolver do
         end
       end
 
+      describe 'the pgvector connection' do
+        let(:pg_url) { 'postgres://u-fakesecretmarker:pw%40fakesecretmarker@db-fakesecretmarker:5432/woods' }
+        let(:adapter) { double('Adapter') }
+
+        after { Woods::DiagnosticRedaction.clear! }
+
+        def write_pgvector_snapshot(dir)
+          write_woods_json(dir, woods_json_hash.merge(
+                                  'stores' => woods_json_hash.fetch('stores').merge('vector_store' => 'pgvector'),
+                                  'store_options' => { 'vector_store' => { 'dimensions' => 768 } }
+                                ))
+        end
+
+        # Active Record's own pool class is left alone: the pool double has
+        # exactly the methods one supported version's pools have.
+        def stub_establish_connection(pool, raises)
+          allow(described_class).to receive(:require).and_call_original
+          allow(described_class).to receive(:require).with('active_record').and_return(true)
+          stub_const('ActiveRecord::Base', double('Base'))
+          stubbed = allow(ActiveRecord::Base).to receive(:establish_connection).with(pg_url)
+          raises ? stubbed.and_raise(raises) : stubbed.and_return(pool)
+        end
+
+        def resolve_with_pool(pool = nil, raises: nil)
+          stub_establish_connection(pool, raises)
+          Dir.mktmpdir do |dir|
+            write_pgvector_snapshot(dir)
+            config, = described_class.resolve(blank_config, artifact: Woods::IndexArtifact.new(dir),
+                                                            env: { 'WOODS_PG_URL' => pg_url })
+            config
+          end
+        end
+
+        it 'leases it from a pool that has only lease_connection, as on Active Record 8.0 and later' do
+          pool = double('ConnectionPool', lease_connection: adapter)
+
+          expect(resolve_with_pool(pool).vector_store_options).to include(connection: adapter, dimensions: 768)
+        end
+
+        it 'leases it from a pool that has both, as on Active Record 7.2, where connection is deprecated' do
+          pool = double('ConnectionPool', lease_connection: adapter)
+          allow(pool).to receive(:connection).and_raise('ConnectionPool#connection is deprecated')
+
+          expect(resolve_with_pool(pool).vector_store_options).to include(connection: adapter)
+        end
+
+        it 'takes it with connection from a pool that has no lease_connection, as before Active Record 7.2' do
+          pool = double('ConnectionPool', connection: adapter)
+
+          expect(resolve_with_pool(pool).vector_store_options).to include(connection: adapter)
+        end
+
+        it 'reports a failed connection as one BootstrapError line naming WOODS_PG_URL, without the credentials' do
+          error = StandardError.new(
+            'connection to server at "db-fakesecretmarker" (10.1.2.3), port 5432 failed: FATAL:  password ' \
+            "authentication failed for user \"u-fakesecretmarker\"\n(conninfo: host=db-fakesecretmarker " \
+            "user=u-fakesecretmarker password=pw@fakesecretmarker, url #{pg_url}, pw@fakesecretmarker)"
+          )
+
+          expect { resolve_with_pool(raises: error) }.to raise_error(Woods::MCP::BootstrapError) do |raised|
+            expect(raised.message).to start_with('pgvector index could not open a database connection through ' \
+                                                 'WOODS_PG_URL: StandardError: connection to server at "[REDACTED]"')
+            expect(raised.message).not_to include('fakesecretmarker', '10.1.2.3', "\n")
+            expect(raised.details).to eq(vector_store: 'pgvector', env_var: 'WOODS_PG_URL')
+            expect(raised.cause).to be_nil
+          end
+        end
+
+        it 'reports a missing database adapter gem as the same BootstrapError' do
+          error = LoadError.new("Error loading the 'postgresql' Active Record adapter. Missing a gem it depends on?")
+
+          expect { resolve_with_pool(raises: error) }
+            .to raise_error(Woods::MCP::BootstrapError, /WOODS_PG_URL: LoadError: Error loading the 'postgresql'/)
+        end
+      end
+
       it 'sets embedding_options with host and model from the snapshot' do
         Dir.mktmpdir do |dir|
           write_woods_json(dir)

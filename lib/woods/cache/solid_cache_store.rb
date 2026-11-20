@@ -41,7 +41,7 @@ module Woods
         delete_silently(key)
         nil
       rescue StandardError => e
-        logger.warn("[Woods] SolidCacheStore#read failed for #{key}: #{e.message}")
+        logger.warn("[Woods] SolidCacheStore#read failed for #{key}: #{DiagnosticRedaction.redact(e.message)}")
         nil
       end
 
@@ -59,7 +59,7 @@ module Woods
         begin
           @cache.write(key, serialized, **opts)
         rescue StandardError => e
-          logger.warn("[Woods] SolidCacheStore#write failed for #{key}: #{e.message}")
+          logger.warn("[Woods] SolidCacheStore#write failed for #{key}: #{DiagnosticRedaction.redact(e.message)}")
           nil
         end
       end
@@ -71,7 +71,7 @@ module Woods
       def delete(key)
         @cache.delete(key)
       rescue StandardError => e
-        logger.warn("[Woods] SolidCacheStore#delete failed for #{key}: #{e.message}")
+        logger.warn("[Woods] SolidCacheStore#delete failed for #{key}: #{DiagnosticRedaction.redact(e.message)}")
         nil
       end
 
@@ -82,7 +82,7 @@ module Woods
       def exist?(key)
         @cache.exist?(key)
       rescue StandardError => e
-        logger.warn("[Woods] SolidCacheStore#exist? failed for #{key}: #{e.message}")
+        logger.warn("[Woods] SolidCacheStore#exist? failed for #{key}: #{DiagnosticRedaction.redact(e.message)}")
         false
       end
 
@@ -105,7 +105,7 @@ module Woods
 
         @cache.delete_matched(pattern)
       rescue StandardError => e
-        logger.warn("[Woods] SolidCacheStore#clear failed: #{e.message}")
+        logger.warn("[Woods] SolidCacheStore#clear failed: #{DiagnosticRedaction.redact(e.message)}")
         nil
       end
     end

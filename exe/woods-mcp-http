@@ -76,8 +76,10 @@ begin
 # credential) surfaces as the one-line operator message instead of a raw
 # backtrace (M9).
 rescue Woods::MCP::BootstrapError, Woods::ConfigurationError => e
-  warn "[woods-mcp-http] #{e.class.name.split('::').last}: #{e.message}"
-  warn "[woods-mcp-http] details: #{e.details.inspect}" if e.respond_to?(:details) && !e.details.empty?
+  warn "[woods-mcp-http] #{e.class.name.split('::').last}: #{Woods::DiagnosticRedaction.redact(e.message)}"
+  if e.respond_to?(:details) && !e.details.empty?
+    warn "[woods-mcp-http] details: #{Woods::DiagnosticRedaction.redact_details(e.details).inspect}"
+  end
   exit 2
 end
 

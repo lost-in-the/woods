@@ -3,6 +3,7 @@
 require 'digest'
 require 'json'
 require 'logger'
+require_relative '../diagnostic_redaction'
 
 module Woods
   module Cache
@@ -102,7 +103,7 @@ module Woods
         begin
           write(key, value, ttl: ttl)
         rescue StandardError => e
-          logger.warn("[Woods] CacheStore#fetch write failed for #{key}: #{e.message}")
+          logger.warn("[Woods] CacheStore#fetch write failed for #{key}: #{DiagnosticRedaction.redact(e.message)}")
         end
         value
       end

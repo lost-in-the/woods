@@ -46,7 +46,7 @@ module Woods
         delete_silently(key)
         nil
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[Woods] RedisCacheStore#read failed for #{key}: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#read failed for #{key}: #{DiagnosticRedaction.redact(e.message)}")
         nil
       end
 
@@ -66,7 +66,7 @@ module Woods
           @redis.set(key, serialized)
         end
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[Woods] RedisCacheStore#write failed for #{key}: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#write failed for #{key}: #{DiagnosticRedaction.redact(e.message)}")
         nil
       end
 
@@ -77,7 +77,7 @@ module Woods
       def delete(key)
         @redis.del(key)
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[Woods] RedisCacheStore#delete failed for #{key}: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#delete failed for #{key}: #{DiagnosticRedaction.redact(e.message)}")
         nil
       end
 
@@ -88,7 +88,7 @@ module Woods
       def exist?(key)
         @redis.exists?(key)
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[Woods] RedisCacheStore#exist? failed for #{key}: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#exist? failed for #{key}: #{DiagnosticRedaction.redact(e.message)}")
         false
       end
 
@@ -108,7 +108,7 @@ module Woods
           break if cursor == '0'
         end
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[Woods] RedisCacheStore#clear failed: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#clear failed: #{DiagnosticRedaction.redact(e.message)}")
         nil
       end
     end

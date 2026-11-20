@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'errors'
+require_relative '../diagnostic_redaction'
 require_relative '../resolved_config'
 
 module Woods
@@ -253,12 +254,35 @@ module Woods
             raise ConfigMismatch, 'pgvector index requires WOODS_PG_URL when served outside its host application.'
           end
 
-          require 'active_record'
-          options[:connection] = ActiveRecord::Base.establish_connection(url).connection
+          options[:connection] = pgvector_connection(url)
         end
         config.vector_store_options = options unless options.empty?
       end
       private_class_method :restore_store_options
+
+      # A connection leased from the pool for +WOODS_PG_URL+, with the call
+      # the running Active Record has: +lease_connection+ from 7.2, whose
+      # pools dropped +connection+ in 8.0, and +connection+ before 7.2.
+      # Any failure, a missing +activerecord+ or +pg+ gem included, becomes
+      # one {BootstrapError} with the connection details redacted
+      # ({DiagnosticRedaction}), and without the adapter's error as its cause.
+      #
+      # @param url [String]
+      # @return [ActiveRecord::ConnectionAdapters::AbstractAdapter]
+      # @raise [Woods::MCP::BootstrapError]
+      def self.pgvector_connection(url)
+        DiagnosticRedaction.register(url)
+        require 'active_record'
+        pool = ActiveRecord::Base.establish_connection(url)
+        pool.respond_to?(:lease_connection) ? pool.lease_connection : pool.connection
+      rescue StandardError, LoadError => e
+        raise BootstrapError.new(
+          'pgvector index could not open a database connection through WOODS_PG_URL: ' \
+          "#{DiagnosticRedaction.describe(e).split("\n").map(&:strip).reject(&:empty?).join(' ')}",
+          details: { vector_store: 'pgvector', env_var: 'WOODS_PG_URL' }
+        ), cause: nil
+      end
+      private_class_method :pgvector_connection
 
       def self.require_store_setting!(options, key, env_name, adapter)
         return unless options[key].to_s.empty?
