@@ -3,8 +3,10 @@
 require 'spec_helper'
 require 'mcp'
 require 'fileutils'
+require 'json'
 require 'open3'
 require 'tmpdir'
+require 'woods/version'
 
 # Integration specs for the MCP CLI entry points. These shell out to the
 # real executables rather than invoking Ruby classes directly — the point
@@ -387,6 +389,35 @@ RSpec.describe 'MCP CLI integration' do
 
           expect(booted).to be(true)
           expect(err).not_to include('ConfigurationError')
+          expect(err).not_to match(/from .+\.rb:\d+:in/) # backtrace frame
+        end
+      end
+
+      it 'exits 2 with one BootstrapError line when a pgvector index cannot open its database connection' do
+        Dir.mktmpdir do |dir|
+          FileUtils.cp(File.join(fixture_dir, 'manifest.json'), File.join(dir, 'manifest.json'))
+          File.write(File.join(dir, 'woods.json'), JSON.generate(
+                                                     schema_version: 1, gem_version: Woods::VERSION,
+                                                     created_at: '2026-11-16T00:00:00Z',
+                                                     embedding_provider: { class: 'Woods::Embedding::Provider::Fake',
+                                                                           model: 'cli', dimension: 8 },
+                                                     stores: { vector_store: 'pgvector', metadata_store: 'in_memory',
+                                                               graph_store: 'in_memory' },
+                                                     store_options: { vector_store: { dimensions: 8 } }
+                                                   ))
+          env = {
+            'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'),
+            'WOODS_PG_URL' => 'postgres://u-fakesecretmarker:pw-fakesecretmarker@127.0.0.1:1/d-fakesecretmarker',
+            'OPENAI_API_KEY' => nil
+          }
+
+          _out, err, status = Open3.capture3(env, 'bundle', 'exec', 'ruby', ruby_bin, dir)
+          err = utf8(err)
+
+          expect(status.exitstatus).to eq(2)
+          expect(err).to match(/^\[woods-mcp\] BootstrapError: pgvector index could not open a database connection/)
+          expect(err).to include('details: {')
+          expect(err).not_to include('fakesecretmarker')
           expect(err).not_to match(/from .+\.rb:\d+:in/) # backtrace frame
         end
       end

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../diagnostic_redaction'
+
 module Woods
   module Operator
     # Classifies pipeline errors by severity and suggests remediation.
@@ -57,14 +59,14 @@ module Woods
                 find_match(error_string, PERMANENT_PATTERNS, :permanent)
 
         if match
-          match.merge(error_class: resolved_class, message: error.message)
+          match.merge(error_class: resolved_class, message: DiagnosticRedaction.redact(error.message))
         else
           {
             severity: :unknown,
             category: 'unclassified',
             remediation: 'Investigate error details and check logs',
             error_class: resolved_class,
-            message: error.message
+            message: DiagnosticRedaction.redact(error.message)
           }
         end
       end

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'diagnostic_redaction'
 require_relative 'retriever'
 require_relative 'storage/vector_store'
 require_relative 'storage/pgvector'
@@ -497,7 +498,9 @@ module Woods
     # (CREATE ... IF NOT EXISTS DDL) after construction. Without this, the
     # first embed against a bare database fails with PG::UndefinedTable
     # (#187 / B-075). Schema/connection failures are re-raised as
-    # {Woods::Error} with the original error preserved as the cause.
+    # {Woods::Error} naming the original error with its connection details
+    # redacted, and without it as the cause: an uncaught error prints its
+    # cause chain.
     #
     # @return [Storage::VectorStore::Pgvector]
     # @raise [Woods::Error] when the schema cannot be created
@@ -506,17 +509,19 @@ module Woods
       validate_required_store_options!(:pgvector, opts, :connection)
       opts[:dimensions] = resolve_pgvector_dimensions(provider_dimensions, opts[:dimensions])
       store = Storage::VectorStore::Pgvector.new(**opts)
+      DiagnosticRedaction.register(opts[:connection])
       begin
         store.ensure_schema!
         verify_pgvector_dimensions!(store, opts[:dimensions])
       rescue ConfigurationError
         raise
       rescue StandardError => e
-        raise Woods::Error,
-              "pgvector schema setup failed (#{e.class}: #{e.message}). " \
-              'Verify vector_store_options[:connection] is a live PostgreSQL ' \
-              'connection and that the pgvector extension is available ' \
-              '(`rails generate woods:pgvector && rails db:migrate` sets it up via migration).'
+        raise Woods::Error.new(
+          "pgvector schema setup failed (#{DiagnosticRedaction.describe(e)}). " \
+          'Verify vector_store_options[:connection] is a live PostgreSQL ' \
+          'connection and that the pgvector extension is available ' \
+          '(`rails generate woods:pgvector && rails db:migrate` sets it up via migration).'
+        ), cause: nil
       end
       store
     end

@@ -2,6 +2,7 @@
 
 require 'digest'
 require 'securerandom'
+require_relative '../diagnostic_redaction'
 require_relative 'cache_store'
 # CachedEmbeddingProvider includes Embedding::Provider::Interface at load
 # time, so the interface must be defined before this file's class bodies run
@@ -361,7 +362,7 @@ module Woods
       def write_cache(text, vector)
         @cache_store.write(embedding_key(text), vector, ttl: @ttl)
       rescue StandardError => e
-        warn("[Woods] CachedEmbeddingProvider cache write failed: #{e.message}")
+        warn("[Woods] CachedEmbeddingProvider cache write failed: #{DiagnosticRedaction.redact(e.message)}")
       end
 
       # Split texts into cached hits and uncached misses.
@@ -498,7 +499,7 @@ module Woods
         begin
           @cache_store.write(key, serialize_result(result), ttl: @context_ttl)
         rescue StandardError => e
-          warn("[Woods] CachedRetriever cache write failed: #{e.message}")
+          warn("[Woods] CachedRetriever cache write failed: #{DiagnosticRedaction.redact(e.message)}")
         end
 
         result
