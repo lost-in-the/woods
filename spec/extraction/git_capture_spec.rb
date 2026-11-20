@@ -82,7 +82,7 @@ RSpec.describe Woods::Extraction::GitCapture do
 
       2.times { expect(capture.head).to be_nil }
       expect(capture.file_facts([path.to_s])).to eq({})
-      expect(capture.commit_table(nil, graph: graph, full: true)).to be_nil
+      expect(capture.commit_table(nil, graph: graph)).to be_nil
       expect(capture).to have_received(:run_git).with('rev-parse', '--verify', 'HEAD^{commit}').once
       expect(capture.provenance).to be_nil
     end
@@ -216,6 +216,20 @@ RSpec.describe Woods::Extraction::GitCapture do
     end
   end
 
+  describe '#history_rewrites' do
+    it 'reads replacement, the replace refs and the grafts path with the child environment' do
+      init_repository
+      allow(Open3).to receive(:capture3).and_call_original
+
+      expect(capture.history_rewrites).to be_nil
+      [%w[config --bool core.useReplaceRefs],
+       ['for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)'],
+       %w[rev-parse --git-path info/grafts]].each do |args|
+        expect(Open3).to have_received(:capture3).with(Woods::GitCommand::CHILD_ENV, 'git', '-C', root.to_s, *args)
+      end
+    end
+  end
+
   describe '#commit_table' do
     before do
       init_repository
@@ -227,23 +241,23 @@ RSpec.describe Woods::Extraction::GitCapture do
     end
 
     it 'builds the table over the application paths of the graph on a full run', :capable_git do
-      table = capture.commit_table(nil, graph: graph, full: true)
+      table = capture.commit_table(nil, graph: graph)
 
       expect(table['head']).to eq(git('rev-parse', 'HEAD'))
       expect(table['paths'].keys).to eq(['app/models/post.rb'])
     end
 
-    it 'keeps a current published table on an incremental run without walking history' do
-      published = described_class.new(root: root, logger: logger).commit_table(nil, graph: graph, full: true)
+    it 'keeps a current published table without walking history' do
+      published = described_class.new(root: root, logger: logger).commit_table(nil, graph: graph)
       expect_any_instance_of(Woods::GitCommitTable).not_to receive(:build)
 
-      expect(capture.commit_table(published, graph: graph, full: false)).to equal(published)
+      expect(capture.commit_table(published, graph: graph)).to equal(published)
     end
 
     it 'has no table without readable history' do
       FileUtils.rm_rf(root.join('.git'))
 
-      expect(capture.commit_table({ 'head' => 'old' }, graph: graph, full: false)).to be_nil
+      expect(capture.commit_table({ 'head' => 'old' }, graph: graph)).to be_nil
     end
   end
 
@@ -272,7 +286,7 @@ RSpec.describe Woods::Extraction::GitCapture do
       answer_version("git version 2.30.2\n")
 
       expect { expect(capture.available?).to be(false) }.to output(notice).to_stderr
-      expect(capture.commit_table(nil, graph: graph, full: true)).to be_nil
+      expect(capture.commit_table(nil, graph: graph)).to be_nil
       summary = capture.enrichment_summary(graph: graph, full: true)
 
       expect(spawned).not_to be_empty

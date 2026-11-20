@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'open3'
 require 'set'
 
@@ -131,16 +132,25 @@ module Woods
 
       # The `git_commits.json` table (W-3) this run publishes, nil for none.
       #
-      # The table is a pure function of HEAD, the indexed path set and the
-      # bounds ({GitCommitTable}). A full run always walks; an incremental run
-      # keeps the seeded table when it records the same inputs, so both modes
-      # publish the same bytes. Without a readable history there is no table.
+      # The table is a pure function of HEAD, the indexed path set, the
+      # bounds and the history rewrites the walk honours ({GitCommitTable}),
+      # all recorded in it. Every run, full or incremental, keeps the seeded
+      # table when it records the same inputs and otherwise walks the whole
+      # history again, so both modes publish the same bytes. Without a
+      # readable history there is no table.
+      #
+      # Replace refs and grafts change the commits git walks without moving
+      # HEAD, so their state is part of the key ({#history_rewrites}). A run
+      # that cannot read that state always walks. Each walk process reads the
+      # refs again when it starts, so the state is read once more, uncached,
+      # after the walk: a table walked while it moved records
+      # {REWRITES_UNKNOWN} and is never kept. The same state before and after
+      # cannot rule out a change and its reversal inside the walk.
       #
       # @param published [Hash, nil] the table the payload was seeded with
       # @param graph [DependencyGraph] the run's final graph
-      # @param full [Boolean] whether this is a full extraction
       # @return [Hash, nil]
-      def commit_table(published, graph:, full:)
+      def commit_table(published, graph:)
         return nil unless available?
 
         sha = head
@@ -148,9 +158,41 @@ module Woods
 
         paths = commit_table_paths(graph)
         builder = GitCommitTable.new(root: @root, logger: @logger, settings: GitCommitTable.settings)
-        return published if !full && GitCommitTable.current?(published, builder.key(paths, head: sha))
+        rewrites = history_rewrites
+        key = builder.key(paths, head: sha, history_rewrites: rewrites)
+        return published if rewrites != REWRITES_UNKNOWN && GitCommitTable.current?(published, key)
 
-        builder.build(paths, head: sha)
+        recheck_rewrites(builder.build(paths, head: sha, history_rewrites: rewrites), rewrites)
+      end
+
+      # Recorded for a table walked while the rewrite state could not be read,
+      # so no later run mistakes it for a table of the plain history.
+      REWRITES_UNKNOWN = 'unknown'
+
+      # The digest of the replace refs, with their base, and the grafts file
+      # this repository's walks honour, nil when there are none,
+      # {REWRITES_UNKNOWN} when git could not say. It follows git's own
+      # reading (environment.c, replace-object.c, from 2.31):
+      #
+      # * replace refs count only while replacement is on:
+      #   `GIT_NO_REPLACE_OBJECTS` unset (any value turns it off) and
+      #   `core.useReplaceRefs` not false (read with `git config --bool`);
+      # * a replace ref is any ref below `GIT_REPLACE_REF_BASE` taken as a raw
+      #   string prefix (`refs/replace/` only when the variable is absent; set
+      #   but empty selects every ref) whose last path component is an object id;
+      #   Git 2.56 and later abort object reads when a set base has no trailing
+      #   slash, so HEAD does not resolve and the table is withdrawn;
+      # * the grafts file is the one `git rev-parse --git-path info/grafts`
+      #   names, which honours `GIT_GRAFT_FILE`, and counts either way.
+      #
+      # A shallow repository has no table at all ({#available?}). Read once
+      # per capture.
+      #
+      # @return [String, nil]
+      def history_rewrites
+        return @history_rewrites if defined?(@history_rewrites)
+
+        @history_rewrites = read_history_rewrites
       end
 
       # The published account of whether this generation's Git facts can be
@@ -282,6 +324,79 @@ module Woods
           'the relocated complete layout. Derive <id> from the worktree Git metadata, not its branch name; ' \
           "selecting /mounted-common itself uses the primary checkout's HEAD."
         )
+      end
+
+      # @param table [Hash, nil] a table just walked under +rewrites+
+      # @param rewrites [String, nil] the state read before the walk
+      # @return [Hash, nil] +table+, marked {REWRITES_UNKNOWN} when a fresh
+      #   read no longer agrees with +rewrites+
+      def recheck_rewrites(table, rewrites)
+        return table if table.nil? || rewrites == REWRITES_UNKNOWN || read_history_rewrites == rewrites
+
+        table.merge('history_rewrites' => REWRITES_UNKNOWN)
+      end
+
+      # The base is digested with the refs: git names each original from the
+      # part of a ref below the base, so the same refs under another base can
+      # replace other objects.
+      #
+      # @return [String, nil] see {#history_rewrites}
+      def read_history_rewrites
+        refs = replacement_refs
+        grafts = grafts_content
+        return REWRITES_UNKNOWN if refs.nil? || grafts.nil?
+        return nil if refs.empty? && grafts.empty?
+
+        Digest::SHA256.hexdigest("replace\n#{replace_ref_base}\n#{refs}\ngrafts\n#{grafts}")
+      end
+
+      # @return [String] the replace ref prefix git reads, `refs/replace/` when unset
+      def replace_ref_base
+        ENV.fetch('GIT_REPLACE_REF_BASE', 'refs/replace/')
+      end
+
+      # @return [String, nil] `<ref> <object>` lines of the replace refs in
+      #   force, by name, empty when replacement is off; nil when git could not say
+      def replacement_refs
+        return '' if ENV.key?('GIT_NO_REPLACE_OBJECTS')
+
+        enabled, _error, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                                 *git_argv('config', '--bool', 'core.useReplaceRefs'))
+        return '' if status.success? && enabled.strip == 'false'
+
+        base = replace_ref_base
+        output, _error, status = Open3.capture3(
+          GitCommand::CHILD_ENV, *git_argv('for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)')
+        )
+        return nil unless status.success?
+
+        output.each_line.select { |line| replacement_ref?(line.split(' ', 2).first, base) }.join
+      end
+
+      # Git's test (register_replace_ref): below +base+ as a string prefix, and
+      # the last path component of the rest starts with an object id.
+      #
+      # @param name [String] full ref name
+      # @param base [String] the replace ref prefix
+      # @return [Boolean]
+      def replacement_ref?(name, base)
+        return false unless name.start_with?(base)
+
+        rest = name.delete_prefix(base)
+        rest[((rest.rindex('/') || -1) + 1)..].match?(/\A\h{40}/)
+      end
+
+      # @return [String, nil] the grafts file's bytes, empty without one; nil
+      #   when git could not name it
+      def grafts_content
+        output, _error, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                                *git_argv('rev-parse', '--git-path', 'info/grafts'))
+        return nil unless status.success?
+
+        path = File.expand_path(output.strip, @root.to_s)
+        File.file?(path) ? File.binread(path) : ''
+      rescue SystemCallError
+        nil
       end
 
       # `-C <root>` keeps the result independent of the process working
