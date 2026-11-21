@@ -131,6 +131,38 @@ module Woods
         Array(units).each { |unit| SourceContributors.paths(unit).each { |path| consume_unit(key, path) } }
       end
 
+      # Captured paths a consumer scope's rule matches in this run's tree.
+      #
+      # @param scope [String] for example `file:rake_tasks` or `whole:test_mappings`
+      # @return [Array<String>] root-relative paths, empty without a capture
+      def scope_paths(scope)
+        @snapshot.fetch('scope_paths').fetch(scope, [])
+      end
+
+      # Captured paths a scope's rule matches that the scope does not record yet.
+      #
+      # @param scope [String]
+      # @return [Array<String>]
+      def unrecorded_paths(scope)
+        recorded = @identities.fetch(scope, {})
+        scope_paths(scope).reject { |path| recorded.key?(path) }
+      end
+
+      # Record in a whole-app family's scope the captured paths its rule now
+      # matches and the scope lacks, without re-running the family. Only for a
+      # family whose output the caller has proved unchanged: recording an
+      # input claims the published units are what those bytes produce. Paths
+      # already recorded keep their identity, so an edit still reads as changed.
+      #
+      # @param key [Symbol, String] extractor key of the family
+      # @return [void]
+      def adopt_new_paths(key)
+        scope = "whole:#{key}"
+        unrecorded_paths(scope).each do |path|
+          record_identity(scope, path, @snapshot.fetch('files').fetch(path))
+        end
+      end
+
       def unverified(scope)
         @unverified << scope.to_s
       end
