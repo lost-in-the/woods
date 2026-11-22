@@ -93,7 +93,19 @@ module PendingPolicy
     ['spec/integration/git_version_notice_spec.rb',
      'Git version notice says so with the real git of a machine older than 2.31',
      'needs a git older than 2.31',
-     -> { !Woods::GitVersion.too_old?(Woods::GitVersion.parse(Open3.capture2('git', '--version').first)) }]
+     -> { !Woods::GitVersion.too_old?(Woods::GitVersion.parse(Open3.capture2('git', '--version').first)) }],
+    # The examples that read real history skip on a git older than 2.31,
+    # which cannot walk it; the skip reason names no version found.
+    *['#available? probes once per capture',
+      '#enrichment_summary counts every unit with facts as refreshed on a full run, and only noted units otherwise',
+      '#commit_table builds the table over the application paths of the graph on a full run',
+      '#commit_table keeps a current published table without walking history',
+      ' a git too old for the history walk reads history as before on a git that is new enough',
+      ' a git too old for the history walk behaves as before when the version cannot be read'].map do |description|
+      ['spec/extraction/git_capture_spec.rb', "Woods::Extraction::GitCapture#{description}",
+       'needs Git 2.31.0 or newer',
+       -> { Woods::GitVersion.too_old?(Woods::GitVersion.parse(Open3.capture2('git', '--version').first)) }]
+    end
   ].freeze
 
   def self.allowed?(example)

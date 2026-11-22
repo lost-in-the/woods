@@ -43,7 +43,7 @@ RSpec.describe Woods::Extraction::GitCapture do
   # These read real history, which a git older than 2.31 cannot walk.
   before(:each, :capable_git) do
     found = Woods::GitVersion.parse(Open3.capture2('git', '--version').first)
-    skip "needs Git #{Woods::GitVersion::MINIMUM} or newer (found #{found})" if Woods::GitVersion.too_old?(found)
+    skip "needs Git #{Woods::GitVersion::MINIMUM} or newer" if Woods::GitVersion.too_old?(found)
   end
 
   describe 'HEAD capture' do
