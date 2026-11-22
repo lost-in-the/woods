@@ -6,6 +6,7 @@ require_relative 'supervision_status'
 require_relative 'supervisor_reporting'
 require_relative 'claim_lease'
 require_relative 'status'
+require_relative '../coordination/pipeline_lock'
 
 module Woods
   module Watch
@@ -16,6 +17,14 @@ module Woods
 
       RETRY_DELAYS = [1, 2, 4, 8, 16, 30].freeze
       PARKED_ADVICE = '[woods-watch] restart the owner after correcting configuration; no automatic takeover'
+      # After its guardian has exited, the stopped watcher's group gets this long to vanish before its claim stays.
+      GROUP_EXIT_WAIT = 1
+      # Why a lock that names the stopped watcher stays. Either way a writer on
+      # this host takes it over once its holder is gone, and any writer once it is stale.
+      LOCK_REFUSALS = {
+        alive: 'that watcher or a process in its group is still present',
+        busy: 'another process held the lock guard'
+      }.freeze
 
       # @param command [Array<String>] fresh application invocation on each attempt
       # @param root [String] application root
@@ -77,6 +86,90 @@ module Woods
         @logger.puts("[woods-watch] incompatible lifecycle: #{e.message}")
       ensure
         @process&.stop
+        retire_stopped_watcher
+      end
+
+      # A watcher killed after the shutdown timeout releases neither its
+      # extraction lock nor its claim. Lock first: a successor that finds no
+      # claim must not then wait out a dead writer's lock, which from another
+      # host it can judge only by age. Each step rescues its own failure.
+      def retire_stopped_watcher
+        index = @protocol&.index
+        pid = @protocol&.child_pid
+        return unless index && pid
+
+        await_group_exit(pid)
+        retire_stopped_lock(index, pid)
+        retire_stopped_claim(index, pid)
+      end
+
+      # Only a lock recorded on this host by this attempt's watcher pid, through the lock's own guarded path.
+      def retire_stopped_lock(index, pid)
+        lock = Coordination::PipelineLock.for_index(index)
+        outcome = lock.retire_gone_holder(pid: pid, host: Status.host_identity) { watcher_group_gone?(pid) }
+        if outcome == :cleared
+          @logger.puts("[woods-watch] retired the extraction lock of stopped watcher pid #{pid} at #{index}")
+        elsif LOCK_REFUSALS.key?(outcome)
+          lock_left(pid, index, LOCK_REFUSALS.fetch(outcome))
+        end
+      rescue SystemCallError => e
+        lock_left(pid, index, e.class)
+      end
+
+      # A lock naming another pid or host, or no lock at all, is not this watcher's and is left silently.
+      def lock_left(pid, index, detail)
+        @logger.puts("[woods-watch] left the extraction lock of stopped watcher pid #{pid} at #{index} " \
+                     "in place: #{detail}")
+      end
+
+      # Retire the claim only when it still names the pid this attempt's stream reported.
+      def retire_stopped_claim(index, pid)
+        lease = ClaimLease.new(index)
+        return unless lease.retire_stopped(pid: pid, host: Status.host_identity) { watcher_group_gone?(pid) }
+
+        @logger.puts("[woods-watch] retired the claim of stopped watcher pid #{pid} at #{index}")
+      rescue Errno::ENOENT
+        nil
+      rescue ClaimLease::Unavailable, SystemCallError => e
+        claim_left(pid, index, e)
+      end
+
+      # Refusal messages name the next step and never the token; a system error names only its class.
+      def claim_left(pid, index, error)
+        detail = error.is_a?(ClaimLease::Unavailable) ? error.message : error.class
+        @logger.puts("[woods-watch] left the claim of stopped watcher pid #{pid} at #{index} in place: #{detail}")
+      end
+
+      def await_group_exit(pid)
+        deadline = monotonic + GROUP_EXIT_WAIT
+        sleep 0.02 until watcher_group_gone?(pid) || monotonic >= deadline
+      end
+
+      # The guardian exits only after it has reaped the watcher and sent KILL to its group.
+      def watcher_group_gone?(pid)
+        return false if @process&.alive?
+
+        Process.kill(0, -pid)
+        only_zombies_in_group?(pid)
+      rescue Errno::ESRCH
+        true
+      rescue Errno::EPERM
+        false
+      end
+
+      # A killed member orphaned to a PID 1 that never reaps stays a zombie, and
+      # a zombie still answers a signal to its group, but it has closed every
+      # descriptor and cannot write. Only Linux /proc can tell; elsewhere the
+      # group stays present.
+      def only_zombies_in_group?(pgid)
+        return false unless File.directory?('/proc/self')
+
+        Dir.glob('/proc/[0-9]*/stat').none? do |path|
+          state, _ppid, group = File.binread(path).split(') ').last.split.first(3)
+          group.to_i == pgid && state != 'Z'
+        rescue SystemCallError
+          false
+        end
       end
 
       def prepare_attempt

@@ -19,14 +19,14 @@ RSpec.describe Woods::Watch::Supervisor do
     @thread&.join(5)
   end
 
-  def launch(body, **options)
+  def launch(body, flags: [], **options)
     script = <<~RUBY
       require #{File.expand_path('../../lib/woods/watch/managed_child', __dir__).inspect}
       child = Woods::Watch::ManagedChild.from_env
       #{body}
     RUBY
     @log = StringIO.new
-    @supervisor = described_class.new(command: [Gem.ruby, '-e', script], root: @root,
+    @supervisor = described_class.new(command: [Gem.ruby, *flags, '-e', script], root: @root,
                                       logger: @log, shutdown_timeout: 0.1, retry_delays: [0.02], **options)
     @thread = Thread.new { @supervisor.run }
   end
@@ -132,6 +132,141 @@ RSpec.describe Woods::Watch::Supervisor do
       expect(@log.string).to include("woods-watch --recover-claim #{index}")
       expect(@log.string).not_to include(token)
       expect(supervision_record).to include('state' => 'parked', 'reason' => 'already_running')
+    end
+  end
+
+  describe 'the claim of a watcher the launcher stopped' do
+    let(:lib) { File.expand_path('../../lib', __dir__) }
+
+    # A managed daemon that claims the index exactly as `woods:watch` does,
+    # then reports readiness. `on_term` and `wait` stand in for its shutdown path.
+    def launch_claimed(on_term, wait = 'sleep 30')
+      launch(<<~RUBY, flags: ['-rbundler/setup'])
+        $LOAD_PATH.unshift(#{lib.inspect})
+        require 'woods/watch/daemon'
+        #{handshake}
+        index = File.join(Dir.pwd, 'index')
+        daemon = Woods::Watch::Daemon.new(root: Dir.pwd, output_dir: index, conservative_claims: true)
+        abort 'claim unavailable' unless daemon.send(:claim_startup?)
+        #{on_term}
+        child.call(:startup, state: 'ready', generation: 1, reason: 'reconciled')
+        #{wait}
+      RUBY
+      eventually { @supervisor.state == 'ready' }
+      File.join(@root, 'index', 'watch_claim.json')
+    end
+
+    def stop_launcher
+      @supervisor.stop
+      expect(@thread.join(10).value).to eq(0)
+    end
+
+    it 'retires the claim of a watcher it had to kill after its shutdown timeout' do
+      # Busy past the shutdown timeout, as a watcher in the middle of an extraction is.
+      claim = launch_claimed("Signal.trap('TERM', 'IGNORE')")
+      record = JSON.parse(File.read(claim))
+
+      stop_launcher
+
+      expect(File.exist?(claim)).to be(false)
+      expect(@log.string).to include("retired the claim of stopped watcher pid #{record.fetch('pid')}")
+      expect(@log.string).not_to include(record.fetch('token'))
+      expect(File.exist?("#{claim}.lease")).to be(true)
+      expect(File.exist?("#{claim}.lock")).to be(true)
+    end
+
+    it 'retires the extraction lock of a watcher it killed in the middle of an extraction, before its claim' do
+      claim = launch_claimed(<<~RUBY)
+        Signal.trap('TERM', 'IGNORE')
+        abort 'extraction lock unavailable' unless Woods::Coordination::PipelineLock.for_index(index).acquire
+      RUBY
+      lock = File.join(File.dirname(claim), 'extraction.lock')
+      pid = JSON.parse(File.read(lock)).fetch('pid')
+
+      stop_launcher
+
+      expect(File.exist?(lock)).to be(false)
+      expect(File.exist?(claim)).to be(false)
+      expect(File.exist?(File.join(File.dirname(claim), '.extraction.lock.guard'))).to be(true)
+      retired_lock = @log.string.index("retired the extraction lock of stopped watcher pid #{pid} at ")
+      retired_claim = @log.string.index("retired the claim of stopped watcher pid #{pid} at ")
+      expect(retired_lock).to be < retired_claim
+    end
+
+    it 'still retires the claim when the extraction lock stays because its guard is busy' do
+      claim = launch_claimed(<<~RUBY)
+        Signal.trap('TERM', 'IGNORE')
+        abort 'extraction lock unavailable' unless Woods::Coordination::PipelineLock.for_index(index).acquire
+      RUBY
+      lock = File.join(File.dirname(claim), 'extraction.lock')
+      bytes = File.binread(lock)
+
+      File.open(File.join(File.dirname(claim), '.extraction.lock.guard'), File::RDWR) do |guard|
+        guard.flock(File::LOCK_EX)
+        stop_launcher
+      end
+
+      expect(File.binread(lock)).to eq(bytes)
+      expect(@log.string).to match(/left the extraction lock of stopped watcher pid \d+ at .* in place: another/)
+      expect(File.exist?(claim)).to be(false)
+      expect(@log.string).not_to include(JSON.parse(bytes).fetch('token'))
+    end
+
+    it 'leaves the claim when a process that escaped the watcher group still holds its lease' do
+      # A forked copy in its own session keeps the inherited lease descriptor past the group KILL.
+      claim = launch_claimed(<<~RUBY)
+        Signal.trap('TERM', 'IGNORE')
+        File.write('holder.pid', fork { Process.setsid; sleep 30 }.to_s)
+      RUBY
+      bytes = File.binread(claim)
+
+      stop_launcher
+
+      expect(File.binread(claim)).to eq(bytes)
+      expect(@log.string).to match(/left the claim of stopped watcher pid \d+ at .* in place: owner lease is held/)
+      expect(@log.string).not_to include(JSON.parse(bytes).fetch('token'))
+    ensure
+      holder = File.read(File.join(@root, 'holder.pid')).to_i if File.exist?(File.join(@root, 'holder.pid'))
+      Process.kill('KILL', holder) if holder
+    end
+
+    it 'has nothing to do when the watcher released its own claim on a graceful stop' do
+      claim = launch_claimed("Signal.trap('TERM') { $stop = true }",
+                             'sleep 0.02 until $stop; daemon.send(:release_claim); exit 0')
+
+      stop_launcher
+
+      expect(File.exist?(claim)).to be(false)
+      expect(@log.string).not_to include('claim')
+    end
+  end
+
+  describe 'whether a stopped watcher group is gone' do
+    subject(:supervisor) { described_class.new(command: [Gem.ruby], root: @root, logger: StringIO.new) }
+
+    it 'counts a group whose only member is an unreaped zombie as gone, since it cannot write' do
+      pid = fork do
+        Process.setpgrp
+        exit!(0)
+      end
+      sleep 0.02 until File.read("/proc/#{pid}/stat").split(') ').last.start_with?('Z')
+
+      expect(supervisor.send(:watcher_group_gone?, pid)).to be(true)
+    ensure
+      Process.wait(pid)
+    end
+
+    it 'counts a group with a live member as present' do
+      pid = fork do
+        Process.setpgrp
+        sleep 30
+      end
+      sleep 0.02 until File.read("/proc/#{pid}/stat").split(') ').last.split[2].to_i == pid
+
+      expect(supervisor.send(:watcher_group_gone?, pid)).to be(false)
+    ensure
+      Process.kill('KILL', pid)
+      Process.wait(pid)
     end
   end
 

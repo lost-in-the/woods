@@ -196,6 +196,10 @@ edit under `app/models/concerns/` can leave table ownership unchanged, so the
 table family is skipped and `whole:database_tables` retains that file's previous
 identity. Model and concern units can still equal a full extraction. This
 conservative provenance difference does not establish a unit-content mismatch.
+A new file the table rule matches is still recorded in `whole:database_tables` when the family is skipped.
+The skip is proved: no schema input changed, and the live table ownership equals the published one.
+A re-run would write the published table units again, so recording the file is what that re-run would record.
+A file already recorded keeps its previous identity, so its edit still reads as changed.
 Do not refresh a skipped family's identity merely because another consumer read
 the file. A verified full launcher run establishes a new complete baseline.
 Unchanged scopes keep their earlier baseline. A file can therefore remain

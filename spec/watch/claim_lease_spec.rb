@@ -3,6 +3,8 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'shellwords'
+require 'json'
+require 'rbconfig'
 require 'woods/watch/claim_lease'
 
 RSpec.describe Woods::Watch::ClaimLease do
@@ -83,6 +85,118 @@ RSpec.describe Woods::Watch::ClaimLease do
     expect(command).to end_with("--claim-token <token from #{index}/watch_claim.json>")
     pasted = Shellwords.split(command.sub(/<token from .*>\z/, 'c' * 64))
     expect(pasted).to eq(['woods-watch', '--recover-claim', index, '--claim-token', 'c' * 64])
+  end
+
+  describe '#retire_stopped' do
+    let(:host) { 'this-host' }
+    let(:pid) { 4242 }
+    let(:claim) { File.join(@index, described_class::CLAIM) }
+
+    # A claim that would be retired: this host, this pid, version 2, naming the
+    # free lease. Each refusal changes exactly one of these.
+    def write_claim(**changes)
+      owner = acquired
+      record = { 'pid' => pid, 'host' => host, 'lease_version' => 2, 'token' => 'c' * 64,
+                 'lease_id' => owner.fields[:lease_id] }.merge(changes.transform_keys(&:to_s))
+      owner.close
+      File.write(claim, JSON.generate(record))
+      File.binread(claim)
+    end
+
+    def retire(&gone)
+      gone ||= proc { true }
+      described_class.new(@index).retire_stopped(pid: pid, host: host, &gone)
+    end
+
+    def expect_claim_kept(bytes)
+      expect(File.binread(claim)).to eq(bytes)
+      expect { acquired }.not_to raise_error
+    end
+
+    it 'retires a claim naming the stopped watcher, keeps both sidecars and frees the lease' do
+      write_claim
+
+      expect(retire).to be(true)
+      expect(File.exist?(claim)).to be(false)
+      expect(File.exist?(@lease_path)).to be(true)
+      expect(File.exist?("#{claim}.lock")).to be(true)
+      expect { acquired }.not_to raise_error
+    end
+
+    it 'leaves a claim recorded on another host, without asking about its process group' do
+      bytes = write_claim(host: 'retired-container')
+      asked = false
+
+      expect(retire { asked = true }).to be(false)
+      expect(asked).to be(false)
+      expect_claim_kept(bytes)
+    end
+
+    it 'leaves a claim naming another pid' do
+      bytes = write_claim(pid: pid + 1)
+
+      expect(retire).to be(false)
+      expect_claim_kept(bytes)
+    end
+
+    it 'leaves a claim whose lease lock a live process holds' do
+      bytes = write_claim
+      reader, writer = IO.pipe
+      holder = Process.spawn(RbConfig.ruby, '-I', File.expand_path('../../lib', __dir__), '-e', <<~RUBY, @index,
+        require 'woods/watch/claim_lease'
+        Woods::Watch::ClaimLease.new(ARGV.first).acquire(create: false)
+        puts 'held'
+        STDOUT.flush
+        sleep 30
+      RUBY
+                             out: writer)
+      writer.close
+      expect(reader.gets).to eq("held\n")
+
+      expect { retire }.to raise_error(described_class::Unavailable, /owner lease is held/)
+      expect(File.binread(claim)).to eq(bytes)
+    ensure
+      Process.kill('KILL', holder) if holder
+      Process.wait(holder) if holder
+      reader&.close
+    end
+
+    it 'leaves a claim naming a different lease id' do
+      bytes = write_claim(lease_id: 'e' * 32)
+
+      expect { retire }.to raise_error(described_class::Unavailable) { |error|
+        expect(error.message).to include('owner lease was replaced')
+        expect(error.message).not_to include('c' * 64)
+      }
+      expect_claim_kept(bytes)
+    end
+
+    it 'leaves a claim while the watcher process group is still present' do
+      bytes = write_claim
+
+      expect { retire { false } }.to raise_error(described_class::Unavailable, /pid #{pid} still has a live process/)
+      expect_claim_kept(bytes)
+    end
+
+    it 'leaves a claim replaced between its check and the unlink' do
+      write_claim
+      replacement = JSON.generate(pid: pid, host: host, lease_version: 2, token: 'd' * 64, lease_id: 'f' * 32)
+
+      expect(retire { File.write(claim, replacement) }).to be(false)
+      expect(File.binread(claim)).to eq(replacement)
+    end
+
+    it 'leaves a version 1 claim, which names no lease id' do
+      bytes = write_claim(lease_version: 1, lease_id: nil)
+
+      expect(retire).to be(false)
+      expect_claim_kept(bytes)
+    end
+
+    it 'has nothing to do when the claim is already gone' do
+      expect(retire).to be(false)
+      expect(File.exist?(claim)).to be(false)
+    end
   end
 
   it 'reads the id through the descriptor that holds the lock' do
