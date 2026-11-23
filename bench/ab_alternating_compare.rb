@@ -164,35 +164,35 @@ module WoodsABCompare
         deps_res = deps_via.delete(:result)
         index.close
 
-        warm = Woods::MCP::IndexReader.new(sdir)
-        preflight = warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
-        stop = preflight.dig(:scan, :stop_reason)
-        scanned = preflight.dig(:scan, :scanned_units)
-        raise "Reader preflight failed: stop=#{stop.inspect}, scanned=#{scanned.inspect}" if stop || scanned != 400
+        def verify_complete!(res, expected_units, label)
+          status = res.dig(:completeness, :status)
+          scanned = res.dig(:scan, :scanned_units)
+          return if status == 'complete' && scanned == expected_units
 
+          raise "#{label} incomplete: #{res[:completeness].inspect}, scanned=#{scanned.inspect}"
+        end
+
+        warm = Woods::MCP::IndexReader.new(sdir)
+        verify_complete!(warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20), 400, 'preflight')
         search_warm = sample { warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20) }
         search_cold = sample do
           Woods::MCP::IndexReader.new(sdir).search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
         end
         warm_res = search_warm.delete(:result)
         cold_res = search_cold.delete(:result)
+        verify_complete!(warm_res, 400, 'warm_search')
+        verify_complete!(cold_res, 400, 'cold_search')
 
         fp = Digest::SHA256.hexdigest(JSON.generate(
           edges: edges_res, deps: deps_res,
-          warm_scanned: warm_res.dig(:scan, :scanned_units), warm_stop: warm_res.dig(:scan, :stop_reason),
-          cold_scanned: cold_res.dig(:scan, :scanned_units), cold_stop: cold_res.dig(:scan, :stop_reason)
+          warm_scanned: warm_res.dig(:scan, :scanned_units), warm_completeness: warm_res[:completeness]&.slice(:status, :reason),
+          cold_scanned: cold_res.dig(:scan, :scanned_units), cold_completeness: cold_res[:completeness]&.slice(:status, :reason)
         ))
 
         puts JSON.generate(
-          metrics: {
-            edge_shaper_edges_via_10k: edges_via,
-            edge_shaper_deps_via_10k: deps_via,
-            index_reader_search_400_warm: search_warm,
-            index_reader_search_400_cold: search_cold
-          },
-          fixture_fingerprints: {
-            reader_and_edge_shaper: fp
-          }
+          metrics: { edge_shaper_edges_via_10k: edges_via, edge_shaper_deps_via_10k: deps_via,
+                     index_reader_search_400_warm: search_warm, index_reader_search_400_cold: search_cold },
+          fixture_fingerprints: { reader_and_edge_shaper: fp }
         )
       end
     RUBY
@@ -257,6 +257,15 @@ module WoodsABCompare
       return 'n/a' if before.zero?
 
       format('%<d>+.1f%%', d: ((after - before).to_f / before) * 100.0)
+    end
+
+    def verify_complete_search!(res, expected_units:, label: 'search')
+      status = res.dig(:completeness, :status)
+      reason = res.dig(:completeness, :reason)
+      scanned = res.dig(:scan, :scanned_units)
+      return if status == 'complete' && (expected_units.nil? || scanned == expected_units)
+
+      raise "#{label} incomplete: status=#{status.inspect}, reason=#{reason.inspect}, scanned=#{scanned.inspect}"
     end
 
     def verify_fingerprints(base_runs, cand_runs)
@@ -429,6 +438,11 @@ module WoodsABCompare
 
   # Git provenance verification before and after arm sampling.
   module Provenance
+    CLEAN_GIT_ENV = {
+      'GIT_DIR' => nil, 'GIT_WORK_TREE' => nil, 'GIT_INDEX_FILE' => nil,
+      'GIT_OBJECT_DIRECTORY' => nil, 'GIT_ALTERNATE_OBJECT_DIRECTORIES' => nil, 'GIT_COMMON_DIR' => nil
+    }.freeze
+
     module_function
 
     def verify_worktree!(dir, allow_dirty:)
@@ -447,10 +461,10 @@ module WoodsABCompare
     end
 
     def git_meta!(dir)
-      sha, sha_err, sha_st = Open3.capture3('git', '-C', dir, 'rev-parse', 'HEAD')
+      sha, sha_err, sha_st = Open3.capture3(CLEAN_GIT_ENV, 'git', '-C', dir, 'rev-parse', 'HEAD')
       raise "git rev-parse HEAD failed for #{dir}: #{sha_err.strip}" unless sha_st.success? && !sha.strip.empty?
 
-      status, st_err, st_ok = Open3.capture3('git', '-C', dir, 'status', '--porcelain')
+      status, st_err, st_ok = Open3.capture3(CLEAN_GIT_ENV, 'git', '-C', dir, 'status', '--porcelain')
       raise "git status failed for #{dir}: #{st_err.strip}" unless st_ok.success?
 
       { dir: dir, sha: sha.strip, clean: status.strip.empty? }

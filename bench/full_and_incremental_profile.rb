@@ -322,10 +322,8 @@ module WoodsEndToEndProfile
 
     def graph_digest(report)
       Digest::SHA256.hexdigest(JSON.generate(
-                                 stats: report[:stats],
-                                 hubs: report[:hubs].first(10),
-                                 bridges: report[:bridges],
-                                 cycles: report[:cycles],
+                                 stats: report[:stats], hubs: report[:hubs].first(10),
+                                 bridges: report[:bridges], cycles: report[:cycles],
                                  cycles_truncated: report[:cycles_truncated]
                                ))
     end
@@ -353,8 +351,14 @@ module WoodsEndToEndProfile
       flow_index = JSON.parse(File.read(File.join(dir, 'flows', 'flow_index.json')))
       touched_ids = touched_units.map(&:identifier)
       touched_files = flow_index.select { |entry, _| touched_ids.any? { |id| entry.start_with?("#{id}#") } }
-                                .sort.to_h { |entry, rel| [entry, File.read(File.join(dir, rel))] }
+                                .sort.to_h { |entry, rel| [entry, normalized_flow_doc(File.join(dir, rel))] }
       Digest::SHA256.hexdigest(JSON.generate(delta: delta_res, flow_index: flow_index.sort.to_h, files: touched_files))
+    end
+
+    def normalized_flow_doc(path)
+      doc = JSON.parse(File.read(path))
+      doc['generated_at'] = '<ts>' if doc.is_a?(Hash) && doc.key?('generated_at')
+      doc
     end
 
     def seed_flow_corpus(dir, controllers:, actions:, services:)
@@ -440,12 +444,25 @@ module WoodsEndToEndProfile
       edges_res = edges_via.delete(:last_result)
       deps_res = deps_via.delete(:last_result)
       search_res = deep.delete(:last_result)
+      verify_complete_search!(search_res)
       lex_res = lex_query.delete(:last_result)
       lex_top = lex_res.candidates.first(5).map { |c| [c.identifier, c.score.round(6)] }
       Digest::SHA256.hexdigest(JSON.generate(
                                  edges: edges_res, dependents: deps_res,
-                                 scanned_units: search_res.dig(:scan, :scanned_units), lex_top: lex_top
+                                 scanned_units: search_res.dig(:scan, :scanned_units),
+                                 search_completeness: search_res[:completeness]&.slice(:status, :reason),
+                                 lex_top: lex_top
                                ))
+    end
+
+    def verify_complete_search!(res)
+      status = res.dig(:completeness, :status)
+      reason = res.dig(:completeness, :reason)
+      scanned = res.dig(:scan, :scanned_units)
+      return if status == 'complete' && scanned.is_a?(Integer) && scanned.positive?
+
+      raise "ReaderBench deep search incomplete: status=#{status.inspect}, " \
+            "reason=#{reason.inspect}, scanned=#{scanned.inspect}"
     end
 
     def build_lexical_units(reader)
@@ -508,11 +525,15 @@ module WoodsEndToEndProfile
   end
 
   REPO_ROOT = File.expand_path('..', __dir__)
+  CLEAN_GIT_ENV = {
+    'GIT_DIR' => nil, 'GIT_WORK_TREE' => nil, 'GIT_INDEX_FILE' => nil,
+    'GIT_OBJECT_DIRECTORY' => nil, 'GIT_ALTERNATE_OBJECT_DIRECTORIES' => nil, 'GIT_COMMON_DIR' => nil
+  }.freeze
 
   module_function
 
   def git_sha!
-    sha, err, st = Open3.capture3('git', '-C', REPO_ROOT, 'rev-parse', 'HEAD')
+    sha, err, st = Open3.capture3(CLEAN_GIT_ENV, 'git', '-C', REPO_ROOT, 'rev-parse', 'HEAD')
     raise "git rev-parse HEAD failed in #{REPO_ROOT}: #{err.strip}" unless st.success? && !sha.strip.empty?
 
     sha.strip
@@ -626,7 +647,12 @@ module WoodsEndToEndProfile
       id = 'Billing::Processor0Service'
       base = id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
       path = File.join(payload, 'services', "#{base}_#{Digest::SHA256.hexdigest(id)[0, 8]}.json")
-      File.file?(path) ? JSON.parse(File.read(path))['source_code'] : nil
+      raise "Missing expected edited unit payload: #{path}" unless File.file?(path)
+
+      source = JSON.parse(File.read(path))['source_code']
+      raise "Missing source_code in edited unit payload: #{path}" unless source.is_a?(String) && !source.empty?
+
+      source
     end
   end
 

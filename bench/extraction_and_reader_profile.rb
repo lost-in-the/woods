@@ -98,38 +98,57 @@ module WoodsBench
     end
   end
 
+  # Timing sampler and git provenance helpers.
+  module Sampler
+    CLEAN_GIT_ENV = {
+      'GIT_DIR' => nil, 'GIT_WORK_TREE' => nil, 'GIT_INDEX_FILE' => nil,
+      'GIT_OBJECT_DIRECTORY' => nil, 'GIT_ALTERNATE_OBJECT_DIRECTORIES' => nil, 'GIT_COMMON_DIR' => nil
+    }.freeze
+
+    module_function
+
+    def git_sha!
+      root = WoodsBench::REPO_ROOT
+      sha, err, st = Open3.capture3(CLEAN_GIT_ENV, 'git', '-C', root, 'rev-parse', 'HEAD')
+      raise "git rev-parse HEAD failed in #{root}: #{err.strip}" unless st.success? && !sha.strip.empty?
+
+      sha.strip
+    end
+
+    def median(values)
+      sorted = values.sort
+      mid = sorted.size / 2
+      sorted.size.odd? ? sorted[mid] : ((sorted[mid - 1] + sorted[mid]) / 2.0).round(3)
+    end
+
+    def measure(runs: 5, &block)
+      samples = Array.new(runs) { sample_once(&block) }
+      walls = samples.map { |s| s[:wall_ms] }.sort
+      allocs = samples.map { |s| s[:allocations] }.sort
+      {
+        runs: runs, median_wall_ms: median(walls),
+        min_wall_ms: walls.first, max_wall_ms: walls.last, median_allocations: median(allocs)
+      }
+    end
+
+    def sample_once
+      GC.start
+      alloc_before = GC.stat(:total_allocated_objects)
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      yield
+      wall_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(3)
+      { wall_ms: wall_ms, allocations: GC.stat(:total_allocated_objects) - alloc_before }
+    end
+  end
+
   module_function
 
   def git_sha!
-    sha, err, st = Open3.capture3('git', '-C', REPO_ROOT, 'rev-parse', 'HEAD')
-    raise "git rev-parse HEAD failed in #{REPO_ROOT}: #{err.strip}" unless st.success? && !sha.strip.empty?
-
-    sha.strip
-  end
-
-  def median(values)
-    sorted = values.sort
-    mid = sorted.size / 2
-    sorted.size.odd? ? sorted[mid] : ((sorted[mid - 1] + sorted[mid]) / 2.0).round(3)
+    Sampler.git_sha!
   end
 
   def measure(runs: 5, &block)
-    samples = Array.new(runs) { sample_once(&block) }
-    walls = samples.map { |s| s[:wall_ms] }.sort
-    allocs = samples.map { |s| s[:allocations] }.sort
-    {
-      runs: runs, median_wall_ms: median(walls),
-      min_wall_ms: walls.first, max_wall_ms: walls.last, median_allocations: median(allocs)
-    }
-  end
-
-  def sample_once
-    GC.start
-    alloc_before = GC.stat(:total_allocated_objects)
-    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    yield
-    wall_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(3)
-    { wall_ms: wall_ms, allocations: GC.stat(:total_allocated_objects) - alloc_before }
+    Sampler.measure(runs: runs, &block)
   end
 
   def bench_lock_heartbeat
@@ -191,20 +210,29 @@ module WoodsBench
     measure(runs: 5) { Woods::Extractors::LibExtractor.new.extract_all }
   end
 
+  def verify_complete_search!(res, expected_units:, label: 'search')
+    status = res.dig(:completeness, :status)
+    reason = res.dig(:completeness, :reason)
+    scanned = res.dig(:scan, :scanned_units)
+    return if status == 'complete' && scanned == expected_units
+
+    raise "#{label} incomplete: status=#{status.inspect}, reason=#{reason.inspect}, scanned=#{scanned.inspect}"
+  end
+
   def bench_index_reader_search(tmpdir)
     idx_dir = Fixtures.seed_search_index(File.join(tmpdir, 'search_index'), 400)
     warm = Woods::MCP::IndexReader.new(idx_dir)
-    preflight = warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
-    stop_reason = preflight.dig(:scan, :stop_reason)
-    scanned = preflight.dig(:scan, :scanned_units)
-    if stop_reason || scanned != 400
-      raise "Reader preflight failed: stop_reason=#{stop_reason.inspect}, scanned_units=#{scanned.inspect}"
-    end
+    verify_complete_search!(warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20),
+                            expected_units: 400, label: 'preflight')
 
     {
-      warm_cache: measure(runs: 5) { warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20) },
+      warm_cache: measure(runs: 5) do
+        verify_complete_search!(warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20),
+                                expected_units: 400, label: 'warm_cache')
+      end,
       cold_cache: measure(runs: 5) do
-        Woods::MCP::IndexReader.new(idx_dir).search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
+        res = Woods::MCP::IndexReader.new(idx_dir).search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
+        verify_complete_search!(res, expected_units: 400, label: 'cold_cache')
       end
     }
   end

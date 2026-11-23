@@ -144,7 +144,12 @@ module ProfileCompare
 
     def internal_rebuild_issues(base, cand)
       [['baseline', base], ['candidate', cand]].filter_map do |label, receipt|
-        "#{label} incremental_matches_clean_rebuild is false" if receipt['incremental_matches_clean_rebuild'] == false
+        val = receipt['incremental_matches_clean_rebuild']
+        if val == false
+          "#{label} incremental_matches_clean_rebuild is false"
+        elsif val != true
+          "#{label} incremental_matches_clean_rebuild is missing or unverified (#{val.inspect})"
+        end
       end
     end
   end

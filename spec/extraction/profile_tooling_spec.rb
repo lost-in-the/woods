@@ -1,12 +1,16 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'digest'
+require 'fileutils'
 require 'json'
 require 'open3'
 require 'rbconfig'
 require 'tmpdir'
+require 'woods/mcp/search_results'
 
 load File.expand_path('../../bench/ab_alternating_compare.rb', __dir__)
+load File.expand_path('../../bench/full_and_incremental_profile.rb', __dir__)
 
 RSpec.describe 'Woods profiling and A/B comparison tooling' do
   let(:compare_script) { File.expand_path('../../script/profile-compare', __dir__) }
@@ -55,6 +59,79 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
       expect { WoodsABCompare.verify_unchanged!(before_meta, became_dirty) }
         .to raise_error(RuntimeError, /changed during sampling/)
     end
+
+    it 'rejects partial SearchResults even when scanned_units matches and accepts exhausted complete scans' do
+      unreadable = Woods::MCP::SearchResults.new(limit: 20).tap { |r| r.stop('unreadable_or_corrupt_source') }.response
+                                            .merge(scan: { scanned_units: 400 })
+      budgeted = Woods::MCP::SearchResults.new(limit: 20).tap { |r| r.stop('byte_budget') }.response
+                                          .merge(scan: { scanned_units: 400 })
+      complete = Woods::MCP::SearchResults.new(limit: 20).finish.response
+                                          .merge(scan: { scanned_units: 400 })
+
+      expect { WoodsABCompare::Reporter.verify_complete_search!(unreadable, expected_units: 400) }
+        .to raise_error(RuntimeError, /incomplete.*unreadable_or_corrupt_source/)
+      expect { WoodsABCompare::Reporter.verify_complete_search!(budgeted, expected_units: 400) }
+        .to raise_error(RuntimeError, /incomplete.*byte_budget/)
+      expect { WoodsABCompare::Reporter.verify_complete_search!(complete, expected_units: 400) }
+        .not_to raise_error
+    end
+
+    it 'isolates git provenance queries from inherited GIT_DIR and GIT_WORK_TREE' do
+      repo_root = File.expand_path('../..', __dir__)
+      saved = %w[GIT_DIR GIT_WORK_TREE].to_h { |k| [k, ENV.fetch(k, nil)] }
+      ENV['GIT_DIR'] = '/nonexistent/woods-git-dir'
+      ENV['GIT_WORK_TREE'] = '/nonexistent/woods-work-tree'
+
+      meta = WoodsABCompare::Provenance.git_meta!(repo_root)
+      expect(meta[:sha]).to match(/\A[0-9a-f]{40}\z/)
+    ensure
+      saved.each { |k, v| ENV[k] = v }
+    end
+  end
+
+  describe 'WoodsEndToEndProfile fingerprint helpers' do
+    it 'normalizes generated_at in flow delta fingerprints while detecting real step changes' do
+      Dir.mktmpdir('flow_delta_fp') do |dir|
+        FileUtils.mkdir_p(File.join(dir, 'flows'))
+        unit = Struct.new(:identifier).new('Ctrl0Controller')
+        File.write(File.join(dir, 'flows', 'flow_index.json'),
+                   JSON.generate('Ctrl0Controller#act_0' => 'flows/Ctrl0Controller_act_0.json'))
+
+        base_doc = { 'entry_point' => 'Ctrl0Controller#act_0', 'generated_at' => '2026-11-23T12:00:00Z',
+                     'steps' => [{ 'unit' => 'Service0', 'operations' => [{ 'target' => 'OldGw' }] }] }
+        File.write(File.join(dir, 'flows', 'Ctrl0Controller_act_0.json'), JSON.generate(base_doc))
+        first = WoodsEndToEndProfile::GraphAndFlowBench.fingerprint_flow_delta(dir, [unit], { 'Ctrl0Controller' => {} })
+
+        same_semantic = base_doc.merge('generated_at' => '2026-11-23T12:00:05Z')
+        File.write(File.join(dir, 'flows', 'Ctrl0Controller_act_0.json'), JSON.generate(same_semantic))
+        second = WoodsEndToEndProfile::GraphAndFlowBench.fingerprint_flow_delta(dir, [unit],
+                                                                                { 'Ctrl0Controller' => {} })
+        expect(second).to eq(first)
+
+        changed_step = base_doc.merge('steps' => [{ 'unit' => 'Service0', 'operations' => [{ 'target' => 'NewGw' }] }])
+        File.write(File.join(dir, 'flows', 'Ctrl0Controller_act_0.json'), JSON.generate(changed_step))
+        third = WoodsEndToEndProfile::GraphAndFlowBench.fingerprint_flow_delta(dir, [unit], { 'Ctrl0Controller' => {} })
+        expect(third).not_to eq(first)
+      end
+    end
+
+    it 'fails closed when the expected edited unit payload or source_code is missing' do
+      Dir.mktmpdir('edited_source_fp') do |payload|
+        expect { WoodsEndToEndProfile::IndexFingerprint.edited_service_source(payload) }
+          .to raise_error(RuntimeError, /Missing expected edited unit payload/)
+
+        id = 'Billing::Processor0Service'
+        path = File.join(payload, 'services', "Billing__Processor0Service_#{Digest::SHA256.hexdigest(id)[0, 8]}.json")
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, JSON.generate('identifier' => id, 'source_code' => nil))
+        expect { WoodsEndToEndProfile::IndexFingerprint.edited_service_source(payload) }
+          .to raise_error(RuntimeError, /Missing source_code/)
+
+        File.write(path, JSON.generate('identifier' => id, 'source_code' => 'class Processor0Service; end'))
+        expect(WoodsEndToEndProfile::IndexFingerprint.edited_service_source(payload))
+          .to eq('class Processor0Service; end')
+      end
+    end
   end
 
   describe 'script/profile-compare' do
@@ -66,15 +143,14 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
       }
     end
 
-    def synthetic_receipt(incremental_matches: true, digest: 'abc123')
+    def synthetic_receipt(incremental_matches: true, include_rebuild_key: true, digest: 'abc123')
       metric = { 'wall_ms' => 10.0, 'cpu_ms' => 8.0, 'allocations' => 1000 }
       sub = { 'median_wall_ms' => 5.0, 'median_cpu_ms' => 4.0, 'median_allocations' => 500 }
-      {
+      receipt = {
         'git_sha' => 'a' * 40,
         'full_extraction' => { 'total' => metric, 'phases' => [] },
         'incremental_noop' => { 'total' => metric, 'phases' => [] },
         'incremental_method_edit' => { 'total' => metric, 'phases' => [] },
-        'incremental_matches_clean_rebuild' => incremental_matches,
         'graph_analyzer' => { 'analyze' => sub, 'cycles' => sub, 'bridges' => sub },
         'flow_precomputer' => { 'precompute' => sub, 'recompute_delta' => sub },
         'reader_and_lexical' => {
@@ -83,6 +159,8 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
         },
         'fixture_fingerprints' => { 'full_index_digest' => digest }
       }
+      receipt['incremental_matches_clean_rebuild'] = incremental_matches if include_rebuild_key
+      receipt
     end
 
     it 'rejects mixed raw and synthetic receipts before calculating deltas' do
@@ -110,6 +188,34 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
         expect(out).to include('Fixture fingerprints: DRIFT')
         expect(out).to include('baseline incremental_matches_clean_rebuild is false')
         expect(out).to include('candidate incremental_matches_clean_rebuild is false')
+      end
+    end
+
+    it 'rejects synthetic receipts with omitted, nil, or non-boolean incremental_matches_clean_rebuild' do
+      Dir.mktmpdir('profile_compare_spec') do |dir|
+        base_path = File.join(dir, 'base.json')
+        cand_path = File.join(dir, 'cand.json')
+        File.write(base_path, JSON.generate(synthetic_receipt(include_rebuild_key: false)))
+        File.write(cand_path, JSON.generate(synthetic_receipt(incremental_matches: 'true')))
+
+        out, _err, status = Open3.capture3(RbConfig.ruby, compare_script, base_path, cand_path)
+        expect(status.exitstatus).to eq(1)
+        expect(out).to include('Fixture fingerprints: DRIFT')
+        expect(out).to include('baseline incremental_matches_clean_rebuild is missing or unverified')
+        expect(out).to include('candidate incremental_matches_clean_rebuild is missing or unverified')
+      end
+    end
+
+    it 'passes when both synthetic receipts match with explicit true incremental_matches_clean_rebuild' do
+      Dir.mktmpdir('profile_compare_spec') do |dir|
+        base_path = File.join(dir, 'base.json')
+        cand_path = File.join(dir, 'cand.json')
+        File.write(base_path, JSON.generate(synthetic_receipt(incremental_matches: true)))
+        File.write(cand_path, JSON.generate(synthetic_receipt(incremental_matches: true)))
+
+        out, _err, status = Open3.capture3(RbConfig.ruby, compare_script, base_path, cand_path)
+        expect(status.exitstatus).to eq(0)
+        expect(out).to include('Fixture fingerprints: PASS')
       end
     end
 
