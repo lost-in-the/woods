@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Local test -> lint -> profile -> compare loop for Woods performance work.
+#
+# Usage:
+#   script/perf-loop baseline                  # Capture tmp/perf/baseline.json
+#   script/perf-loop check [spec/file_spec.rb] # Lint changed files, run specs, profile & compare
+#   script/perf-loop compare [base] [cand]     # Compare two receipts (defaults to tmp/perf/*.json)
+#
+# Environment:
+#   SCALE=1          Fixture scale multiplier for bench/full_and_incremental_profile.rb
+#   PERF_DIR=tmp/perf Output directory for local JSON receipts (gitignored under tmp/)
+
+set -euo pipefail
+
+PERF_DIR="${PERF_DIR:-tmp/perf}"
+BASELINE="${PERF_DIR}/baseline.json"
+CANDIDATE="${PERF_DIR}/candidate.json"
+mkdir -p "${PERF_DIR}"
+
+cmd="${1:-check}"
+shift || true
+
+case "${cmd}" in
+  baseline)
+    echo "[perf-loop] Capturing baseline receipt -> ${BASELINE}"
+    PROFILE_OUT="${BASELINE}" bundle exec ruby bench/full_and_incremental_profile.rb
+    ;;
+  check)
+    changed_rb=$(git diff --name-only --diff-filter=AM main -- '*.rb' || true)
+    if [[ -n "${changed_rb}" ]]; then
+      echo "[perf-loop] Running RuboCop on changed Ruby files..."
+      # shellcheck disable=SC2086
+      bin/rubocop ${changed_rb}
+    fi
+    if [[ "$#" -gt 0 ]]; then
+      echo "[perf-loop] Running targeted specs: $*"
+      bin/rspec "$@"
+    fi
+    echo "[perf-loop] Running end-to-end profile -> ${CANDIDATE}"
+    PROFILE_OUT="${CANDIDATE}" bundle exec ruby bench/full_and_incremental_profile.rb
+    if [[ -f "${BASELINE}" ]]; then
+      echo "[perf-loop] Comparing against ${BASELINE}"
+      ruby script/profile-compare "${BASELINE}" "${CANDIDATE}"
+    else
+      echo "[perf-loop] No baseline at ${BASELINE}; run 'script/perf-loop baseline' on main first."
+    fi
+    ;;
+  compare)
+    base="${1:-${BASELINE}}"
+    cand="${2:-${CANDIDATE}}"
+    ruby script/profile-compare "${base}" "${cand}"
+    ;;
+  *)
+    echo "Usage: script/perf-loop {baseline|check [specs...]|compare [base] [cand]}" >&2
+    exit 2
+    ;;
+esac

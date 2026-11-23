@@ -1,0 +1,162 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Compare two JSON receipts produced by `bench/full_and_incremental_profile.rb`
+# (or two `WOODS_PROFILE_OUT` JSON files).
+#
+# Usage:
+#   ruby script/profile-compare BASELINE.json CANDIDATE.json
+#   ruby script/profile-compare --markdown BASELINE.json CANDIDATE.json
+#   ruby script/profile-compare --allow-drift BASELINE.json CANDIDATE.json
+
+require 'json'
+
+# Formatter and equivalence checker for Woods profiling JSON receipts.
+module ProfileCompare
+  SUBSYSTEM_ROWS = [
+    ['graph_analyzer.analyze', %w[graph_analyzer analyze]],
+    ['graph_analyzer.cycles', %w[graph_analyzer cycles]],
+    ['graph_analyzer.bridges', %w[graph_analyzer bridges]],
+    ['flow_precomputer.precompute', %w[flow_precomputer precompute]],
+    ['flow_precomputer.delta', %w[flow_precomputer recompute_delta]],
+    ['reader.edges_via', %w[reader_and_lexical edges_via]],
+    ['reader.dependents_via', %w[reader_and_lexical dependents_via]],
+    ['reader.deep_search', %w[reader_and_lexical deep_search]],
+    ['lexical.build', %w[reader_and_lexical lexical_build]],
+    ['lexical.query', %w[reader_and_lexical lexical_query]]
+  ].freeze
+
+  module_function
+
+  def run(argv)
+    allow_drift = !argv.delete('--allow-drift').nil?
+    markdown = !argv.delete('--markdown').nil?
+    if argv.size != 2
+      warn 'Usage: ruby script/profile-compare [--markdown] [--allow-drift] BASELINE.json CANDIDATE.json'
+      exit 2
+    end
+
+    base = JSON.parse(File.read(argv[0]))
+    cand = JSON.parse(File.read(argv[1]))
+    rows = collect_rows(base, cand)
+    markdown ? Formatter.print_markdown(base, cand, rows) : Formatter.print_text(base, cand, rows)
+    check_fingerprints(base, cand, allow_drift: allow_drift)
+  end
+
+  def collect_rows(base, cand)
+    return [metric_row('total', base['total'], cand['total'], prefix: nil)] unless base.key?('full_extraction')
+
+    keys = %w[full_extraction incremental_noop incremental_method_edit incremental_extraction]
+    rows = keys.select { |k| base.key?(k) && cand.key?(k) }.map do |key|
+      metric_row(key, base.dig(key, 'total'), cand.dig(key, 'total'), prefix: nil)
+    end
+    SUBSYSTEM_ROWS.each do |label, path|
+      rows << metric_row(label, base.dig(*path), cand.dig(*path), prefix: 'median_')
+    end
+    rows
+  end
+
+  def metric_row(label, base_hash, cand_hash, prefix:)
+    b = base_hash || {}
+    c = cand_hash || {}
+    w_key = "#{prefix}wall_ms"
+    c_key = "#{prefix}cpu_ms"
+    a_key = "#{prefix}allocations"
+    {
+      label: label,
+      b_wall: b[w_key].to_f, c_wall: c[w_key].to_f,
+      b_cpu: b[c_key].to_f, c_cpu: c[c_key].to_f,
+      b_alloc: b[a_key].to_i, c_alloc: c[a_key].to_i
+    }
+  end
+
+  def phase_rows(base, cand, min_ms: 5.0)
+    b_phases = index_phases(base)
+    c_phases = index_phases(cand)
+    (b_phases.keys | c_phases.keys).filter_map do |name|
+      row = metric_row(name, b_phases[name], c_phases[name], prefix: nil)
+      row unless row[:b_wall] < min_ms && row[:c_wall] < min_ms
+    end
+  end
+
+  def index_phases(receipt)
+    (receipt.dig('full_extraction', 'phases') || []).to_h { |p| [p['name'], p] }
+  end
+
+  def extract_fingerprints(receipt)
+    fp = receipt['fixture_fingerprints'] || receipt['equivalence']
+    fp.is_a?(Hash) && !fp.empty? ? fp : nil
+  end
+
+  def check_fingerprints(base, cand, allow_drift:)
+    b_fp = extract_fingerprints(base)
+    c_fp = extract_fingerprints(cand)
+    unless b_fp && c_fp
+      puts 'Fixture fingerprints: N/A (raw profile receipt — no fixture fingerprints)'
+      return
+    end
+
+    mismatches = (b_fp.keys | c_fp.keys).reject { |k| b_fp[k] == c_fp[k] }
+    if mismatches.empty?
+      puts "Fixture fingerprints: PASS (all #{b_fp.size} synthetic digests match)"
+    else
+      puts "Fixture fingerprints: DRIFT in #{mismatches.join(', ')}"
+      exit 1 unless allow_drift
+    end
+  end
+
+  # Text and Markdown table rendering for comparison rows.
+  module Formatter
+    module_function
+
+    def pct(before, after)
+      return 'n/a' if before.nil? || after.nil? || before.zero?
+
+      format('%<delta>+.1f%%', delta: ((after.to_f - before.to_f) / before.to_f) * 100.0)
+    end
+
+    def print_text(base, cand, rows)
+      puts "Comparing baseline (#{base['git_sha']}) -> candidate (#{cand['git_sha']})"
+      puts '-' * 136
+      rows.each { |r| puts format_text_row(r) }
+      print_phase_deltas(base, cand) if base.key?('full_extraction')
+      puts '-' * 136
+    end
+
+    def format_text_row(row)
+      format(
+        '%<label>-28s wall %<bw>8.2f->%<cw>8.2f ms (%<wp>7s) | cpu %<bc>7.2f->%<cc>7.2f ms (%<cp>7s) | ' \
+        'allocs %<ba>9d->%<ca>9d (%<ap>7s)',
+        label: row[:label], bw: row[:b_wall], cw: row[:c_wall], wp: pct(row[:b_wall], row[:c_wall]),
+        bc: row[:b_cpu], cc: row[:c_cpu], cp: pct(row[:b_cpu], row[:c_cpu]),
+        ba: row[:b_alloc], ca: row[:c_alloc], ap: pct(row[:b_alloc], row[:c_alloc])
+      )
+    end
+
+    def print_phase_deltas(base, cand)
+      puts '-' * 136
+      puts 'Phase deltas (full_extraction, >= 5ms):'
+      ProfileCompare.phase_rows(base, cand).each { |row| puts "  #{format_text_row(row)}" }
+    end
+
+    def print_markdown(base, cand, rows)
+      header = "| Workload (`#{base['git_sha']}` -> `#{cand['git_sha']}`) | " \
+               'Wall (ms) | Wall Δ | CPU (ms) | CPU Δ | Allocs | Alloc Δ |'
+      puts header
+      puts '|---|---:|---:|---:|---:|---:|---:|'
+      rows.each { |r| puts format_markdown_row(r) }
+    end
+
+    def format_markdown_row(row)
+      format(
+        '| `%<label>s` | %<bw>.2f -> %<cw>.2f | %<wp>s | %<bc>.2f -> %<cc>.2f | %<cp>s | ' \
+        '%<ba>d -> %<ca>d | %<ap>s |',
+        label: row[:label], bw: row[:b_wall], cw: row[:c_wall], wp: pct(row[:b_wall], row[:c_wall]),
+        bc: row[:b_cpu], cc: row[:c_cpu], cp: pct(row[:b_cpu], row[:c_cpu]),
+        ba: row[:b_alloc], ca: row[:c_alloc], ap: pct(row[:b_alloc], row[:c_alloc])
+      )
+    end
+  end
+end
+
+ProfileCompare.run(ARGV)
