@@ -206,6 +206,36 @@ RSpec.describe Woods::GraphAnalyzer do
 
       expect(signature).to match(/\A[0-9a-f]{64}\z/)
     end
+
+    it 'preserves exact cycle ordering, counts, and caps across overlapping cycles with external edges' do
+      graph.register(make_unit(type: :model, identifier: 'A', dependencies: [
+                                 { type: :model, target: 'B' },
+                                 { type: :model, target: 'ExternalMissing' }
+                               ]))
+      graph.register(make_unit(type: :model, identifier: 'B', dependencies: [
+                                 { type: :model, target: 'C' },
+                                 { type: :model, target: 'A' }
+                               ]))
+      graph.register(make_unit(type: :model, identifier: 'C', dependencies: [
+                                 { type: :model, target: 'A' },
+                                 { type: :model, target: 'D' }
+                               ]))
+      graph.register(make_unit(type: :model, identifier: 'D', dependencies: [
+                                 { type: :model, target: 'B' }
+                               ]))
+
+      full = described_class.new(graph)
+      expect(full.cycles).to eq([
+                                  %w[A B A],
+                                  %w[A B C A],
+                                  %w[B C D B]
+                                ])
+      expect(full.cycle_limit_reached?).to be(false)
+
+      capped = described_class.new(graph, cycle_limit: 2)
+      expect(capped.cycles).to eq([%w[A B A], %w[A B C A]])
+      expect(capped.cycle_limit_reached?).to be(true)
+    end
   end
 
   describe '#bfs_shortest_path' do
