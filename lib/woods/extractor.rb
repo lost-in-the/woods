@@ -586,6 +586,7 @@ module Woods
 
     def perform_extract_all
       profile = start_profile_run('full')
+      completed = false
       reset_git_capture
       setup_output_directory
       @results = {}
@@ -742,9 +743,10 @@ module Woods
 
       profile_phase('summary') { log_summary }
 
+      completed = true
       @results
     ensure
-      finish_profile_run('full', profile, error: $ERROR_INFO)
+      finish_profile_run('full', profile, error: completed ? @publication_error : ($ERROR_INFO || @publication_error))
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -779,6 +781,7 @@ module Woods
     #   Rails process and full extraction instead of reusing this runtime
     def perform_extract_changed(changed_files)
       profile = start_profile_run('incremental')
+      completed = false
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
       require_relative 'input_rules'
       restart_paths = change_set.relative_paths.select { |path| InputRules.new.action(path) == :full }
@@ -873,9 +876,11 @@ module Woods
 
       finalize_incremental_run(touched)
 
+      completed = true
       touched.to_a
     ensure
-      finish_profile_run('incremental', profile, error: $ERROR_INFO)
+      finish_profile_run('incremental', profile,
+                         error: completed ? @publication_error : ($ERROR_INFO || @publication_error))
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -911,6 +916,7 @@ module Woods
     # @raise [ArgumentError] when no recognized key is given
     def refresh(*keys)
       profile = start_profile_run('refresh')
+      completed = false
       keys = Array(keys).flatten.map(&:to_sym).uniq
       known, unknown = keys.partition { |key| EXTRACTORS.key?(key) }
       raise ArgumentError, "No known extractor in #{keys.inspect}" if known.empty?
@@ -937,10 +943,12 @@ module Woods
       profile_phase('type index') { affected_types.each { |type_key| regenerate_type_index(type_key) } }
       finalize_incremental_run(touched, reason: "refresh:#{known.sort.join(',')}")
 
+      completed = true
       { types: known, touched: touched.to_a, unknown: unknown }
     ensure
       discard_unpromoted_stage
-      finish_profile_run('refresh', profile, error: $ERROR_INFO)
+      finish_profile_run('refresh', profile,
+                         error: completed ? @publication_error : ($ERROR_INFO || @publication_error))
     end
 
     # The whole-app families a refresh re-runs with the named ones (#1124): each
@@ -1020,6 +1028,8 @@ module Woods
     def start_profile_run(operation)
       @last_profile = nil
       @active_profile = nil
+      @publication_error = nil
+      @timing_collector = Extraction::ExtractorTimings.new
       return nil unless profiling?
 
       @active_profile = Extraction::ProfileReport.new(operation: operation).start

@@ -4,13 +4,13 @@
 #
 # Runs N alternating pairs (AB, BA, AB, BA, ...) across two Woods worktrees
 # in fresh Ruby subprocesses with BOTH `WOODS_PROFILE` and `WOODS_PROFILE_OUT`
-# explicitly unset, verifying git SHA / clean-tree provenance and fixture
-# fingerprints (including exact ordered GraphAnalyzer cycles).
+# explicitly unset and each arm isolated to its own Gemfile, verifying full
+# Git SHA / clean-tree provenance before & after sampling and comparing
+# non-empty fixture fingerprints across every measured run.
 #
 # Usage:
-#   ruby bench/ab_alternating_compare.rb --base /path/base --cand /path/cand
-#   ruby bench/ab_alternating_compare.rb --suite graph --pairs 5 --base ... --cand ... --out receipt.json
-#   ruby bench/ab_alternating_compare.rb --suite reader --pairs 5 --base ... --cand ... --markdown
+#   ruby bench/ab_alternating_compare.rb --suite graph --pairs 5 --base /path/base --cand /path/cand
+#   ruby bench/ab_alternating_compare.rb --suite reader --pairs 5 --base ... --cand ... --out receipt.json
 
 require 'json'
 require 'open3'
@@ -147,7 +147,8 @@ module WoodsABCompare
             'source_code' => ("class #{id} < ApplicationRecord\n  has_many :items\nend\n" * 40),
             'dependencies' => [], 'dependents' => []
           }
-          File.write(File.join(mdir, "#{id}.json"), JSON.generate(unit))
+          filename = "#{id}_#{Digest::SHA256.hexdigest(id)[0, 8]}.json"
+          File.write(File.join(mdir, filename), JSON.generate(unit))
           { 'identifier' => id, 'file_path' => unit['file_path'], 'namespace' => 'Models' }
         end
         File.write(File.join(mdir, '_index.json'), JSON.generate(entries))
@@ -164,7 +165,11 @@ module WoodsABCompare
         index.close
 
         warm = Woods::MCP::IndexReader.new(sdir)
-        warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
+        preflight = warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
+        stop = preflight.dig(:scan, :stop_reason)
+        scanned = preflight.dig(:scan, :scanned_units)
+        raise "Reader preflight failed: stop=#{stop.inspect}, scanned=#{scanned.inspect}" if stop || scanned != 400
+
         search_warm = sample { warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20) }
         search_cold = sample do
           Woods::MCP::IndexReader.new(sdir).search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
@@ -173,10 +178,9 @@ module WoodsABCompare
         cold_res = search_cold.delete(:result)
 
         fp = Digest::SHA256.hexdigest(JSON.generate(
-          edges_count: edges_res.size, edges_sample: edges_res.first(10),
-          deps: deps_res,
-          warm_scanned: warm_res.dig(:scan, :scanned_units),
-          cold_scanned: cold_res.dig(:scan, :scanned_units)
+          edges: edges_res, deps: deps_res,
+          warm_scanned: warm_res.dig(:scan, :scanned_units), warm_stop: warm_res.dig(:scan, :stop_reason),
+          cold_scanned: cold_res.dig(:scan, :scanned_units), cold_stop: cold_res.dig(:scan, :stop_reason)
         ))
 
         puts JSON.generate(
@@ -194,12 +198,12 @@ module WoodsABCompare
     RUBY
   end
 
-  # Summary statistics and formatting helpers.
+  # Summary statistics, fingerprint validation, and report formatting.
   module Reporter
     module_function
 
     def summarize(base_runs, cand_runs)
-      base_runs.first['metrics'].keys.to_h do |key|
+      base_runs.first.fetch('metrics').keys.to_h do |key|
         [key, summarize_metric(base_runs, cand_runs, key)]
       end
     end
@@ -211,7 +215,13 @@ module WoodsABCompare
     end
 
     def extract_series(runs, key, field)
-      runs.map { |r| r['metrics'][key][field] }
+      runs.map do |run|
+        metrics = run.fetch('metrics')
+        entry = metrics.fetch(key)
+        raise KeyError, "Missing metric #{key}.#{field}" unless entry.key?(field) && !entry[field].nil?
+
+        entry[field]
+      end
     end
 
     def build_stats(base, cand)
@@ -230,8 +240,17 @@ module WoodsABCompare
     end
 
     def median(values)
+      raise ArgumentError, 'Cannot compute median of empty sample list' if values.empty?
+
       sorted = values.sort
-      sorted[sorted.size / 2]
+      mid = sorted.size / 2
+      return sorted[mid] if sorted.size.odd?
+
+      ((sorted[mid - 1] + sorted[mid]) / 2.0).round(3)
+    end
+
+    def format_alloc(val)
+      val.is_a?(Float) && val != val.to_i ? format('%<v>.1f', v: val) : val.to_i.to_s
     end
 
     def pct(before, after)
@@ -240,16 +259,56 @@ module WoodsABCompare
       format('%<d>+.1f%%', d: ((after - before).to_f / before) * 100.0)
     end
 
+    def verify_fingerprints(base_runs, cand_runs)
+      expected = valid_fingerprints(base_runs.first)
+      return ['base pair 1: missing or empty fixture_fingerprints'] unless expected
+
+      mismatches = []
+      check_arm_fingerprints('base', base_runs, expected, mismatches)
+      check_arm_fingerprints('candidate', cand_runs, expected, mismatches)
+      mismatches
+    end
+
+    def valid_fingerprints(run)
+      fp = run['fixture_fingerprints']
+      fp.is_a?(Hash) && !fp.empty? ? fp : nil
+    end
+
+    def check_arm_fingerprints(arm, runs, expected, mismatches)
+      runs.each_with_index do |run, idx|
+        fp = valid_fingerprints(run)
+        if fp.nil?
+          mismatches << "#{arm} pair #{idx + 1}: missing or empty fixture_fingerprints"
+        elsif fp != expected
+          diff = (expected.keys | fp.keys).reject { |k| expected[k] == fp[k] }
+          mismatches << "#{arm} pair #{idx + 1}: drift in #{diff.join(', ')}"
+        end
+      end
+    end
+
+    def print_report(receipt, markdown: false)
+      Printer.print_report(receipt, markdown: markdown)
+    end
+  end
+
+  # Text and Markdown table rendering for alternating A/B receipts.
+  module Printer
+    module_function
+
     def print_report(receipt, markdown: false)
       markdown ? print_markdown(receipt) : print_text(receipt)
-      puts "Fixture fingerprints: #{receipt[:fingerprints_match] ? 'PASS' : 'DRIFT'}"
+      if receipt[:fingerprints_match]
+        puts "Fixture fingerprints: PASS (all #{receipt[:pairs]} pairs matched)"
+      else
+        puts "Fixture fingerprints: DRIFT (#{receipt[:fingerprint_mismatches].join('; ')})"
+      end
     end
 
     def print_text(receipt)
       b = receipt[:base]
       c = receipt[:candidate]
       puts "Alternating Unprofiled A/B (#{receipt[:suite]}, #{receipt[:pairs]} pairs, " \
-           "#{b[:sha]}[clean=#{b[:clean]}] -> #{c[:sha]}[clean=#{c[:clean]}])"
+           "#{b[:sha][0, 12]}[clean=#{b[:clean]}] -> #{c[:sha][0, 12]}[clean=#{c[:clean]}])"
       puts '-' * 124
       receipt[:summary].each { |k, s| puts format_text_row(k, s) }
       puts '-' * 124
@@ -258,24 +317,26 @@ module WoodsABCompare
     def format_text_row(key, stats)
       format(
         '%<k>-30s wall %<bw>7.2f->%<cw>7.2f ms (%<wd>7s) | ' \
-        'cpu %<bc>7.2f->%<cc>7.2f ms (%<cd>7s) | allocs %<ba>8d->%<ca>8d (%<ad>7s)',
+        'cpu %<bc>7.2f->%<cc>7.2f ms (%<cd>7s) | allocs %<ba>9s->%<ca>9s (%<ad>7s)',
         k: key, bw: stats[:base_wall_med], cw: stats[:cand_wall_med], wd: stats[:wall_delta],
         bc: stats[:base_cpu_med], cc: stats[:cand_cpu_med], cd: stats[:cpu_delta],
-        ba: stats[:base_alloc_med], ca: stats[:cand_alloc_med], ad: stats[:alloc_delta]
+        ba: Reporter.format_alloc(stats[:base_alloc_med]), ca: Reporter.format_alloc(stats[:cand_alloc_med]),
+        ad: stats[:alloc_delta]
       )
     end
 
     def print_markdown(receipt)
-      puts "| Workload (`#{receipt[:base][:sha]}` -> `#{receipt[:candidate][:sha]}`) | " \
+      puts "| Workload (`#{receipt[:base][:sha][0, 12]}` -> `#{receipt[:candidate][:sha][0, 12]}`) | " \
            'Wall med (ms) | Wall Δ | CPU med (ms) | CPU Δ | Allocs med | Alloc Δ |'
       puts '|---|---:|---:|---:|---:|---:|---:|'
       receipt[:summary].each do |key, stats|
         puts format(
           '| `%<k>s` | %<bw>.2f -> %<cw>.2f | %<wd>s | %<bc>.2f -> %<cc>.2f | %<cd>s | ' \
-          '%<ba>d -> %<ca>d | %<ad>s |',
+          '%<ba>s -> %<ca>s | %<ad>s |',
           k: key, bw: stats[:base_wall_med], cw: stats[:cand_wall_med], wd: stats[:wall_delta],
           bc: stats[:base_cpu_med], cc: stats[:cand_cpu_med], cd: stats[:cpu_delta],
-          ba: stats[:base_alloc_med], ca: stats[:cand_alloc_med], ad: stats[:alloc_delta]
+          ba: Reporter.format_alloc(stats[:base_alloc_med]), ca: Reporter.format_alloc(stats[:cand_alloc_med]),
+          ad: stats[:alloc_delta]
         )
       end
     end
@@ -285,16 +346,30 @@ module WoodsABCompare
 
   def run(argv)
     opts = parse_options(argv)
-    worker = worker_source(opts[:suite])
-    base_runs, cand_runs = execute_pairs(opts[:base], opts[:cand], opts[:pairs], worker)
-    receipt = build_receipt(opts, base_runs, cand_runs)
+    base_meta, cand_meta, base_runs, cand_runs = measure_verified(opts)
+    receipt = build_receipt(opts, base_meta, cand_meta, base_runs, cand_runs)
     File.write(opts[:out], "#{JSON.pretty_generate(receipt)}\n") if opts[:out]
-    Reporter.print_report(receipt, markdown: opts[:markdown])
+    Printer.print_report(receipt, markdown: opts[:markdown])
     exit 1 unless receipt[:fingerprints_match]
   end
 
+  def measure_verified(opts)
+    base_before = Provenance.verify_worktree!(opts[:base], allow_dirty: opts[:allow_dirty])
+    cand_before = Provenance.verify_worktree!(opts[:cand], allow_dirty: opts[:allow_dirty])
+    base_runs, cand_runs = execute_pairs(opts[:base], opts[:cand], opts[:pairs], worker_source(opts[:suite]))
+    Provenance.verify_unchanged!(base_before, Provenance.git_meta!(opts[:base]))
+    Provenance.verify_unchanged!(cand_before, Provenance.git_meta!(opts[:cand]))
+    [base_before, cand_before, base_runs, cand_runs]
+  end
+
   def parse_options(argv)
-    opts = { suite: 'graph', pairs: 5, markdown: false }
+    opts = { suite: 'graph', pairs: 5, markdown: false, allow_dirty: false }
+    option_parser(opts).parse!(argv)
+    validate_options!(opts)
+    opts
+  end
+
+  def option_parser(opts)
     OptionParser.new do |p|
       p.on('--suite NAME', SUITES) { |v| opts[:suite] = v }
       p.on('--pairs N', Integer) { |v| opts[:pairs] = v }
@@ -302,10 +377,13 @@ module WoodsABCompare
       p.on('--cand DIR') { |v| opts[:cand] = File.expand_path(v) }
       p.on('--out PATH') { |v| opts[:out] = v }
       p.on('--markdown') { opts[:markdown] = true }
-    end.parse!(argv)
-    raise ArgumentError, 'Provide --base DIR and --cand DIR' unless opts[:base] && opts[:cand]
+      p.on('--allow-dirty') { opts[:allow_dirty] = true }
+    end
+  end
 
-    opts
+  def validate_options!(opts)
+    raise ArgumentError, 'Provide --base DIR and --cand DIR' unless opts[:base] && opts[:cand]
+    raise ArgumentError, "--pairs must be >= 1 (got #{opts[:pairs]})" if opts[:pairs] < 1
   end
 
   def worker_source(suite)
@@ -333,33 +411,69 @@ module WoodsABCompare
   end
 
   def run_arm(dir, worker)
-    # Explicitly clear both profiling variables so runs are strictly unprofiled.
-    env = { 'WOODS_PROFILE' => nil, 'WOODS_PROFILE_OUT' => nil }
-    out, err, st = Open3.capture3(env, 'bundle', 'exec', 'ruby', '-e', worker, chdir: dir)
+    # Isolate Bundler to each arm's own Gemfile and explicitly clear both profiling vars.
+    env = { 'BUNDLE_GEMFILE' => File.join(dir, 'Gemfile'), 'WOODS_PROFILE' => nil, 'WOODS_PROFILE_OUT' => nil }
+    out, err, st = with_clean_bundler_env do
+      Open3.capture3(env, 'bundle', 'exec', 'ruby', '-e', worker, chdir: dir)
+    end
     raise "Arm #{dir} failed:\n#{err}" unless st.success?
 
     JSON.parse(out.lines.last)
   end
 
-  def git_meta(dir)
-    sha, = Open3.capture2('git', '-C', dir, 'rev-parse', '--short', 'HEAD')
-    status, = Open3.capture2('git', '-C', dir, 'status', '--porcelain')
-    { dir: dir, sha: sha.strip, clean: status.strip.empty? }
+  def with_clean_bundler_env(&block)
+    return Bundler.with_unbundled_env(&block) if defined?(Bundler) && Bundler.respond_to?(:with_unbundled_env)
+
+    yield
   end
 
-  def build_receipt(opts, base_runs, cand_runs)
-    b_fp = base_runs.first['fixture_fingerprints']
-    c_fp = cand_runs.first['fixture_fingerprints']
+  # Git provenance verification before and after arm sampling.
+  module Provenance
+    module_function
+
+    def verify_worktree!(dir, allow_dirty:)
+      meta = git_meta!(dir)
+      raise "Worktree #{dir} has uncommitted changes (pass --allow-dirty to override)" if !meta[:clean] && !allow_dirty
+
+      meta
+    end
+
+    def verify_unchanged!(before_meta, after_meta)
+      return if before_meta == after_meta
+
+      raise "Worktree #{before_meta[:dir]} changed during sampling " \
+            "(#{before_meta[:sha]}[clean=#{before_meta[:clean]}] -> " \
+            "#{after_meta[:sha]}[clean=#{after_meta[:clean]}])"
+    end
+
+    def git_meta!(dir)
+      sha, sha_err, sha_st = Open3.capture3('git', '-C', dir, 'rev-parse', 'HEAD')
+      raise "git rev-parse HEAD failed for #{dir}: #{sha_err.strip}" unless sha_st.success? && !sha.strip.empty?
+
+      status, st_err, st_ok = Open3.capture3('git', '-C', dir, 'status', '--porcelain')
+      raise "git status failed for #{dir}: #{st_err.strip}" unless st_ok.success?
+
+      { dir: dir, sha: sha.strip, clean: status.strip.empty? }
+    end
+  end
+
+  def verify_unchanged!(before_meta, after_meta)
+    Provenance.verify_unchanged!(before_meta, after_meta)
+  end
+
+  def build_receipt(opts, base_meta, cand_meta, base_runs, cand_runs)
+    mismatches = Reporter.verify_fingerprints(base_runs, cand_runs)
     {
-      schema_version: 1, ruby_version: RUBY_VERSION, suite: opts[:suite], pairs: opts[:pairs],
+      schema_version: 2, ruby_version: RUBY_VERSION, suite: opts[:suite], pairs: opts[:pairs],
       unprofiled_env: { WOODS_PROFILE: nil, WOODS_PROFILE_OUT: nil },
-      base: git_meta(opts[:base]), candidate: git_meta(opts[:cand]),
+      base: base_meta, candidate: cand_meta,
       summary: Reporter.summarize(base_runs, cand_runs),
-      fingerprints_match: b_fp == c_fp,
-      base_fingerprints: b_fp, candidate_fingerprints: c_fp,
+      fingerprints_match: mismatches.empty?,
+      fingerprint_mismatches: mismatches,
+      expected_fingerprints: base_runs.first['fixture_fingerprints'],
       base_runs: base_runs, cand_runs: cand_runs
     }
   end
 end
 
-WoodsABCompare.run(ARGV)
+WoodsABCompare.run(ARGV) if $PROGRAM_NAME == __FILE__

@@ -7,12 +7,14 @@
 #   script/perf-loop compare [base] [cand]     # Compare two receipts (defaults to tmp/perf/*.json)
 #
 # Environment:
-#   SCALE=1          Fixture scale multiplier for bench/full_and_incremental_profile.rb
+#   BASE_REF=main     Git ref to diff against for RuboCop (must resolve in this checkout)
+#   SCALE=1           Fixture scale multiplier for bench/full_and_incremental_profile.rb
 #   PERF_DIR=tmp/perf Output directory for local JSON receipts (gitignored under tmp/)
 
 set -euo pipefail
 
 PERF_DIR="${PERF_DIR:-tmp/perf}"
+BASE_REF="${BASE_REF:-main}"
 BASELINE="${PERF_DIR}/baseline.json"
 CANDIDATE="${PERF_DIR}/candidate.json"
 mkdir -p "${PERF_DIR}"
@@ -26,11 +28,17 @@ case "${cmd}" in
     PROFILE_OUT="${BASELINE}" bundle exec ruby bench/full_and_incremental_profile.rb
     ;;
   check)
-    changed_rb=$(git diff --name-only --diff-filter=AM main -- '*.rb' || true)
-    if [[ -n "${changed_rb}" ]]; then
-      echo "[perf-loop] Running RuboCop on changed Ruby files..."
-      # shellcheck disable=SC2086
-      bin/rubocop ${changed_rb}
+    if ! git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null; then
+      echo "[perf-loop] Comparison ref '${BASE_REF}' does not resolve. Set BASE_REF (e.g. origin/main)." >&2
+      exit 2
+    fi
+    changed_rb=()
+    while IFS= read -r -d '' path; do
+      changed_rb+=("${path}")
+    done < <(git diff -z --name-only --diff-filter=AM "${BASE_REF}" -- '*.rb')
+    if [[ "${#changed_rb[@]}" -gt 0 ]]; then
+      echo "[perf-loop] Running RuboCop on ${#changed_rb[@]} changed Ruby file(s)..."
+      bin/rubocop -- "${changed_rb[@]}"
     fi
     if [[ "$#" -gt 0 ]]; then
       echo "[perf-loop] Running targeted specs: $*"
@@ -42,7 +50,9 @@ case "${cmd}" in
       echo "[perf-loop] Comparing against ${BASELINE}"
       ruby script/profile-compare "${BASELINE}" "${CANDIDATE}"
     else
-      echo "[perf-loop] No baseline at ${BASELINE}; run 'script/perf-loop baseline' on main first."
+      echo "[perf-loop] No baseline receipt at ${BASELINE}."
+      echo "[perf-loop] Capture one from a revision containing bench/full_and_incremental_profile.rb:"
+      echo "[perf-loop]   PERF_DIR=\"$(pwd)/${PERF_DIR}\" script/perf-loop baseline"
     fi
     ;;
   compare)

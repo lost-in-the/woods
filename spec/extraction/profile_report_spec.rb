@@ -168,5 +168,70 @@ RSpec.describe Woods::Extraction::ProfileReport do
       ENV['WOODS_PROFILE'] = original_profile
       ENV['WOODS_PROFILE_OUT'] = original_out
     end
+
+    it 'records status ok when a successful extraction runs inside a caller rescue block' do
+      original_profile = ENV.fetch('WOODS_PROFILE', nil)
+      original_out = ENV.fetch('WOODS_PROFILE_OUT', nil)
+      ENV['WOODS_PROFILE'] = '1'
+      ENV['WOODS_PROFILE_OUT'] = nil
+
+      begin
+        raise IOError, 'unrelated caller exception'
+      rescue IOError
+        extractor.extract_all
+      end
+
+      expect(extractor.last_profile.to_h[:total][:status]).to eq('ok')
+      expect(extractor.last_profile.to_h[:total][:error_class]).to be_nil
+    ensure
+      ENV['WOODS_PROFILE'] = original_profile
+      ENV['WOODS_PROFILE_OUT'] = original_out
+    end
+
+    it 'records error status on publication failure without carrying it into the next run' do
+      original_profile = ENV.fetch('WOODS_PROFILE', nil)
+      original_out = ENV.fetch('WOODS_PROFILE_OUT', nil)
+      ENV['WOODS_PROFILE'] = '1'
+      ENV['WOODS_PROFILE_OUT'] = nil
+
+      allow(extractor).to receive(:publish_generation) do
+        extractor.instance_variable_set(:@publication_error, Woods::ExtractionError.new('publish failed'))
+        false
+      end
+      extractor.extract_all
+
+      expect(extractor.last_profile.to_h[:total][:status]).to eq('error')
+      expect(extractor.last_profile.to_h[:total][:error_class]).to eq('Woods::ExtractionError')
+
+      allow(extractor).to receive(:publish_generation).and_return(true)
+      extractor.extract_all
+
+      expect(extractor.last_profile.to_h[:total][:status]).to eq('ok')
+      expect(extractor.last_profile.to_h[:total][:error_class]).to be_nil
+    ensure
+      ENV['WOODS_PROFILE'] = original_profile
+      ENV['WOODS_PROFILE_OUT'] = original_out
+    end
+
+    it 'resets extractor_timings before a rejected refresh raises ArgumentError' do
+      original_profile = ENV.fetch('WOODS_PROFILE', nil)
+      original_out = ENV.fetch('WOODS_PROFILE_OUT', nil)
+      ENV['WOODS_PROFILE'] = '1'
+      ENV['WOODS_PROFILE_OUT'] = nil
+
+      allow(extractor).to receive(:extract_all_sequential) do
+        extractor.send(:timing_collector).time(:models) { [] }
+      end
+      extractor.extract_all
+      expect(extractor.last_profile.to_h[:extractor_timings]).to have_key('models')
+
+      expect { extractor.refresh(:not_a_real_extractor) }.to raise_error(ArgumentError, /No known extractor/)
+      expect(extractor.last_profile.to_h[:total][:status]).to eq('error')
+      expect(extractor.last_profile.to_h[:total][:error_class]).to eq('ArgumentError')
+      expect(extractor.last_profile.to_h[:extractor_timings]).to eq({})
+    ensure
+      ENV['WOODS_PROFILE'] = original_profile
+      ENV['WOODS_PROFILE_OUT'] = original_out
+    end
   end
 end

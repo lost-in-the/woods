@@ -11,7 +11,7 @@
 
 require 'json'
 
-# Formatter and equivalence checker for Woods profiling JSON receipts.
+# Formatter and fingerprint gate for Woods profiling JSON receipts.
 module ProfileCompare
   SUBSYSTEM_ROWS = [
     ['graph_analyzer.analyze', %w[graph_analyzer analyze]],
@@ -38,13 +38,31 @@ module ProfileCompare
 
     base = JSON.parse(File.read(argv[0]))
     cand = JSON.parse(File.read(argv[1]))
-    rows = collect_rows(base, cand)
-    markdown ? Formatter.print_markdown(base, cand, rows) : Formatter.print_text(base, cand, rows)
-    check_fingerprints(base, cand, allow_drift: allow_drift)
+    kind = validate_schemas!(base, cand)
+    rows = collect_rows(base, cand, kind: kind)
+    markdown ? Formatter.print_markdown(base, cand, rows) : Formatter.print_text(base, cand, rows, kind: kind)
+    check_fingerprints(base, cand, kind: kind, allow_drift: allow_drift)
   end
 
-  def collect_rows(base, cand)
-    return [metric_row('total', base['total'], cand['total'], prefix: nil)] unless base.key?('full_extraction')
+  def classify_receipt(receipt)
+    return :synthetic_suite if receipt.is_a?(Hash) && receipt.key?('full_extraction')
+    return :raw_profile if receipt.is_a?(Hash) && receipt['total'].is_a?(Hash) && receipt['phases'].is_a?(Array)
+
+    :unknown
+  end
+
+  def validate_schemas!(base, cand)
+    base_kind = classify_receipt(base)
+    cand_kind = classify_receipt(cand)
+    if base_kind == :unknown || cand_kind == :unknown || base_kind != cand_kind
+      warn "Incompatible receipt schemas: baseline=#{base_kind}, candidate=#{cand_kind}"
+      exit 2
+    end
+    base_kind
+  end
+
+  def collect_rows(base, cand, kind:)
+    return [metric_row('total', base['total'], cand['total'], prefix: nil)] if kind == :raw_profile
 
     keys = %w[full_extraction incremental_noop incremental_method_edit incremental_extraction]
     rows = keys.select { |k| base.key?(k) && cand.key?(k) }.map do |key|
@@ -57,23 +75,29 @@ module ProfileCompare
   end
 
   def metric_row(label, base_hash, cand_hash, prefix:)
-    b = base_hash || {}
-    c = cand_hash || {}
-    w_key = "#{prefix}wall_ms"
-    c_key = "#{prefix}cpu_ms"
-    a_key = "#{prefix}allocations"
     {
       label: label,
-      b_wall: b[w_key].to_f, c_wall: c[w_key].to_f,
-      b_cpu: b[c_key].to_f, c_cpu: c[c_key].to_f,
-      b_alloc: b[a_key].to_i, c_alloc: c[a_key].to_i
+      b_wall: fetch_number(base_hash, "#{prefix}wall_ms", label, 'baseline'),
+      c_wall: fetch_number(cand_hash, "#{prefix}wall_ms", label, 'candidate'),
+      b_cpu: fetch_number(base_hash, "#{prefix}cpu_ms", label, 'baseline'),
+      c_cpu: fetch_number(cand_hash, "#{prefix}cpu_ms", label, 'candidate'),
+      b_alloc: fetch_number(base_hash, "#{prefix}allocations", label, 'baseline'),
+      c_alloc: fetch_number(cand_hash, "#{prefix}allocations", label, 'candidate')
     }
+  end
+
+  def fetch_number(hash, key, label, side)
+    val = hash.is_a?(Hash) ? hash[key] : nil
+    return val if val.is_a?(Numeric)
+
+    warn "Missing numeric metric #{key} for #{label} in #{side} receipt"
+    exit 2
   end
 
   def phase_rows(base, cand, min_ms: 5.0)
     b_phases = index_phases(base)
     c_phases = index_phases(cand)
-    (b_phases.keys | c_phases.keys).filter_map do |name|
+    (b_phases.keys & c_phases.keys).filter_map do |name|
       row = metric_row(name, b_phases[name], c_phases[name], prefix: nil)
       row unless row[:b_wall] < min_ms && row[:c_wall] < min_ms
     end
@@ -83,25 +107,45 @@ module ProfileCompare
     (receipt.dig('full_extraction', 'phases') || []).to_h { |p| [p['name'], p] }
   end
 
-  def extract_fingerprints(receipt)
-    fp = receipt['fixture_fingerprints'] || receipt['equivalence']
-    fp.is_a?(Hash) && !fp.empty? ? fp : nil
-  end
-
-  def check_fingerprints(base, cand, allow_drift:)
-    b_fp = extract_fingerprints(base)
-    c_fp = extract_fingerprints(cand)
-    unless b_fp && c_fp
+  def check_fingerprints(base, cand, kind:, allow_drift:)
+    if kind == :raw_profile
       puts 'Fixture fingerprints: N/A (raw profile receipt — no fixture fingerprints)'
       return
     end
 
-    mismatches = (b_fp.keys | c_fp.keys).reject { |k| b_fp[k] == c_fp[k] }
-    if mismatches.empty?
-      puts "Fixture fingerprints: PASS (all #{b_fp.size} synthetic digests match)"
+    issues = Gate.issues(base, cand)
+    if issues.empty?
+      puts "Fixture fingerprints: PASS (all #{Gate.extract(base).size} synthetic digests match)"
     else
-      puts "Fixture fingerprints: DRIFT in #{mismatches.join(', ')}"
+      puts "Fixture fingerprints: DRIFT (#{issues.join('; ')})"
       exit 1 unless allow_drift
+    end
+  end
+
+  # Fingerprint and internal clean-rebuild integrity gate.
+  module Gate
+    module_function
+
+    def extract(receipt)
+      fp = receipt['fixture_fingerprints'] || receipt['equivalence']
+      fp.is_a?(Hash) && !fp.empty? ? fp : nil
+    end
+
+    def issues(base, cand)
+      out = internal_rebuild_issues(base, cand)
+      b_fp = extract(base)
+      c_fp = extract(cand)
+      return out << 'missing or empty fixture_fingerprints' unless b_fp && c_fp
+
+      mismatches = (b_fp.keys | c_fp.keys).reject { |k| b_fp[k] == c_fp[k] }
+      out << "cross-receipt drift in #{mismatches.join(', ')}" unless mismatches.empty?
+      out
+    end
+
+    def internal_rebuild_issues(base, cand)
+      [['baseline', base], ['candidate', cand]].filter_map do |label, receipt|
+        "#{label} incremental_matches_clean_rebuild is false" if receipt['incremental_matches_clean_rebuild'] == false
+      end
     end
   end
 
@@ -115,21 +159,30 @@ module ProfileCompare
       format('%<delta>+.1f%%', delta: ((after.to_f - before.to_f) / before.to_f) * 100.0)
     end
 
-    def print_text(base, cand, rows)
-      puts "Comparing baseline (#{base['git_sha']}) -> candidate (#{cand['git_sha']})"
+    def fmt_alloc(val)
+      val.is_a?(Float) && val != val.to_i ? format('%<v>.1f', v: val) : val.to_i.to_s
+    end
+
+    def sha_label(receipt)
+      sha = receipt['git_sha']
+      sha ? sha.to_s[0, 12] : (receipt['operation'] || 'raw')
+    end
+
+    def print_text(base, cand, rows, kind:)
+      puts "Comparing baseline (#{sha_label(base)}) -> candidate (#{sha_label(cand)})"
       puts '-' * 136
       rows.each { |r| puts format_text_row(r) }
-      print_phase_deltas(base, cand) if base.key?('full_extraction')
+      print_phase_deltas(base, cand) if kind == :synthetic_suite
       puts '-' * 136
     end
 
     def format_text_row(row)
       format(
         '%<label>-28s wall %<bw>8.2f->%<cw>8.2f ms (%<wp>7s) | cpu %<bc>7.2f->%<cc>7.2f ms (%<cp>7s) | ' \
-        'allocs %<ba>9d->%<ca>9d (%<ap>7s)',
+        'allocs %<ba>9s->%<ca>9s (%<ap>7s)',
         label: row[:label], bw: row[:b_wall], cw: row[:c_wall], wp: pct(row[:b_wall], row[:c_wall]),
         bc: row[:b_cpu], cc: row[:c_cpu], cp: pct(row[:b_cpu], row[:c_cpu]),
-        ba: row[:b_alloc], ca: row[:c_alloc], ap: pct(row[:b_alloc], row[:c_alloc])
+        ba: fmt_alloc(row[:b_alloc]), ca: fmt_alloc(row[:c_alloc]), ap: pct(row[:b_alloc], row[:c_alloc])
       )
     end
 
@@ -140,7 +193,7 @@ module ProfileCompare
     end
 
     def print_markdown(base, cand, rows)
-      header = "| Workload (`#{base['git_sha']}` -> `#{cand['git_sha']}`) | " \
+      header = "| Workload (`#{sha_label(base)}` -> `#{sha_label(cand)}`) | " \
                'Wall (ms) | Wall Δ | CPU (ms) | CPU Δ | Allocs | Alloc Δ |'
       puts header
       puts '|---|---:|---:|---:|---:|---:|---:|'
@@ -150,13 +203,13 @@ module ProfileCompare
     def format_markdown_row(row)
       format(
         '| `%<label>s` | %<bw>.2f -> %<cw>.2f | %<wp>s | %<bc>.2f -> %<cc>.2f | %<cp>s | ' \
-        '%<ba>d -> %<ca>d | %<ap>s |',
+        '%<ba>s -> %<ca>s | %<ap>s |',
         label: row[:label], bw: row[:b_wall], cw: row[:c_wall], wp: pct(row[:b_wall], row[:c_wall]),
         bc: row[:b_cpu], cc: row[:c_cpu], cp: pct(row[:b_cpu], row[:c_cpu]),
-        ba: row[:b_alloc], ca: row[:c_alloc], ap: pct(row[:b_alloc], row[:c_alloc])
+        ba: fmt_alloc(row[:b_alloc]), ca: fmt_alloc(row[:c_alloc]), ap: pct(row[:b_alloc], row[:c_alloc])
       )
     end
   end
 end
 
-ProfileCompare.run(ARGV)
+ProfileCompare.run(ARGV) if $PROGRAM_NAME == __FILE__

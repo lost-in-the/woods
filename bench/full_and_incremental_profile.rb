@@ -19,6 +19,7 @@ require 'digest'
 require 'fileutils'
 require 'json'
 require 'logger'
+require 'open3'
 require 'pathname'
 require 'tmpdir'
 require 'active_support'
@@ -265,15 +266,20 @@ module WoodsEndToEndProfile
     end
 
     def summarize(samples, runs)
-      mid = runs / 2
       {
         runs: runs,
-        median_wall_ms: samples.map { |s| s[:wall_ms] }.sort[mid],
-        median_cpu_ms: samples.map { |s| s[:cpu_ms] }.sort[mid],
-        median_allocations: samples.map { |s| s[:allocations] }.sort[mid],
-        median_gc_count: samples.map { |s| s[:gc_count] }.sort[mid],
+        median_wall_ms: median(samples.map { |s| s[:wall_ms] }),
+        median_cpu_ms: median(samples.map { |s| s[:cpu_ms] }),
+        median_allocations: median(samples.map { |s| s[:allocations] }),
+        median_gc_count: median(samples.map { |s| s[:gc_count] }),
         last_result: samples.last[:result]
       }
+    end
+
+    def median(values)
+      sorted = values.sort
+      mid = sorted.size / 2
+      sorted.size.odd? ? sorted[mid] : ((sorted[mid - 1] + sorted[mid]) / 2.0).round(3)
     end
 
     def cpu_now
@@ -334,8 +340,21 @@ module WoodsEndToEndProfile
                               .recompute_delta(touched_units: ctrl_units.first(10), removed_identifiers: [])
       end
       pre_res = pre.delete(:last_result)
-      delta.delete(:last_result)
-      { precompute: pre, recompute_delta: delta, digest: Digest::SHA256.hexdigest(JSON.generate(pre_res)) }
+      delta_res = delta.delete(:last_result)
+      delta_digest = fingerprint_flow_delta(dir, ctrl_units.first(10), delta_res)
+      {
+        precompute: pre, recompute_delta: delta,
+        digest: Digest::SHA256.hexdigest(JSON.generate(pre_res)),
+        delta_digest: delta_digest
+      }
+    end
+
+    def fingerprint_flow_delta(dir, touched_units, delta_res)
+      flow_index = JSON.parse(File.read(File.join(dir, 'flows', 'flow_index.json')))
+      touched_ids = touched_units.map(&:identifier)
+      touched_files = flow_index.select { |entry, _| touched_ids.any? { |id| entry.start_with?("#{id}#") } }
+                                .sort.to_h { |entry, rel| [entry, File.read(File.join(dir, rel))] }
+      Digest::SHA256.hexdigest(JSON.generate(delta: delta_res, flow_index: flow_index.sort.to_h, files: touched_files))
     end
 
     def seed_flow_corpus(dir, controllers:, actions:, services:)
@@ -424,7 +443,7 @@ module WoodsEndToEndProfile
       lex_res = lex_query.delete(:last_result)
       lex_top = lex_res.candidates.first(5).map { |c| [c.identifier, c.score.round(6)] }
       Digest::SHA256.hexdigest(JSON.generate(
-                                 edges_count: edges_res.size, dependents: deps_res,
+                                 edges: edges_res, dependents: deps_res,
                                  scanned_units: search_res.dig(:scan, :scanned_units), lex_top: lex_top
                                ))
     end
@@ -488,7 +507,16 @@ module WoodsEndToEndProfile
     end
   end
 
+  REPO_ROOT = File.expand_path('..', __dir__)
+
   module_function
+
+  def git_sha!
+    sha, err, st = Open3.capture3('git', '-C', REPO_ROOT, 'rev-parse', 'HEAD')
+    raise "git rev-parse HEAD failed in #{REPO_ROOT}: #{err.strip}" unless st.success? && !sha.strip.empty?
+
+    sha.strip
+  end
 
   def run(scale: 1)
     Dir.mktmpdir('woods_e2e_profile') { |tmpdir| execute_in(tmpdir, scale: scale) }
@@ -524,8 +552,8 @@ module WoodsEndToEndProfile
     full, noop, edited, clean_digest = extractions.values_at(:full, :noop, :edited, :clean_digest)
     graph, flow, reader = subsystems.values_at(:graph, :flow, :reader)
     {
-      schema_version: 2, ruby_version: RUBY_VERSION, woods_version: Woods::VERSION,
-      git_sha: `git rev-parse --short HEAD`.strip, scale: scale,
+      schema_version: 3, ruby_version: RUBY_VERSION, woods_version: Woods::VERSION,
+      git_sha: git_sha!, scale: scale,
       full_extraction: full[0], incremental_noop: noop[0], incremental_method_edit: edited[0],
       incremental_matches_clean_rebuild: edited[1] == clean_digest,
       graph_analyzer: graph, flow_precomputer: flow, reader_and_lexical: reader,
@@ -533,7 +561,7 @@ module WoodsEndToEndProfile
         full_index_digest: full[1], incremental_noop_digest: noop[1],
         incremental_method_edit_digest: edited[1], clean_rebuild_digest: clean_digest,
         graph_analyzer_digest: graph[:digest], flow_precomputer_digest: flow[:digest],
-        reader_and_lexical_digest: reader[:digest]
+        flow_delta_digest: flow[:delta_digest], reader_and_lexical_digest: reader[:digest]
       }
     }
   end
@@ -566,16 +594,44 @@ module WoodsEndToEndProfile
     end
   end
 
+  # Synthetic fixture fingerprint covering manifest counts, full sorted graph
+  # edges, structural summary, and the edited unit's source_code payload (fast
+  # synthetic regression guard, not a substitute for booted-Rails equivalence).
+  module IndexFingerprint
+    module_function
+
+    def digest(out_dir)
+      payload = payload_dir(out_dir)
+      manifest = read_json(payload, 'manifest.json')
+      graph = read_json(payload, 'dependency_graph.json')
+      summary = File.read(File.join(payload, 'SUMMARY.md')).sub(/^Generated: .*$/, 'Generated: <ts>')
+      Digest::SHA256.hexdigest(JSON.generate(
+                                 counts: manifest['counts'].sort.to_h, total_units: manifest['total_units'],
+                                 total_chunks: manifest['total_chunks'], graph_stats: graph['stats'],
+                                 graph_edges: Hash(graph['edges']).sort.to_h,
+                                 edited_source: edited_service_source(payload), summary_lines: summary.lines.sort
+                               ))
+    end
+
+    def payload_dir(out_dir)
+      gen = Woods::Generation.new(output_dir: out_dir).current
+      gen&.payload ? File.join(out_dir, gen.payload) : out_dir
+    end
+
+    def read_json(payload, rel)
+      JSON.parse(File.read(File.join(payload, rel)))
+    end
+
+    def edited_service_source(payload)
+      id = 'Billing::Processor0Service'
+      base = id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+      path = File.join(payload, 'services', "#{base}_#{Digest::SHA256.hexdigest(id)[0, 8]}.json")
+      File.file?(path) ? JSON.parse(File.read(path))['source_code'] : nil
+    end
+  end
+
   def index_equivalence_digest(out_dir)
-    gen = Woods::Generation.new(output_dir: out_dir).current
-    payload = gen&.payload ? File.join(out_dir, gen.payload) : out_dir
-    manifest = JSON.parse(File.read(File.join(payload, 'manifest.json')))
-    summary = File.read(File.join(payload, 'SUMMARY.md')).sub(/^Generated: .*$/, 'Generated: <ts>')
-    graph = JSON.parse(File.read(File.join(payload, 'dependency_graph.json')))
-    Digest::SHA256.hexdigest(JSON.generate(
-                               counts: manifest['counts'], total_units: manifest['total_units'],
-                               total_chunks: manifest['total_chunks'], graph_stats: graph['stats'], summary: summary
-                             ))
+    IndexFingerprint.digest(out_dir)
   end
 
   def with_env(overrides)
@@ -587,11 +643,13 @@ module WoodsEndToEndProfile
   end
 end
 
-scale = Integer(ENV.fetch('SCALE', '1'))
-receipt = WoodsEndToEndProfile.run(scale: scale)
-out_path = ENV.fetch('PROFILE_OUT', nil)
-if out_path && !out_path.empty?
-  FileUtils.mkdir_p(File.dirname(out_path))
-  File.write(out_path, "#{JSON.pretty_generate(receipt)}\n")
+if $PROGRAM_NAME == __FILE__
+  scale = Integer(ENV.fetch('SCALE', '1'))
+  receipt = WoodsEndToEndProfile.run(scale: scale)
+  out_path = ENV.fetch('PROFILE_OUT', nil)
+  if out_path && !out_path.empty?
+    FileUtils.mkdir_p(File.dirname(out_path))
+    File.write(out_path, "#{JSON.pretty_generate(receipt)}\n")
+  end
+  WoodsEndToEndProfile::SummaryPrinter.print(receipt)
 end
-WoodsEndToEndProfile::SummaryPrinter.print(receipt)
