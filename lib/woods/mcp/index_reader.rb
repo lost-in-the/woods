@@ -99,7 +99,6 @@ module Woods
         @unit_cache = {}
         @domain_clusters_cache = {}
         @unit_cache_signatures = {}
-        @unit_cache_order = []
         @identifier_map = nil
         @auto_refresh = auto_refresh
         @pin_depth = 0
@@ -383,7 +382,6 @@ module Woods
         @cache_mutex.synchronize do
           @unit_cache = {}
           @unit_cache_signatures = {}
-          @unit_cache_order = []
         end
         @identifier_map = nil
         @index_cache = {}
@@ -918,10 +916,11 @@ module Woods
                 # Scoped and unscoped deep matching read the candidate body the
                 # same bounded way; the scope decided eligibility by key and
                 # holds no bodies (F6 step 2).
-                unit = readable_search_unit(type_name, id, results)
+                size = 0
+                unit = readable_search_unit(type_name, id, results) { |bytes| size = bytes }
                 next unless unit
 
-                phase2_bytes += search_unit_bytes(dir, id)
+                phase2_bytes += size
                 type_name = unit['type']
                 field = if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
                           'source_code'
@@ -1002,14 +1001,6 @@ module Woods
         'seconds' if seconds && Process.clock_gettime(Process::CLOCK_MONOTONIC) - started >= seconds
       end
       private :search_scan_limit_hit
-
-      # On-disk size of one unit body just read, for the byte budget.
-      def search_unit_bytes(dir, identifier)
-        current_payload_dir.join(dir, unit_filename(identifier)).size
-      rescue SystemCallError
-        0
-      end
-      private :search_unit_bytes
 
       # The literal a query names, for ranking: an escaped or plain-word
       # query compares as text; any other pattern ranks every match alike.
@@ -1109,8 +1100,8 @@ module Woods
       end
       private :search_entry_type
 
-      def readable_search_unit(type, identifier, results)
-        load_search_unit(type, identifier)
+      def readable_search_unit(type, identifier, results, &size)
+        load_search_unit(type, identifier, &size)
       rescue JSON::ParserError, IOError, SystemCallError
         results.stop('unreadable_or_corrupt_source')
         nil
@@ -1847,9 +1838,9 @@ module Woods
 
       # Read the selected type bucket, never the identifier-only lookup map.
       # Keep the existing per-file signature checks and LRU cache for deep reads.
-      def load_search_unit(type, identifier)
+      def load_search_unit(type, identifier, &size)
         directory = TYPE_TO_DIR[type] || UNIT_TYPE_TO_DIR.fetch(type)
-        data = load_unit(directory, unit_filename(identifier))
+        data = load_unit(directory, unit_filename(identifier), &size)
         unless valid_published_unit?(data, directory, identifier)
           raise IOError, build_gap_message || "typed unit identity mismatch: #{type}:#{identifier}"
         end
@@ -2019,19 +2010,19 @@ module Woods
       # Values are unaffected either way: both threads parse the same file.
       def load_unit(type_dir, filename)
         cache_key = "#{type_dir}/#{filename}"
-        path = current_payload_dir.join(type_dir, filename)
-        open_unit(path.to_s) do |file|
-          signature = unit_file_signature(file.stat)
+        path = File.join(current_payload_dir.to_s, type_dir, filename)
+        open_unit(path) do |file|
+          stat = file.stat
+          yield stat.size if block_given?
+          signature = unit_file_signature(stat)
           cached = @cache_mutex.synchronize do
             if @unit_cache.key?(cache_key) && @unit_cache_signatures[cache_key] == signature
-              # Move to end (most recently used)
-              @unit_cache_order.delete(cache_key)
-              @unit_cache_order.push(cache_key)
-              @unit_cache[cache_key]
+              # Move to end (most recently used) in O(1) using Ruby Hash insertion order
+              value = @unit_cache.delete(cache_key)
+              @unit_cache[cache_key] = value
             elsif @unit_cache.key?(cache_key)
               @unit_cache.delete(cache_key)
               @unit_cache_signatures.delete(cache_key)
-              @unit_cache_order.delete(cache_key)
               nil
             end
           end
@@ -2040,17 +2031,14 @@ module Woods
           data = JSON.parse(file.read)
 
           @cache_mutex.synchronize do
-            # Evict oldest if at capacity
-            if @unit_cache.size >= MAX_UNIT_CACHE && !@unit_cache.key?(cache_key)
-              oldest = @unit_cache_order.shift
-              @unit_cache.delete(oldest)
+            @unit_cache.delete(cache_key)
+            if @unit_cache.size >= MAX_UNIT_CACHE
+              oldest, = @unit_cache.shift
               @unit_cache_signatures.delete(oldest)
             end
 
             @unit_cache[cache_key] = data
             @unit_cache_signatures[cache_key] = signature
-            @unit_cache_order.delete(cache_key)
-            @unit_cache_order.push(cache_key)
           end
           data
         end

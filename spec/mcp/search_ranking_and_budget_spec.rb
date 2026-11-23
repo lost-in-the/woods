@@ -234,5 +234,15 @@ RSpec.describe 'Index search ranking and per-call scan budget' do
       expect(result[:hint]).not_to include('WOODS_SEARCH_MAX_SCAN')
       expect(result[:hint]).not_to include('NOT evidence of absence')
     end
+
+    it 'accounts for scanned_bytes from the opened file without an extra Pathname#size stat' do
+      expect_any_instance_of(Pathname).not_to receive(:size)
+
+      result = reader.search('needle', fields: %w[source_code])
+
+      expect(result[:scan][:scanned_units]).to eq(5)
+      expect(result[:scan][:scanned_bytes]).to be > 0
+      expect(identifiers(result)).to eq(['Thing4'])
+    end
   end
 end

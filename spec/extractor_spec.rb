@@ -2862,6 +2862,45 @@ RSpec.describe Woods::Extractor do
 
         expect(content).to include("Units: #{manifest['total_units']} | Chunks: #{manifest['total_chunks']}")
       end
+
+      it 'writes byte-identical sections and tied namespace order across full and incremental paths' do
+        full_dir = File.join(tmpdir, 'summary_full')
+        inc_dir = File.join(tmpdir, 'summary_inc')
+        FileUtils.mkdir_p(full_dir)
+        FileUtils.mkdir_p(inc_dir)
+
+        full_extractor = described_class.new(output_dir: full_dir)
+        full_extractor.instance_variable_set(:@results, {
+                                               jobs: [make_unit(type: :job, identifier: 'SyncJob')],
+                                               models: [
+                                                 make_unit(type: :model, identifier: 'Zeta::A', namespace: 'Zeta::'),
+                                                 make_unit(type: :model, identifier: 'Alpha::A', namespace: 'Alpha::'),
+                                                 make_unit(type: :model, identifier: 'Beta::A', namespace: 'Beta::')
+                                               ]
+                                             })
+        full_extractor.send(:write_structural_summary)
+
+        inc_extractor = described_class.new(output_dir: inc_dir)
+        inc_extractor.instance_variable_set(:@results, {})
+        FileUtils.mkdir_p(File.join(inc_dir, 'models'))
+        model_entries = [
+          { 'identifier' => 'Alpha::A', 'namespace' => 'Alpha::', 'chunk_count' => 0 },
+          { 'identifier' => 'Beta::A', 'namespace' => 'Beta::', 'chunk_count' => 0 },
+          { 'identifier' => 'Zeta::A', 'namespace' => 'Zeta::', 'chunk_count' => 0 }
+        ]
+        File.write(File.join(inc_dir, 'models', '_index.json'), JSON.generate(model_entries))
+        FileUtils.mkdir_p(File.join(inc_dir, 'jobs'))
+        job_entries = [{ 'identifier' => 'SyncJob', 'namespace' => nil, 'chunk_count' => 0 }]
+        File.write(File.join(inc_dir, 'jobs', '_index.json'), JSON.generate(job_entries))
+        inc_extractor.send(:write_structural_summary)
+
+        strip_generated = ->(text) { text.sub(/^Generated: .*$/, 'Generated: <ts>') }
+        full_body = strip_generated.call(File.read(File.join(full_dir, 'SUMMARY.md')))
+        inc_body = strip_generated.call(File.read(File.join(inc_dir, 'SUMMARY.md')))
+
+        expect(full_body).to eq(inc_body)
+        expect(full_body).to include('Namespaces: Alpha:: 1, Beta:: 1, Zeta:: 1')
+      end
     end
 
     it 'includes dependency overview section' do

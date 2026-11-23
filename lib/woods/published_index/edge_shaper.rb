@@ -18,8 +18,41 @@ module Woods
       #
       # @param graph [Hash] raw dependency graph data
       #   ({Woods::MCP::IndexReader#raw_graph_data})
+      # @param via [String, nil] optional relationship label filter
       # @return [Array<Hash>] `{ from:, to:, via:, through:, through_db:, disable_joins: }`
-      def self.call(graph)
+      def self.call(graph, via: nil)
+        return all_edges(graph) unless via
+
+        edges = []
+        each_owner(graph) do |from, list|
+          list.each do |raw|
+            edges << edge_hash(from, raw) if raw.is_a?(Hash) && raw['via'] == via
+          end
+        end
+        edges
+      end
+
+      # Keep primary then variant encounter order without allocating edge hashes
+      # for non-matching edges.
+      #
+      # @param graph [Hash] raw dependency graph data
+      # @param target [String] target identifier
+      # @param via [String] relationship label
+      # @return [Array<String>] unique dependent identifiers
+      def self.dependents(graph, target, via)
+        sources = []
+        each_owner(graph) do |from, list|
+          sources << from if list.any? { |raw| raw.is_a?(Hash) && raw['target'] == target && raw['via'] == via }
+        end
+        sources.uniq
+      end
+
+      def self.each_owner(graph)
+        (graph['edges'] || {}).each { |from, list| yield from, Array(list) }
+        variant_records(graph).each { |record| yield record['identifier'], Array(record['edges']) }
+      end
+
+      def self.all_edges(graph)
         primary = (graph['edges'] || {}).flat_map { |from, list| Array(list).map { |raw| edge_hash(from, raw) } }
         primary + variant_edges(graph)
       end
@@ -55,7 +88,7 @@ module Woods
         end
       end
 
-      private_class_method :variant_edges, :variant_records, :edge_hash
+      private_class_method :each_owner, :all_edges, :variant_edges, :variant_records, :edge_hash
     end
   end
 end
