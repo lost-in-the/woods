@@ -128,14 +128,17 @@ module ProfileCompare
 
     def extract(receipt)
       fp = receipt['fixture_fingerprints'] || receipt['equivalence']
-      fp.is_a?(Hash) && !fp.empty? ? fp : nil
+      return nil unless fp.is_a?(Hash) && !fp.empty?
+      return nil unless fp.values.all? { |v| v.is_a?(String) && !v.strip.empty? }
+
+      fp
     end
 
     def issues(base, cand)
       out = internal_rebuild_issues(base, cand)
       b_fp = extract(base)
       c_fp = extract(cand)
-      return out << 'missing or empty fixture_fingerprints' unless b_fp && c_fp
+      return out << 'missing, empty, or invalid fixture_fingerprints' unless b_fp && c_fp
 
       mismatches = (b_fp.keys | c_fp.keys).reject { |k| b_fp[k] == c_fp[k] }
       out << "cross-receipt drift in #{mismatches.join(', ')}" unless mismatches.empty?

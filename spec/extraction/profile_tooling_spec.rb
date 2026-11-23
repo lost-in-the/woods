@@ -132,6 +132,36 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
           .to eq('class Processor0Service; end')
       end
     end
+    it 'rejects an earlier incomplete sample during ReaderBench.collect_metrics even if the final sample completes' do
+      index = double('PublishedIndex', edges: [], dependents_of: [])
+      partial = { completeness: { status: 'partial', reason: 'time_budget' }, scan: { scanned_units: 5 }, results: [] }
+      complete = { completeness: { status: 'complete', reason: 'exhausted' }, scan: { scanned_units: 5 }, results: [] }
+      responses = [partial, complete, complete, complete, complete]
+      reader = double('IndexReader')
+      allow(reader).to receive(:search) { responses.shift }
+
+      expect { WoodsEndToEndProfile::ReaderBench.collect_metrics(index, reader) }
+        .to raise_error(/ReaderBench deep search incomplete.*time_budget/)
+    end
+
+    it 'changes ReaderBench.build_digest when search results differ despite identical scan counts' do
+      base_search = {
+        completeness: { status: 'complete', reason: 'exhausted' }, scan: { scanned_units: 5 }, results: []
+      }
+      matched_search = {
+        completeness: { status: 'complete', reason: 'exhausted' },
+        scan: { scanned_units: 5 },
+        results: [{ identifier: 'Order', match_field: 'source_code' }]
+      }
+      lex = double('LexResult', candidates: [])
+      d1 = WoodsEndToEndProfile::ReaderBench.build_digest(
+        { last_result: [] }, { last_result: [] }, { last_result: base_search }, { last_result: lex }
+      )
+      d2 = WoodsEndToEndProfile::ReaderBench.build_digest(
+        { last_result: [] }, { last_result: [] }, { last_result: matched_search }, { last_result: lex }
+      )
+      expect(d1).not_to eq(d2)
+    end
   end
 
   describe 'script/profile-compare' do
@@ -203,6 +233,20 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
         expect(out).to include('Fixture fingerprints: DRIFT')
         expect(out).to include('baseline incremental_matches_clean_rebuild is missing or unverified')
         expect(out).to include('candidate incremental_matches_clean_rebuild is missing or unverified')
+      end
+    end
+
+    it 'rejects synthetic receipts whose fingerprint map contains nil or empty digest values' do
+      Dir.mktmpdir('profile_compare_spec') do |dir|
+        base_path = File.join(dir, 'base.json')
+        cand_path = File.join(dir, 'cand.json')
+        File.write(base_path, JSON.generate(synthetic_receipt(incremental_matches: true, digest: nil)))
+        File.write(cand_path, JSON.generate(synthetic_receipt(incremental_matches: true, digest: nil)))
+
+        out, _err, status = Open3.capture3(RbConfig.ruby, compare_script, base_path, cand_path)
+        expect(status.exitstatus).to eq(1)
+        expect(out).to include('Fixture fingerprints: DRIFT')
+        expect(out).to include('missing, empty, or invalid fixture_fingerprints')
       end
     end
 

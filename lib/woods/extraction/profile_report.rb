@@ -49,10 +49,14 @@ module Woods
         started_wall = monotonic_now
         started_cpu = cpu_now
         before_gc = gc_snapshot
-        result = yield
-        elapsed_wall = monotonic_now - started_wall
-        elapsed_cpu = cpu_now - started_cpu
-        @phases << build_phase_entry(name, elapsed_wall, elapsed_cpu, before_gc, gc_snapshot)
+        result = nil
+        begin
+          result = yield
+        ensure
+          elapsed_wall = monotonic_now - started_wall
+          elapsed_cpu = cpu_now - started_cpu
+          @phases << build_phase_entry(name, elapsed_wall, elapsed_cpu, before_gc, gc_snapshot)
+        end
         [result, elapsed_wall]
       end
 

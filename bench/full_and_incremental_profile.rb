@@ -421,7 +421,11 @@ module WoodsEndToEndProfile
     def collect_metrics(index, reader)
       edges_via = Sampler.measure(runs: 5) { index.edges(via: 'include') }
       deps_via = Sampler.measure(runs: 5) { index.dependents_of('Trackable0', via: 'include') }
-      deep = Sampler.measure(runs: 5) { reader.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20) }
+      deep = Sampler.measure(runs: 5) do
+        res = reader.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
+        verify_complete_search!(res)
+        res
+      end
       lex_build, lex_query = measure_lexical(reader)
       digest = build_digest(edges_via, deps_via, deep, lex_query)
       {
@@ -447,11 +451,12 @@ module WoodsEndToEndProfile
       verify_complete_search!(search_res)
       lex_res = lex_query.delete(:last_result)
       lex_top = lex_res.candidates.first(5).map { |c| [c.identifier, c.score.round(6)] }
+      search_results = Array(search_res[:results]).map { |r| [r[:identifier], r[:match_field]] }
       Digest::SHA256.hexdigest(JSON.generate(
                                  edges: edges_res, dependents: deps_res,
                                  scanned_units: search_res.dig(:scan, :scanned_units),
                                  search_completeness: search_res[:completeness]&.slice(:status, :reason),
-                                 lex_top: lex_top
+                                 search_results: search_results, lex_top: lex_top
                                ))
     end
 

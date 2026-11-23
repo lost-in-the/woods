@@ -68,6 +68,21 @@ RSpec.describe Woods::Extraction::ProfileReport do
       expect(report.to_h[:total][:error_class]).to eq('IOError')
     end
 
+    it 'retains phase measurements when a measured phase raises' do
+      report = described_class.new(operation: 'full').start
+      expect do
+        report.measure_phase('failing_phase') do
+          Array.new(100) { Object.new }
+          raise 'boom'
+        end
+      end.to raise_error(RuntimeError, 'boom')
+
+      report.finish(error: RuntimeError.new('boom'))
+      expect(report.to_h[:phases].map { |p| p[:name] }).to eq(['failing_phase'])
+      expect(report.to_h[:phases].first[:allocations]).to be >= 100
+      expect(report.to_h[:total][:status]).to eq('error')
+    end
+
     it 'writes valid JSON atomically via #write_json' do
       report = described_class.new(operation: 'full').start
       report.measure_phase('graph rebuild') { :done }

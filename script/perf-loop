@@ -34,7 +34,7 @@ case "${cmd}" in
     fi
     diff_tmp="$(mktemp)"
     trap 'rm -f "${diff_tmp}"' EXIT
-    git diff -z --name-only --diff-filter=AM "${BASE_REF}" -- '*.rb' > "${diff_tmp}"
+    git diff -z --name-only --no-renames --diff-filter=AM "${BASE_REF}" -- '*.rb' > "${diff_tmp}"
     changed_rb=()
     while IFS= read -r -d '' path; do
       changed_rb+=("${path}")

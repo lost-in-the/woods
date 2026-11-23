@@ -174,19 +174,20 @@ module WoodsABCompare
 
         warm = Woods::MCP::IndexReader.new(sdir)
         verify_complete!(warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20), 400, 'preflight')
-        search_warm = sample { warm.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20) }
-        search_cold = sample do
-          Woods::MCP::IndexReader.new(sdir).search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
+        run_search = lambda do |reader, label|
+          res = reader.search('NonExistentNeedleXYZ', fields: %w[source_code], limit: 20)
+          verify_complete!(res, 400, label)
+          res
         end
-        warm_res = search_warm.delete(:result)
-        cold_res = search_cold.delete(:result)
-        verify_complete!(warm_res, 400, 'warm_search')
-        verify_complete!(cold_res, 400, 'cold_search')
-
+        search_warm = sample { run_search.call(warm, 'warm_search') }
+        search_cold = sample { run_search.call(Woods::MCP::IndexReader.new(sdir), 'cold_search') }
+        warm_res, cold_res = search_warm.delete(:result), search_cold.delete(:result)
+        rkeys = ->(res) { Array(res[:results]).map { |r| [r[:identifier], r[:match_field]] } }
         fp = Digest::SHA256.hexdigest(JSON.generate(
           edges: edges_res, deps: deps_res,
           warm_scanned: warm_res.dig(:scan, :scanned_units), warm_completeness: warm_res[:completeness]&.slice(:status, :reason),
-          cold_scanned: cold_res.dig(:scan, :scanned_units), cold_completeness: cold_res[:completeness]&.slice(:status, :reason)
+          warm_results: rkeys.call(warm_res), cold_scanned: cold_res.dig(:scan, :scanned_units),
+          cold_completeness: cold_res[:completeness]&.slice(:status, :reason), cold_results: rkeys.call(cold_res)
         ))
 
         puts JSON.generate(
