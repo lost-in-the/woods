@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'english'
+require 'English'
 require 'json'
 require 'securerandom'
 require 'digest'
