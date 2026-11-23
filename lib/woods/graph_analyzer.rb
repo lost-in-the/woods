@@ -216,29 +216,20 @@ module Woods
       # list, so leaving it in graph order would make the sampled pairs (and
       # therefore the bridge scores) depend on the order units happened to be
       # registered in rather than on the graph's content (#164).
-      node_ids = nodes.keys.sort
+      ids = sorted_node_ids
       scores = Hash.new(0)
 
       # Sample random pairs of nodes for shortest-path computation.
       # Use a deterministic seed so results are reproducible for the same graph.
-      rng = Random.new(node_ids.size)
-      pairs = generate_sample_pairs(node_ids, sample_size, rng)
-
-      pairs.each do |source, target|
-        path = bfs_shortest_path(source, target)
-
-        next unless path && path.size > 2
-
-        # Credit intermediate nodes (exclude source and target)
-        path[1..-2].each do |intermediate|
-          scores[intermediate] += 1
-        end
-      end
+      rng = Random.new(ids.size)
+      pairs = generate_sample_index_pairs(ids.size, sample_size, rng)
+      accumulate_bridge_scores(pairs, scores)
 
       scores
-        .sort_by { |_id, score| -score }
+        .sort_by { |_idx, score| -score }
         .first(limit)
-        .map do |identifier, score|
+        .map do |idx, score|
+          identifier = @indexed_ids[idx]
           meta = nodes[identifier] || {}
           {
             identifier: identifier,
@@ -1088,64 +1079,115 @@ module Woods
       @cycle_limit_reached = false
       return [] if nodes.empty?
 
-      white = 0
-      gray  = 1
-      black = 2
-
-      color = Hash.new(white)
-      parent = {}
+      init_indexed_graph
+      color = Array.new(@indexed_ids.size, 0)
+      path_pos = Array.new(@indexed_ids.size, -1)
       found_cycles = []
-      seen_cycle_signatures = Set.new
+      seen = Set.new
 
       catch(:cycle_limit) do
-        nodes.keys.sort.each do |start_node|
-          next unless color[start_node] == white
+        @sorted_node_count.times do |start_idx|
+          next unless color[start_idx].zero?
 
-          # Iterative DFS using an explicit stack.
-          # Each entry is [node, :enter] or [node, :exit].
-          stack = [[start_node, :enter]]
-
-          # Track the current DFS path for cycle extraction.
-          path = []
-
-          while stack.any?
-            node, action = stack.pop
-
-            if action == :exit
-              color[node] = black
-              path.pop
-              next
-            end
-
-            # :enter action
-            next unless color[node] == white
-
-            color[node] = gray
-            path.push(node)
-            stack.push([node, :exit])
-
-            # Not sorted, deliberately: this list is the unit's own declared
-            # dependency order, which is identical in a full and an incremental
-            # run, so sorting it would change nothing any test can observe.
-            neighbors = @graph.dependencies_of(node)
-            neighbors.each do |neighbor|
-              case color[neighbor]
-              when white
-                parent[neighbor] = node
-                stack.push([neighbor, :enter])
-              when gray
-                # Found a cycle: extract it from the path
-                collect_cycle(path, neighbor, found_cycles, seen_cycle_signatures)
-              end
-              # black nodes are fully explored, skip them
-            end
-          end
+          dfs_cycles_from(start_idx, color, path_pos, found_cycles, seen)
         end
       end
 
       # Deterministic without a final sort: the DFS starts from a sorted
       # node list, so cycles are discovered in the same order every run.
       found_cycles
+    end
+
+    # Iterative three-color DFS from +start_idx+ using integer node indices.
+    # Non-negative stack entries mean `:enter`, bitwise-inverted (`~idx`) mean
+    # `:exit`, avoiding per-edge 2-element array allocations.
+    def dfs_cycles_from(start_idx, color, path_pos, found_cycles, seen)
+      stack = [start_idx]
+      path = []
+      adj = @indexed_adjacency
+
+      while (entry = stack.pop)
+        if entry.negative?
+          node_idx = ~entry
+          color[node_idx] = 2
+          path_pos[node_idx] = -1
+          path.pop
+          next
+        end
+
+        next unless color[entry].zero?
+
+        color[entry] = 1
+        path_pos[entry] = path.size
+        path << entry
+        stack << ~entry
+
+        neighbors = adj[entry] || neighbors_for_index(entry)
+        i = 0
+        len = neighbors.size
+        while i < len
+          nb = neighbors[i]
+          i += 1
+          state = color[nb]
+          if state.nil? || state.zero?
+            color[nb] = 0 if state.nil?
+            stack << nb
+          elsif state == 1
+            collect_indexed_cycle(path, path_pos[nb], nb, found_cycles, seen)
+          end
+        end
+      end
+    end
+
+    def collect_indexed_cycle(path, start_pos, cycle_start_idx, found_cycles, seen)
+      return if start_pos.nil? || start_pos.negative?
+
+      len = path.size - start_pos
+      if @cycle_max_length && len > @cycle_max_length
+        @cycle_limit_reached = true
+        return
+      end
+
+      cycle, min_i = build_indexed_cycle(path, start_pos, len, cycle_start_idx)
+      signature = digest_rotated_cycle(cycle, len, min_i)
+      return if seen.include?(signature)
+
+      seen.add(signature)
+      found_cycles << cycle
+      return unless @cycle_limit && found_cycles.size >= @cycle_limit
+
+      @cycle_limit_reached = true
+      throw :cycle_limit
+    end
+
+    def build_indexed_cycle(path, start_pos, len, cycle_start_idx)
+      ids = @indexed_ids
+      cycle = Array.new(len + 1)
+      min_i = 0
+      min_str = ids[path[start_pos]]
+      cycle[0] = min_str
+      i = 1
+      while i < len
+        str = ids[path[start_pos + i]]
+        cycle[i] = str
+        if str < min_str
+          min_str = str
+          min_i = i
+        end
+        i += 1
+      end
+      cycle[len] = ids[cycle_start_idx]
+      [cycle, min_i]
+    end
+
+    def digest_rotated_cycle(cycle, len, min_i)
+      sha = Digest::SHA256.new
+      sha << cycle[min_i, len - min_i].join('->')
+      if min_i.positive?
+        sha << '->'
+        sha << cycle[0, min_i].join('->')
+      end
+      sha.hexdigest
     end
 
     # Record the cycle closed by a back-edge to +cycle_start+.
@@ -1243,6 +1285,107 @@ module Woods
       end
 
       pairs.to_a
+    end
+
+    def sorted_node_ids
+      @sorted_node_ids ||= graph_nodes.keys.sort
+    end
+
+    def init_indexed_graph
+      return if @indexed_ids
+
+      @indexed_ids = sorted_node_ids.dup
+      @sorted_node_count = @indexed_ids.size
+      @node_index = {}
+      @indexed_ids.each_with_index { |id, idx| @node_index[id] = idx }
+      @indexed_adjacency = Array.new(@sorted_node_count)
+    end
+
+    def index_for(identifier)
+      @node_index[identifier] ||= begin
+        idx = @indexed_ids.size
+        @indexed_ids << identifier
+        idx
+      end
+    end
+
+    def neighbors_for_index(idx)
+      cached = @indexed_adjacency[idx]
+      return cached if cached
+
+      @indexed_adjacency[idx] = adjacency[@indexed_ids[idx]].map { |nb| index_for(nb) }
+    end
+
+    def generate_sample_index_pairs(node_count, sample_size, rng)
+      max_possible = node_count * (node_count - 1)
+      effective_sample = [sample_size, max_possible].min
+
+      pairs = {}
+      attempts = 0
+      max_attempts = effective_sample * 3
+
+      while pairs.size < effective_sample && attempts < max_attempts
+        a = rng.rand(node_count)
+        b = rng.rand(node_count)
+        pairs[(a * node_count) + b] = [a, b] unless a == b
+        attempts += 1
+      end
+
+      pairs.values
+    end
+
+    def accumulate_bridge_scores(pairs, scores)
+      init_indexed_graph
+      n = @indexed_ids.size
+      visited = Array.new(n, 0)
+      parent = Array.new(n, -1)
+      queue = Array.new(n)
+      scratch = []
+      stamp = 0
+
+      pairs.each do |src_idx, dst_idx|
+        stamp += 1
+        next unless bfs_index_path?(src_idx, dst_idx, visited, parent, queue, stamp)
+
+        scratch.clear
+        curr = parent[dst_idx]
+        while curr != src_idx && curr != -1
+          scratch << curr
+          curr = parent[curr]
+        end
+        scratch.reverse_each { |idx| scores[idx] += 1 }
+      end
+    end
+
+    def bfs_index_path?(src_idx, dst_idx, visited, parent, queue, stamp)
+      adj = @indexed_adjacency
+      visited[src_idx] = stamp
+      parent[src_idx] = -1
+      queue[0] = src_idx
+      head = 0
+      tail = 1
+
+      while head < tail
+        curr = queue[head]
+        head += 1
+        neighbors = adj[curr] || neighbors_for_index(curr)
+        i = 0
+        len = neighbors.size
+        while i < len
+          nb = neighbors[i]
+          i += 1
+          next if visited[nb] == stamp
+
+          visited[nb] = stamp
+          parent[nb] = curr
+          return true if nb == dst_idx
+
+          queue[tail] = nb
+          tail += 1
+        end
+      end
+
+      false
     end
 
     # Forward adjacency, resolved once per node per analyzer instance.
