@@ -377,4 +377,39 @@ RSpec.describe Woods::PublishedIndex do
       end
     end
   end
+
+  describe 'filtered edge and dependent shaping' do
+    it 'filters via labels and dependents in primary-then-variant order without materializing unmatched edges' do
+      graph = {
+        'edges' => {
+          'Order' => [
+            { 'target' => 'Account', 'via' => 'belongs_to' },
+            { 'target' => 'LineItem', 'via' => 'has_many' },
+            'LegacyTarget'
+          ],
+          'Invoice' => [{ 'target' => 'Account', 'via' => 'belongs_to' }]
+        },
+        'variants' => [
+          {
+            'identifier' => 'Order',
+            'edges' => [{ 'target' => 'Account', 'via' => 'belongs_to' }]
+          },
+          {
+            'identifier' => 'BillingJob',
+            'edges' => [{ 'target' => 'Account', 'via' => 'belongs_to' }]
+          }
+        ]
+      }
+
+      filtered = Woods::PublishedIndex::EdgeShaper.call(graph, via: 'belongs_to')
+      expect(filtered.map { |e| [e[:from], e[:to], e[:via]] }).to eq([
+                                                                       %w[Order Account belongs_to],
+                                                                       %w[Invoice Account belongs_to],
+                                                                       %w[Order Account belongs_to],
+                                                                       %w[BillingJob Account belongs_to]
+                                                                     ])
+      expect(Woods::PublishedIndex::EdgeShaper.dependents(graph, 'Account', 'belongs_to'))
+        .to eq(%w[Order Invoice BillingJob])
+    end
+  end
 end

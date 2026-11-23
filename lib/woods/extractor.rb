@@ -3633,10 +3633,10 @@ module Woods
       summary << "Units: #{total_units} | Chunks: #{total_chunks} | Categories: #{stats.size}"
       summary << ''
 
-      stats.each do |type, s|
+      stats.sort_by { |type, _| type.to_s }.each do |type, s|
         summary << "## #{type.to_s.titleize} (#{s[:count]})"
 
-        ns_counts = s[:namespaces].sort_by { |_, count| -count }.first(5)
+        ns_counts = s[:namespaces].sort_by { |ns, count| [-count, ns] }.first(5)
         ns_parts = ns_counts.map { |ns, count| "#{ns} #{count}" }
         summary << "Namespaces: #{ns_parts.join(', ')}" unless ns_parts.empty?
         summary << ''

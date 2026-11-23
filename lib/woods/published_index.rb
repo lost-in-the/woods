@@ -209,8 +209,7 @@ module Woods
     # @param via [String, Symbol, nil] restrict to one relationship label
     # @return [Array<Hash>] `{ from:, to:, via:, through:, through_db:, disable_joins: }`
     def edges(via: nil)
-      wanted = via&.to_s
-      EdgeShaper.call(@reader.raw_graph_data).select { |edge| wanted.nil? || edge[:via] == wanted }
+      EdgeShaper.call(@reader.raw_graph_data, via: via&.to_s)
     end
 
     # @yieldparam edge [Hash] see {#edges}
@@ -225,7 +224,7 @@ module Woods
     def dependents_of(identifier, via: nil)
       return Array((@reader.raw_graph_data['reverse'] || {})[identifier]).dup if via.nil?
 
-      edges(via: via).select { |edge| edge[:to] == identifier }.map { |edge| edge[:from] }.uniq
+      EdgeShaper.dependents(@reader.raw_graph_data, identifier, via.to_s)
     end
 
     # table name => database name, from model units that carry
