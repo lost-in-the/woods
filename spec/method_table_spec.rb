@@ -290,4 +290,264 @@ RSpec.describe Woods::MethodTable do
     described_class.record(route)
     expect(route.metadata).not_to have_key(:methods)
   end
+
+  describe 'definitions Ruby runs only on one path' do
+    def candidates(source)
+      described_class.call(source).map { |entry| entry.values_at('name', 'kind', 'owner', 'candidate') }
+    end
+
+    def candidates_by_line(source)
+      described_class.call(source).map { |entry| entry.values_at('name', 'line', 'candidate') }
+    end
+
+    it 'lists a definition under if, unless, elsif, else or a modifier as a conditional candidate' do
+      source = <<~RUBY
+        class Post
+          def plain; end
+          if Feature.on?
+            def a; end
+          elsif Feature.half?
+            def b; end
+          else
+            def c; end
+          end
+          unless Feature.on?
+            def d; end
+          else
+            def e; end
+          end
+          def f; end if Feature.on?
+        end
+      RUBY
+
+      expect(candidates(source)).to eq([
+                                         ['plain', 'instance', 'Post', nil], %w[a instance Post conditional],
+                                         %w[b instance Post conditional],
+                                         %w[c instance Post conditional],
+                                         %w[d instance Post conditional],
+                                         %w[e instance Post conditional],
+                                         %w[f instance Post conditional]
+                                       ])
+    end
+
+    it 'reads a begin body and its ensure as run, and its rescue and else as conditional' do
+      source = <<~RUBY
+        class Post
+          begin
+            def a; end
+          rescue LoadError
+            def b; end
+          else
+            def c; end
+          ensure
+            def d; end
+          end
+        end
+      RUBY
+
+      expect(candidates(source)).to eq([
+                                         ['a', 'instance', 'Post', nil], %w[b instance Post conditional],
+                                         %w[c instance Post conditional], ['d', 'instance', 'Post', nil]
+                                       ])
+    end
+
+    it 'lists a definition in a when, in or else branch of a case as a conditional candidate' do
+      source = <<~RUBY
+        class Post
+          case FLAG
+          when 1 then def a; end
+          else def b; end
+          end
+          case FLAG
+          in Integer then def c; end
+          end
+        end
+      RUBY
+
+      expect(candidates(source)).to eq([%w[a instance Post conditional], %w[b instance Post conditional],
+                                        %w[c instance Post conditional]])
+    end
+
+    it 'keeps both alternatives of a conditional, and the definite definition beside a later candidate' do
+      source = <<~RUBY
+        class Post
+          def a; end
+          if RUBY_VERSION >= '3'
+            def a; end
+          else
+            def a; end
+          end
+          if Feature.on?
+            def b; end
+          end
+          def b; end
+        end
+      RUBY
+
+      expect(table(source).map { |name, _, line| [name, line] }).to eq([['a', 2], ['a', 4], ['a', 6], ['b', 11]])
+    end
+
+    # Whenever the later `def` runs, Ruby has run the earlier one first.
+    it 'replaces a candidate that a later definition in the same branch, or in an enclosing one, overwrites' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            def a; :old; end
+            def a; :new; end
+            if Feature.beta?
+              def x; end
+            end
+            def x; end
+          end
+          included do
+            def y; end
+            def y; end
+          end
+        end
+      RUBY
+
+      expect(candidates_by_line(source)).to eq([['a', 4, 'conditional'], ['x', 8, 'conditional'], ['y', 12, 'block']])
+    end
+
+    # A nested branch may not run, and a sibling branch runs instead.
+    it 'keeps a candidate beside a later one in a nested or a sibling branch' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            def x; end
+            if Feature.beta?
+              def x; end
+            end
+          else
+            def x; end
+          end
+        end
+      RUBY
+
+      expect(candidates_by_line(source)).to eq([['x', 3, 'conditional'], ['x', 5, 'conditional'],
+                                                ['x', 8, 'conditional']])
+    end
+
+    it 'leaves a visibility section inside a branch to that branch' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            private
+            def a; end
+          end
+          def b; end
+        end
+      RUBY
+
+      expect(table(source).map { |name, _, _, _, visibility| [name, visibility] }).to eq([%w[a private], %w[b public]])
+    end
+
+    it 'applies a visibility call in a branch to the candidates of that branch only' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            def x; end
+          else
+            private def x; end
+          end
+          if Feature.on?
+            def y; end
+          end
+          case Feature.mode
+          when :a then def y; end
+          else
+            def y; end
+            if Feature.strict?
+              protected :y
+            end
+          end
+        end
+      RUBY
+
+      expect(table(source).map { |name, _, line, _, visibility| [name, line, visibility] }).to eq(
+        [['x', 3, 'public'], ['x', 5, 'private'], ['y', 8, 'public'], ['y', 11, 'public'], ['y', 13, 'protected']]
+      )
+    end
+
+    it 'applies a call in a nested branch to an enclosing candidate the branch does not redefine on that side' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            def x; end
+            def self.a; end
+            if Feature.beta?
+              private :x
+              private_class_method def a; end
+            end
+          end
+        end
+      RUBY
+
+      expect(table(source).map { |name, kind, line, _, visibility| [name, kind, line, visibility] })
+        .to eq([['x', 'instance', 3, 'private'], ['a', 'singleton', 4, 'private'], ['a', 'instance', 7, 'public']])
+    end
+
+    it 'makes every alternative of a name a module function, and keeps candidates beside a definite source' do
+      source = <<~RUBY
+        module Util
+          if Feature.on?
+            def x; end
+          else
+            def x; end
+          end
+          def y; end
+          if Feature.on?
+            def y; end
+          end
+          module_function :x, :y
+        end
+      RUBY
+
+      expect(described_class.call(source).map { |entry| entry.values_at('name', 'kind', 'line', 'candidate') })
+        .to eq([['x', 'module_function', 3, 'conditional'], ['x', 'module_function', 5, 'conditional'],
+                ['y', 'module_function', 7, nil],
+                ['y', 'module_function', 9, 'conditional']])
+    end
+
+    it 'lists a definition in a block of the class body as a block candidate of the lexical owner' do
+      source = <<~RUBY
+        class Plugin
+          Registry.create do
+            def run; end
+          end
+          class_methods do
+            def build; end
+          end
+        end
+      RUBY
+
+      expect(candidates(source)).to eq([%w[run instance Plugin block], ['build', 'singleton', 'Plugin', nil]])
+    end
+
+    it 'lists a definition passed to a method that is not a visibility call as run' do
+      source = "class Post\n  memoize def total; end\n  private\n  cache def hidden; end\nend\n"
+
+      expect(table(source).map { |name, kind, _, _, visibility| [name, kind, visibility] })
+        .to eq([%w[total instance public], %w[hidden instance private]])
+    end
+
+    # A decorator returns the name its `def` returns, so the visibility call
+    # receives that name.
+    it 'gives a definition inside a wrapper passed to a visibility call the visibility the call names' do
+      source = <<~RUBY
+        module Util
+          private memoize def total; end
+          private memoize cache def deep; end
+          module_function cache def tool; end
+          private_class_method memoize def self.build; end
+          protected
+          public(memoize(def shown; end))
+        end
+      RUBY
+
+      expect(table(source).map { |name, kind, _, _, visibility| [name, kind, visibility] })
+        .to eq([%w[total instance private], %w[deep instance private], %w[tool module_function public],
+                %w[build singleton private], %w[shown instance public]])
+    end
+  end
 end

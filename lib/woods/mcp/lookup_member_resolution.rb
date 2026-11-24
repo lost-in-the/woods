@@ -77,6 +77,14 @@ module Woods
         attr_reader :overridden
         # @return [Array<String>] what the index could not establish
         attr_reader :caveats
+        # @return [Symbol, nil] :paths when {#ambiguous} holds definitions of
+        #   one body that a static reading cannot order ({Alternatives}),
+        #   nil when it holds concerns whose include order is not published
+        attr_reader :ambiguity
+        # @return [Hash, nil] the extractor's runtime record of where Ruby
+        #   defines the member (`action_sources`), when it picked {#chosen}
+        #   among such definitions
+        attr_reader :installed
         # @return [Candidate, nil] a call Woods does not know that names the
         #   member when nothing else on that side defines it (the answer is
         #   then not found)
@@ -121,15 +129,22 @@ module Woods
         def settled?(groups, index)
           group = groups[index]
           later = groups.drop(index + 1).flat_map { |other| other.candidates + other.extras }
+          alternatives = Alternatives.of(group.candidates)
+          run = alternatives.take_while { |candidate| candidate.entry.key?(MethodTable::CANDIDATE) }
+          covered = run.size > 1 && Exhaustive.call(run)
+          alternatives = run if covered
           if !group.ordered && group.candidates.size > 1
             @ambiguous = group.candidates
             @overridden = definite(group.extras + later)
+          elsif alternatives.size > 1
+            settle_alternatives(alternatives, group.candidates + group.extras + later,
+                                open: alternatives == run && !covered)
           else
             @chosen = group.candidates.first
             rest = group.candidates.drop(1) + group.extras + later
             return answers_past_macro?(rest) if @chosen.origin == :possible_macro
 
-            @overridden = definite(rest)
+            @chosen.entry.key?(MethodTable::CANDIDATE) ? fall_back(rest) : @overridden = definite(rest)
           end
           state_caveats
           true
@@ -152,6 +167,32 @@ module Woods
 
         def definite(candidates)
           candidates.reject { |candidate| candidate.origin == :possible_macro }
+        end
+
+        # Definitions of one body that no static reading orders are the
+        # answer only where the extractor recorded the one Ruby defines;
+        # otherwise each is a candidate, in source order. +open+ when Ruby
+        # may run none of them.
+        def settle_alternatives(alternatives, all, open:)
+          @installed, @chosen = Alternatives.installed(alternatives, @unit, @reference)
+          if @chosen
+            @overridden = definite(all - [@chosen])
+          else
+            @ambiguity = :paths
+            @ambiguous = alternatives.reverse # latest first, so now in source order
+            open ? fall_back(all - alternatives) : @overridden = definite(all - alternatives)
+          end
+        end
+
+        # Past definitions Ruby may all skip, the next one is callable: it is
+        # named in a caveat, with the calls Woods does not know before it, and
+        # only what a definite fallback replaces is overridden.
+        def fall_back(rest)
+          macros = rest.take_while { |candidate| candidate.origin == :possible_macro }
+          following = rest[macros.size]
+          definite_following = following && !following.entry.key?(MethodTable::CANDIDATE)
+          @overridden = definite_following ? definite(rest.drop(macros.size + 1)) : []
+          @fallback = [macros, following] unless macros.empty? && following.nil?
         end
 
         # [level, groups] for each unit of the chain, nearest first.
@@ -184,6 +225,9 @@ module Woods
           return per_concern.map { |candidates| ordered_group(candidates) } if ORDERED_TYPES.include?(@unit['type'])
 
           found = per_concern.reject(&:empty?)
+          # One concern that defines the member has no include order to know.
+          return [ordered_group(found.first)] if found.one?
+
           [Group.new(found.map(&:first), false, found.flat_map { |candidates| candidates.drop(1) })]
         end
 
@@ -198,8 +242,20 @@ module Woods
             entry['name'] == @reference.name && !entry['file_unit'] && entry['owner'] == name &&
               @reference.kind?(entry) && !class_methods.include?(entry['line'])
           end
-          found = candidates(entries, unit, level, :own, nil) + macros
-          found.sort_by { |candidate| -candidate.entry['line'].to_i }
+          latest_first(candidates(entries, unit, level, :own, nil) + macros)
+        end
+
+        # +found+ by line, the later first. On one line a candidate comes
+        # first: a definite definition replaces every earlier one of its
+        # name and side, so one that survives beside a candidate precedes it.
+        # Of two candidates that start on one line, the one ending later is
+        # the later. Ties past that keep their order.
+        def latest_first(found)
+          found.each_with_index.sort_by do |candidate, index|
+            entry = candidate.entry
+            candidate_rank = entry.key?(MethodTable::CANDIDATE) ? [0, -entry['end_line'].to_i] : [1, 0]
+            [-entry['line'].to_i, *candidate_rank, index]
+          end.map(&:first)
         end
 
         # The class-body calls that define the member at this level, by
@@ -251,10 +307,10 @@ module Woods
         end
 
         def candidates(entries, unit, level, origin, concern)
-          entries.sort_by { |entry| -entry['line'].to_i }.map do |entry|
+          latest_first(entries.map do |entry|
             Candidate.new(entry: @reference.as_named(entry), unit: unit, level: level, origin: origin,
                           concern: concern)
-          end
+          end)
         end
 
         def blocks_of(unit)
@@ -401,6 +457,33 @@ module Woods
             end
           end
           chain_caveat(answer_level)
+          path_caveat
+          fallback_caveat
+        end
+
+        def fallback_caveat
+          return unless @fallback && !installed
+
+          macros, following = @fallback
+          calls = macros.map { |macro| "`#{macro.entry['defined_by']}` (#{published_line(macro)})" }
+          parts = []
+          parts << "#{calls.join(', ')}, which may define #{@reference.name}" unless calls.empty?
+          parts << "the next definition of #{@reference.name}: #{published_line(following)}" if following
+          @caveats << "Where Ruby runs none of the definitions above, it calls #{parts.join(', and otherwise ')}."
+        end
+
+        def published_line(candidate)
+          "line #{candidate.entry['line']} of the published source of #{candidate.unit['identifier']}"
+        end
+
+        # An answer defined only on a path Ruby may not run, with no other
+        # definition in that body to fall back to.
+        def path_caveat
+          reason = chosen && !installed && chosen.entry[MethodTable::CANDIDATE]
+          return unless reason
+
+          @caveats << "The definition at line #{chosen.entry['line']} of the published source is " \
+                      "#{Alternatives.where(reason)}, so Ruby may not define #{@reference.name} there."
         end
 
         # A concern answer from the last unit read, when the chain stops short
@@ -425,6 +508,141 @@ module Woods
 
         def stop_why
           @stop == :unrecorded ? "#{@chain.last['identifier']} records no parent class" : @stop_reason
+        end
+
+        # Definitions of one member in one body that a static reading cannot
+        # order: the bodies of an `if` and its `else`, the branches of a
+        # `case`, a modifier `def`, a `def` in a block of a call. The method
+        # table marks each with {MethodTable::CANDIDATE}; it drops one that a
+        # later plain `def` replaces, so sequential redefinition never
+        # reaches here.
+        module Alternatives
+          WHERE = { 'conditional' => 'under a condition', 'block' => 'in a block of a call in the body' }.freeze
+
+          module_function
+
+          # The latest definitions of a body (+candidates+, latest first),
+          # each on a path Ruby may not run, and the definition they would
+          # replace in that body, which Ruby keeps when none of them runs.
+          #
+          # @param candidates [Array<Candidate>] one group, latest first
+          # @return [Array<Candidate>] more than one when they cannot be ordered
+          def of(candidates)
+            run = candidates.take_while { |candidate| candidate.entry.key?(MethodTable::CANDIDATE) }
+            return run if run.empty?
+
+            following = candidates[run.size]
+            following && following.origin != :possible_macro ? run + [following] : run
+          end
+
+          # The alternative Ruby defines, as the controller extractor recorded
+          # it from `instance_method(name).source_location` in the running
+          # application, when that line is exactly one alternative's.
+          #
+          # @param alternatives [Array<Candidate>]
+          # @param unit [Hash] the asked owner's published unit
+          # @param reference [Reference]
+          # @return [Array(Hash, Candidate), nil] the record and the alternative
+          def installed(alternatives, unit, reference)
+            return unless reference.separator == '#'
+
+            sources = unit.dig('metadata', 'action_sources')
+            record = sources.is_a?(Hash) && sources[reference.name]
+            return unless record.is_a?(Hash) && record['line'].is_a?(Integer)
+
+            matched = alternatives.select do |candidate|
+              !candidate.entry['file_unit'] && candidate.unit['file_path'] == record['file'] &&
+                candidate.entry['file_line'] == record['line']
+            end
+            [record, matched.first] if matched.one?
+          end
+
+          # @param reason [String] a {MethodTable::CANDIDATE} value
+          # @return [String] where such a definition is written
+          def where(reason)
+            WHERE.fetch(reason, 'on a path Ruby may not run')
+          end
+        end
+
+        # Whether definitions of one body always define the name: an `if`,
+        # `unless` or `case` with an `else` whose every branch runs a `def` on
+        # one of their lines, read by a Prism walk of that body's source. A
+        # `def` written directly in a body is definite, never one of them.
+        # What the walk cannot read is not covered.
+        module Exhaustive
+          module_function
+
+          # @param run [Array<Candidate>] candidates of one body
+          # @return [Boolean]
+          def call(run)
+            text, shift = source_of(run.first)
+            return false unless text
+
+            parsed = Woods::ParseCache.parse(text)
+            return false if parsed.errors.any?
+
+            body?(parsed.value.statements, run.map { |candidate| candidate.entry['line'].to_i - shift })
+          end
+
+          # The text the candidate's lines count in, and their offset from it.
+          def source_of(candidate)
+            source = candidate.unit['source_code']
+            return [source, 0] unless candidate.concern
+
+            lines = source.is_a?(String) ? source.lines(chomp: true) : []
+            block = MethodTable.named_blocks(lines).find { |_, _, name| name == candidate.concern }
+            block ? [block[1], block[0] - 1] : nil
+          end
+
+          def body?(node, lines)
+            case node
+            when Prism::StatementsNode then node.body.any? { |child| body?(child, lines) }
+            when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then body?(node.body, lines)
+            when Prism::CallNode
+              node.name == :class_methods && node.block.is_a?(Prism::BlockNode) && body?(node.block.body, lines)
+            when Prism::BeginNode then body?(node.statements, lines) || body?(node.ensure_clause&.statements, lines)
+            else covers?(node, lines)
+            end
+          end
+
+          # Whether running +node+ always runs a `def` on one of +lines+.
+          def runs?(node, lines)
+            case node
+            when Prism::StatementsNode then node.body.any? { |child| runs?(child, lines) }
+            when Prism::DefNode then lines.include?(node.location.start_line)
+            when Prism::CallNode then node.arguments&.arguments.to_a.any? { |argument| runs?(argument, lines) }
+            when Prism::BeginNode then runs?(node.statements, lines) || runs?(node.ensure_clause&.statements, lines)
+            else covers?(node, lines)
+            end
+          end
+
+          def covers?(node, lines)
+            bodies = clauses(node)
+            !bodies.nil? && bodies.all? { |body| runs?(body, lines) }
+          end
+
+          # Every body of a construct that runs one of them, or nil.
+          def clauses(node)
+            case node
+            when Prism::IfNode, Prism::UnlessNode
+              other = following(node)
+              rest = case other
+                     when Prism::ElseNode then [other.statements]
+                     when Prism::IfNode then clauses(other)
+                     end
+              rest && [node.statements, *rest]
+            when Prism::CaseNode, Prism::CaseMatchNode
+              other = following(node)
+              other && [*node.conditions.map(&:statements), other.statements]
+            end
+          end
+
+          # The clause after an `if`, `unless` or `case`, by the name the
+          # installed Prism gives it (`consequent` before Prism 1.2).
+          def following(node)
+            name = %i[subsequent else_clause consequent].find { |candidate| node.respond_to?(candidate) }
+            node.public_send(name) if name
+          end
         end
 
         # The name a unit's own class or module declaration has in its

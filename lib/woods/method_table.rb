@@ -40,6 +40,10 @@ module Woods
 
     CLASS_METHOD_VISIBILITY = { private_class_method: 'private', public_class_method: 'public' }.freeze
 
+    # The key marking an entry for a definition Ruby runs only on one path,
+    # valued `conditional` or `block` ({Walker}). Definite entries lack it.
+    CANDIDATE = 'candidate'
+
     BLOCK_HEADER = /\A# │ Included from: (.+?)[^\S\n]*│\z/
     BLOCK_FOOTER = /\A# ─+ End (.+?) ─+\z/
     BLOCK_LINE = /\A  # ?(.*)\z/m
@@ -159,14 +163,25 @@ module Woods
         visibility = node.name.to_s
         arguments.flat_map do |argument|
           if argument.is_a?(Prism::DefNode)
-            next inline_definition(argument, owner, scope, state) do |name|
-              Marks.visibility(@entries, [name], owner, scope, visibility)
+            next inline_definition(argument, owner, scope, state) do |entries, name|
+              Marks.visibility(entries, [name], owner, scope, visibility)
             end
           end
 
-          @entries = Marks.visibility(@entries, Names.symbol_names(argument), owner, scope, visibility)
+          names = given_names(argument, owner, scope, state)
+          mark(scope) { |entries| Marks.visibility(entries, names, owner, scope, visibility) }
           []
         end
+      end
+
+      # The names an argument gives a visibility call: its literal names,
+      # or, for a wrapper call around a `def` (`private memoize def x`, at
+      # any depth), the name the `def` returns, once the definition is
+      # placed. A decorator returns the name it is given; the chain works
+      # only then.
+      def given_names(argument, owner, scope, state)
+        wrapped_argument(argument, owner, scope, state)
+        Names.symbol_names(argument) + Names.wrapped_names(argument)
       end
 
       # `module_function def x` and `module_function :x, 'y'` (symbols and
@@ -174,13 +189,13 @@ module Woods
       def module_function_call(arguments, owner, scope, state)
         arguments.flat_map do |argument|
           if argument.is_a?(Prism::DefNode)
-            next inline_definition(argument, owner, scope, state) do |name|
-              scope == 'instance' ? Marks.module_functions(@entries, [name], owner) : @entries
+            next inline_definition(argument, owner, scope, state) do |entries, name|
+              scope == 'instance' ? Marks.module_functions(entries, [name], owner) : entries
             end
           end
 
-          names = Names.symbol_names(argument) unless argument.is_a?(Prism::ArrayNode)
-          @entries = Marks.module_functions(@entries, Array(names), owner) if scope == 'instance'
+          names = given_names(argument, owner, scope, state) unless argument.is_a?(Prism::ArrayNode)
+          mark('instance') { |entries| Marks.module_functions(entries, Array(names), owner) } if scope == 'instance'
           []
         end
       end
@@ -192,24 +207,203 @@ module Woods
         visibility = CLASS_METHOD_VISIBILITY.fetch(node.name)
         node.arguments&.arguments.to_a.flat_map do |argument|
           unless argument.is_a?(Prism::DefNode)
-            @entries = Marks.visibility(@entries, Names.symbol_names(argument), owner, 'singleton', visibility)
+            names = given_names(argument, owner, 'instance', state)
+            mark('singleton') { |entries| Marks.visibility(entries, names, owner, 'singleton', visibility) }
             next []
           end
 
-          inline_definition(argument, owner, 'instance', state) do |name|
-            Marks.visibility(@entries, [name], owner, 'singleton', visibility)
+          inline_definition(argument, owner, 'instance', state, target: 'singleton') do |entries, name|
+            Marks.visibility(entries, [name], owner, 'singleton', visibility)
           end
         end
       end
 
+      # @param target [String] the side the call acts on
+      # @yieldparam entries [Array<Hash>] the entries the call can act on
       # @yieldparam name [String] the name the `def` returns
       # @yieldreturn [Array<Hash>] the entries the call leaves
       # @return [Array] nothing more to place
-      def inline_definition(node, owner, scope, state)
+      def inline_definition(node, owner, scope, state, target: scope)
         entry = plain_definition(node, owner, scope, state)
         place(entry) if entry
-        @entries = yield(node.name.to_s)
+        mark(target) { |entries| yield(entries, node.name.to_s) }
         []
+      end
+
+      # Apply a call's change to the entries it can reach. A call on a path
+      # Ruby may not run changes only the candidates of that path (made in
+      # the branches that enclose the call, or in branches nested in its
+      # own), never a definite definition or a candidate of another branch,
+      # nor one that a later candidate of a branch around the call replaced.
+      #
+      # @param target [String] the side the call acts on
+      # @yieldparam entries [Array<Hash>]
+      # @yieldreturn [Array<Hash>] those entries after the call
+      def mark(target)
+        return @entries = yield(@entries) unless @candidate
+
+        reached, others = @entries.partition { |entry| entry.key?(CANDIDATE) && on_path?(entry[Marks::PATH]) }
+        replaced, reached = split_replaced(reached, target)
+        @entries = others + replaced + yield(reached)
+      end
+
+      # [replaced, still reached]. Only candidates of one name are compared,
+      # and a branch whose candidates share one depth has none replaced.
+      def split_replaced(reached, target)
+        return [[], reached] if reached.map { |entry| entry[Marks::PATH].size }.uniq.size < 2
+
+        named = reached.group_by { |entry| entry.values_at('owner', 'name') }
+        reached.partition { |entry| replaced_here?(entry, named[entry.values_at('owner', 'name')], target) }
+      end
+
+      # Whether a candidate of an enclosing branch has the side the call
+      # acts on (every side, when it holds no such side) redefined by a
+      # candidate of the same name in a nested branch the call runs in:
+      # whenever the call runs, that later definition has run.
+      def replaced_here?(entry, same_name, target)
+        path = entry[Marks::PATH]
+        slots = Marks.slots(entry)
+        slots &= [target] if slots.include?(target)
+        same_name.any? do |later|
+          inner = later[Marks::PATH]
+          inner.size > path.size && inner.first(path.size) == path && @path.first(inner.size) == inner &&
+            (slots - Marks.slots(later)).empty?
+        end
+      end
+
+      # Whether a candidate made on +path+ can be held where the walk is:
+      # one of the two branch paths encloses the other.
+      def on_path?(path)
+        shared = [path.size, @path.size].min
+        path.first(shared) == @path.first(shared)
+      end
+    end
+
+    # The statements around definitions, for {Walker}. A `def` passed to
+    # any call (`memoize def total`) runs as the argument is evaluated. A
+    # `def` Ruby runs only on one path is a candidate, its entry marked with
+    # the reason: `conditional` for an `if`, `unless`, `elsif` or `else`
+    # branch, a modifier, a `when` or `in` branch of a `case` and its `else`,
+    # or a `rescue` or `else` of a `begin`; `block` for
+    # a block of a call in the body, whose receiver decides whether and
+    # where it runs. A candidate sits beside what is already held, except
+    # the candidates of its own branch and of branches nested in it, which
+    # it replaces; a later definite `def` replaces it. A visibility call on
+    # such a path acts on the candidates of that path only, and a bare
+    # `private` there lasts to the end of its branch.
+    module Wrappers
+      private
+
+      # Add a definition, replacing what it overwrites in Ruby. A candidate
+      # replaces only the candidates of its own branch and of branches nested
+      # in it: whenever it runs, Ruby has run those first.
+      def place(entry)
+        return @entries = Marks.replace(@entries, entry) unless entry.key?(CANDIDATE)
+
+        path = entry[Marks::PATH]
+        covered, others = @entries.partition do |held|
+          held.key?(CANDIDATE) && held[Marks::PATH].first(path.size) == path
+        end
+        @entries = others + Marks.replace(covered, entry)
+      end
+
+      # The bodies of an `if` or `unless`, its `elsif` and `else` included.
+      #
+      # @return [Array<Prism::Node>]
+      def branches(node)
+        other = following(node)
+        found = [node.statements]
+        case other
+        when Prism::ElseNode then found << other.statements
+        when Prism::IfNode then found.concat(branches(other))
+        end
+        found.compact
+      end
+
+      # The bodies of a `case`: each `when` or `in`, and its `else`.
+      #
+      # @return [Array<Prism::Node>]
+      def case_branches(node)
+        (node.conditions.map(&:statements) << following(node)&.statements).compact
+      end
+
+      # The clause after an `if`, `unless` or `rescue`, by the name the
+      # installed Prism gives it (`consequent` before Prism 1.2).
+      def following(node)
+        name = %i[subsequent else_clause consequent].find { |candidate| node.respond_to?(candidate) }
+        node.public_send(name) if name
+      end
+
+      # A `begin` body and its `ensure` run; its `rescue` and `else` bodies
+      # are branches.
+      def begin_entries(node, owner, scope, state)
+        visit_statements(body_statements(node.statements), owner, scope, state)
+        rescued = []
+        rescue_clause = node.rescue_clause
+        while rescue_clause
+          rescued << rescue_clause.statements
+          rescue_clause = following(rescue_clause)
+        end
+        rescued << node.else_clause&.statements
+        branch_entries(rescued.compact, 'conditional', owner, scope, state)
+        visit_statements(body_statements(node.ensure_clause&.statements), owner, scope, state)
+        []
+      end
+
+      # Visit each branch as a candidate path, from a copy of the body's
+      # visibility state.
+      def branch_entries(bodies, reason, owner, scope, state)
+        outer = @candidate
+        @candidate ||= reason
+        bodies.each do |body|
+          @path.push(body.object_id) # the branch, while the tree is walked
+          visit_statements(body_statements(body), owner, scope, state.dup)
+        ensure
+          @path.pop
+        end
+        []
+      ensure
+        @candidate = outer
+      end
+
+      # A body-level call: a visibility or `class_methods` call, or one that
+      # wraps definitions.
+      def call_entries(node, owner, scope, state)
+        if node.receiver.nil?
+          name = node.name
+          return visibility_call(node, owner, scope, state) if VISIBILITY_CALLS.include?(name)
+          return class_methods_block(node, owner) if name == :class_methods && node.block
+          if CLASS_METHOD_VISIBILITY.key?(name) && scope == 'instance'
+            return class_method_visibility(node, owner, state)
+          end
+        end
+
+        wrapped_entries(node, owner, scope, state)
+      end
+
+      # The definitions any other call runs: a `def` argument (`memoize def
+      # total`), one inside a call argument (`memoize private def total`),
+      # and, as block candidates, those of the call's block.
+      def wrapped_entries(node, owner, scope, state)
+        node.arguments&.arguments.to_a.each { |argument| wrapped_argument(argument, owner, scope, state) }
+        block = node.block
+        branch_entries([block.body], 'block', owner, scope, state) if block.is_a?(Prism::BlockNode) && block.body
+        []
+      end
+
+      def wrapped_argument(argument, owner, scope, state)
+        if argument.is_a?(Prism::DefNode)
+          entry = plain_definition(argument, owner, scope, state)
+          place(entry) if entry
+        elsif argument.is_a?(Prism::CallNode) && defines?(argument)
+          statement_entries(argument, owner, scope, state).each { |entry| place(entry) }
+        end
+      end
+
+      def defines?(call)
+        call.arguments&.arguments.to_a.any? do |argument|
+          argument.is_a?(Prism::DefNode) || (argument.is_a?(Prism::CallNode) && defines?(argument))
+        end
       end
     end
 
@@ -224,18 +418,27 @@ module Woods
     # so a later definition on one side leaves the copy on the other.
     class Walker
       include VisibilityCalls
+      include Wrappers
 
-      def initialize
+      # @param offsets [Boolean] keep each entry's definition offset under
+      #   {Marks::OFFSET}, for a reader that joins entries to syntax nodes
+      def initialize(offsets: false)
         @entries = []
         @names = DeclarationName.new
         @nesting = []
+        @candidate = nil
+        @path = []
+        @offsets = offsets
       end
 
       # @param root [Prism::Node]
       # @return [Array<Hash>]
       def call(root)
         visit_body(root, nil, scope: 'instance')
-        @entries.each { |entry| entry.delete(Marks::SCOPE) }
+        @entries.each do |entry|
+          [Marks::SCOPE, Marks::PATH].each { |key| entry.delete(key) }
+          entry.delete(Marks::OFFSET) unless @offsets
+        end
       end
 
       private
@@ -245,15 +448,13 @@ module Woods
       # methods of the including class, defined in a module).
       def visit_body(node, owner, scope:)
         statements = node.is_a?(Prism::ProgramNode) ? node.statements&.body : body_statements(node)
-        state = { visibility: 'public', module_function: false, scope: scope }
+        visit_statements(statements, owner, scope, { visibility: 'public', module_function: false, scope: scope })
+      end
+
+      def visit_statements(statements, owner, scope, state)
         Array(statements).each do |statement|
           statement_entries(statement, owner, scope, state).each { |entry| place(entry) }
         end
-      end
-
-      # Add a definition, replacing what it overwrites in Ruby.
-      def place(entry)
-        @entries = Marks.replace(@entries, entry)
       end
 
       def body_statements(node)
@@ -270,6 +471,12 @@ module Woods
           nested_body(node, owner, scope)
         when Prism::CallNode
           call_entries(node, owner, scope, state)
+        when Prism::IfNode, Prism::UnlessNode
+          branch_entries(branches(node), 'conditional', owner, scope, state)
+        when Prism::CaseNode, Prism::CaseMatchNode
+          branch_entries(case_branches(node), 'conditional', owner, scope, state)
+        when Prism::BeginNode
+          begin_entries(node, owner, scope, state)
         else
           []
         end
@@ -296,17 +503,6 @@ module Woods
         yield
       ensure
         @nesting.pop
-      end
-
-      def call_entries(node, owner, scope, state)
-        return [] unless node.receiver.nil?
-
-        name = node.name
-        return visibility_call(node, owner, scope, state) if VISIBILITY_CALLS.include?(name)
-        return class_methods_block(node, owner) if name == :class_methods && node.block
-        return class_method_visibility(node, owner, state) if CLASS_METHOD_VISIBILITY.key?(name) && scope == 'instance'
-
-        []
       end
 
       # A `def` under the body's current default visibility and
@@ -355,9 +551,11 @@ module Woods
 
         visibility = 'public' if receiver # `private` does not apply to `def self.x`
         landing = definition_scope(receiver, scope)
-        { 'name' => node.name.to_s, 'kind' => definition_kind(landing, module_function),
-          'line' => node.location.start_line, 'end_line' => node.location.end_line,
-          'visibility' => visibility, 'owner' => owner, Marks::SCOPE => landing }
+        entry = { 'name' => node.name.to_s, 'kind' => definition_kind(landing, module_function),
+                  'line' => node.location.start_line, 'end_line' => node.location.end_line,
+                  'visibility' => visibility, 'owner' => owner, Marks::SCOPE => landing,
+                  Marks::OFFSET => node.location.start_offset }
+        @candidate ? entry.merge(CANDIDATE => @candidate, Marks::PATH => @path.dup) : entry
       end
     end
 
@@ -368,6 +566,16 @@ module Woods
       # The internal key naming where an entry was defined; removed before
       # the table is returned.
       SCOPE = 'scope'
+
+      # The internal key holding the byte offset where an entry's `def`
+      # starts, the one position no other definition shares; removed before
+      # the table is returned unless the walker is asked to keep it.
+      OFFSET = 'offset'
+
+      # The internal key holding the branches a candidate was defined in,
+      # outermost first, each by its body node's id; removed before the
+      # table is returned.
+      PATH = 'path'
 
       module_function
 
@@ -424,12 +632,18 @@ module Woods
       # @return [Array<Hash>]
       def module_functions(entries, names, owner)
         names.uniq.reduce(entries) do |held, name|
-          source = held.find { |entry| entry.values_at('owner', 'name', SCOPE) == [owner, name, 'instance'] }
-          next held unless source # neither an instance method nor a module function
-
-          copy = source.merge('kind' => 'module_function', 'visibility' => 'public')
-          replace(held, copy)
+          named = ->(entry) { entry.values_at('owner', 'name', SCOPE) == [owner, name, 'instance'] }
+          candidates, definite = held.partition { |entry| entry.key?(CANDIDATE) }
+          source = definite.find(&named)
+          definite = replace(definite, module_function_copy(source)) if source
+          definite + candidates.map { |entry| named.call(entry) ? module_function_copy(entry) : entry }
         end
+      end
+
+      # A candidate is copied where it stands: Ruby copies whichever
+      # alternative it holds, and a definite source replaces no candidate.
+      def module_function_copy(entry)
+        entry.merge('kind' => 'module_function', 'visibility' => 'public')
       end
 
       # +entries+ with +entry+ added and what it overwrites removed or narrowed.
@@ -468,6 +682,16 @@ module Woods
         when Prism::ConstantPathNode
           parent = node.parent ? constant_name(node.parent) : ''
           "#{parent}::#{node.name}" if parent
+        end
+      end
+
+      # The names the definitions inside a wrapper call return, at any
+      # depth of call arguments (`memoize cache def x`).
+      def wrapped_names(node)
+        return [] unless node.is_a?(Prism::CallNode)
+
+        node.arguments&.arguments.to_a.flat_map do |argument|
+          argument.is_a?(Prism::DefNode) ? [argument.name.to_s] : wrapped_names(argument)
         end
       end
 
