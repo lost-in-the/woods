@@ -54,6 +54,8 @@ module Woods
       def initialize
         @concern_cache = {}
         @concern_module_cache = {}
+        @app_action_source_cache = {}
+        @defining_unit_cache = {}
         @warnings = []
       end
 
@@ -124,11 +126,14 @@ module Woods
 
         unit.namespace = extract_namespace(controller)
         inlined_source, inlined_concerns = build_controller_source_with_concerns(controller, source)
-        action_sources = resolve_action_sources(controller)
-        unit.source_code = build_composite_source(controller, inlined_source)
+        action_sources, inherited_gem_actions = resolve_actions(controller)
+        filters = extract_filter_chain(controller, actions: action_sources.keys)
+        unit.source_code = build_composite_source(controller, inlined_source, filters: filters)
         renders = component_renders(controller, source)
         unit.metadata = extract_metadata(controller, source, inlined_concerns: inlined_concerns,
-                                                             action_sources: action_sources)
+                                                             action_sources: action_sources,
+                                                             inherited_gem_actions: inherited_gem_actions,
+                                                             filters: filters)
                         .merge(unresolved_renders: renders.unresolved, external_renders: renders.external)
         unit.dependencies = extract_dependencies(controller, source, action_sources: action_sources, renders: renders)
         apply_route_helper_references(unit, source, via_type: :redirect_to, forms: false)
@@ -270,12 +275,12 @@ module Woods
       # already concern-inlined source (see
       # {#build_controller_source_with_concerns}), which returns '' rather
       # than nil for a missing file — so this never sees a nil source.
-      def build_composite_source(controller, source)
+      def build_composite_source(controller, source, filters: nil)
         # Prepend route information
         routes_comment = build_routes_comment(controller)
 
         # Prepend before_action chain
-        filters_comment = build_filters_comment(controller)
+        filters_comment = build_filters_comment(controller, filters: filters)
 
         "#{routes_comment}\n#{filters_comment}\n#{source}"
       end
@@ -302,8 +307,8 @@ module Woods
         ROUTES
       end
 
-      def build_filters_comment(controller)
-        filters = extract_filter_chain(controller)
+      def build_filters_comment(controller, filters: nil)
+        filters ||= extract_filter_chain(controller)
         return '' if filters.empty?
 
         lines = filters.map do |f|
@@ -670,28 +675,50 @@ module Woods
       #   whose source holds the method body, or nil when no unit does.
       #   +super_source+, present when Ruby has a next definition of the
       #   action, is that definition: see {#super_source}.
-      def resolve_action_sources(controller)
+      # Resolve both app-owned action sources and routed gem-defined actions in
+      # one pass over +action_method_names(controller)+ and +routed_actions+.
+      #
+      # @param controller [Class]
+      # @return [Array(Hash, Hash)] `[action_sources, inherited_gem_actions]`
+      def resolve_actions(controller)
         routed = routed_actions(controller)
         own_file = source_file_for(controller)
+        action_sources = {}
+        inherited_gem_actions = {}
 
-        action_method_names(controller).each_with_object({}) do |name, sources|
+        action_method_names(controller).each do |name|
           next if name.end_with?('=')
 
+          is_routed = routed.include?(name)
           method = controller.instance_method(name)
           file, line = method.source_location
-          next unless app_action_source?(file)
-          next unless routed.include?(name) || (method.owner == controller && same_file?(file, own_file))
+          if app_action_source?(file)
+            next unless is_routed || (method.owner == controller && same_file?(file, own_file))
 
-          sources[name] = {
-            owner: method.owner.name,
-            defined_in: defining_unit(method.owner, file),
-            file: relative_to_root(file),
-            line: line,
-            **compiled_column(method)
-          }
-          following = super_source(method)
-          sources[name][:super_source] = following if following
+            action_sources[name] = build_action_source_entry(method, file, line)
+          elsif is_routed
+            inherited_gem_actions[name] = { owner: method.owner.name }
+          end
         end
+
+        [action_sources, inherited_gem_actions]
+      end
+
+      def build_action_source_entry(method, file, line)
+        entry = {
+          owner: method.owner.name,
+          defined_in: defining_unit(method.owner, file),
+          file: relative_to_root(file),
+          line: line,
+          **compiled_column(method)
+        }
+        following = super_source(method)
+        entry[:super_source] = following if following
+        entry
+      end
+
+      def resolve_action_sources(controller)
+        resolve_actions(controller).first
       end
 
       # The definition a `super` in the action's body reaches, one hop: the
@@ -812,10 +839,17 @@ module Woods
       # @param file [String, nil] Method source file
       # @return [Boolean]
       def app_action_source?(file)
-        return false unless app_source?(file, Rails.root.to_s)
+        return false if file.nil?
+        return @app_action_source_cache[file] if @app_action_source_cache.key?(file)
 
-        absolute = File.expand_path(file)
-        gem_install_paths.none? { |dir| absolute.start_with?(dir) }
+        @app_action_source_cache[file] = begin
+          if app_source?(file, Rails.root.to_s)
+            absolute = File.expand_path(file)
+            gem_install_paths.none? { |dir| absolute.start_with?(dir) }
+          else
+            false
+          end
+        end
       end
 
       # @return [Array<String>] Installed gem directories, separator-terminated
@@ -842,12 +876,21 @@ module Woods
       def defining_unit(owner, file)
         return nil unless owner.name
 
-        parts = owner.name.split('::')
-        parts.size.downto(1) do |count|
-          name = parts.first(count).join('::')
-          return name if unit_holding?(constant_named(name), file)
+        cache_key = [owner, file]
+        return @defining_unit_cache[cache_key] if @defining_unit_cache.key?(cache_key)
+
+        @defining_unit_cache[cache_key] = begin
+          parts = owner.name.split('::')
+          found = nil
+          parts.size.downto(1) do |count|
+            name = parts.first(count).join('::')
+            if unit_holding?(constant_named(name), file)
+              found = name
+              break
+            end
+          end
+          found
         end
-        nil
       end
 
       # @param candidate [Module, nil]
@@ -896,9 +939,16 @@ module Woods
       # @param action_sources [Hash{String => Hash}, nil] From
       #   {#resolve_action_sources}; computed when nil
       # @return [Hash]
-      def extract_metadata(controller, source = nil, inlined_concerns: nil, action_sources: nil)
-        action_sources ||= resolve_action_sources(controller)
+      def extract_metadata(controller, source = nil, inlined_concerns: nil, action_sources: nil,
+                           inherited_gem_actions: nil, filters: nil)
+        if action_sources.nil? && inherited_gem_actions.nil?
+          action_sources, inherited_gem_actions = resolve_actions(controller)
+        else
+          action_sources ||= resolve_action_sources(controller)
+          inherited_gem_actions ||= resolve_inherited_gem_actions(controller)
+        end
         actions = action_sources.keys
+        filters ||= extract_filter_chain(controller, actions: actions)
         permitted_params = extract_permitted_params(controller, source)
 
         {
@@ -911,11 +961,11 @@ module Woods
                                                                   permitted: permitted_params.transform_values do |p|
                                                                     p[:model]
                                                                   end),
-          inherited_gem_actions: resolve_inherited_gem_actions(controller),
+          inherited_gem_actions: inherited_gem_actions,
           routes: routes_map[controller.name] || {},
 
           # Filter chain, with each filter's resolved actions and owner (W-8)
-          filters: extract_filter_chain(controller, actions: actions),
+          filters: filters,
 
           # Runtime superclass, e.g. ApplicationController or ActionController::Metal
           parent_class: controller.superclass&.name,
@@ -941,7 +991,7 @@ module Woods
 
           # Metrics
           action_count: actions.size,
-          filter_count: process_action_callbacks(controller).count,
+          filter_count: filters.size,
 
           # Strong parameters if definable
           permitted_params: permitted_params
