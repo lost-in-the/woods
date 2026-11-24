@@ -143,9 +143,15 @@ module ProfileCompare
       end
       [['baseline', base], ['candidate', cand]].each do |side, receipt|
         missing = b_keys.reject { |k| receipt[k].is_a?(Hash) }
-        next if missing.empty?
+        unless missing.empty?
+          warn "Missing required workload(s) in #{side} receipt: #{missing.join(', ')}"
+          exit 2
+        end
 
-        warn "Missing required workload(s) in #{side} receipt: #{missing.join(', ')}"
+        failed = b_keys.reject { |k| receipt.dig(k, 'total', 'status') == 'ok' }
+        next if failed.empty?
+
+        warn "Non-ok extraction status in #{side} receipt: #{failed.join(', ')}"
         exit 2
       end
       b_keys

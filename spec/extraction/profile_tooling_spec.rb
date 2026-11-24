@@ -173,14 +173,14 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
       }
     end
 
-    def synthetic_receipt(incremental_matches: true, include_rebuild_key: true, digest: 'abc123')
-      metric = { 'wall_ms' => 10.0, 'cpu_ms' => 8.0, 'allocations' => 1000 }
+    def synthetic_receipt(incremental_matches: true, include_rebuild_key: true, digest: 'abc123', status: 'ok')
+      metric = { 'wall_ms' => 10.0, 'cpu_ms' => 8.0, 'allocations' => 1000, 'status' => status }
       sub = { 'median_wall_ms' => 5.0, 'median_cpu_ms' => 4.0, 'median_allocations' => 500 }
       receipt = {
         'git_sha' => 'a' * 40,
-        'full_extraction' => { 'total' => metric, 'phases' => [] },
-        'incremental_noop' => { 'total' => metric, 'phases' => [] },
-        'incremental_method_edit' => { 'total' => metric, 'phases' => [] },
+        'full_extraction' => { 'total' => metric.dup, 'phases' => [] },
+        'incremental_noop' => { 'total' => metric.dup, 'phases' => [] },
+        'incremental_method_edit' => { 'total' => metric.dup, 'phases' => [] },
         'graph_analyzer' => { 'analyze' => sub, 'cycles' => sub, 'bridges' => sub },
         'flow_precomputer' => { 'precompute' => sub, 'recompute_delta' => sub },
         'reader_and_lexical' => {
@@ -301,6 +301,21 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
         _out, err, status = Open3.capture3(RbConfig.ruby, compare_script, base_path, cand_path)
         expect(status.exitstatus).to eq(2)
         expect(err).to include('incremental_noop')
+      end
+    end
+
+    it 'rejects synthetic receipts whose workload total status is not ok' do
+      Dir.mktmpdir('profile_compare_spec') do |dir|
+        base_path = File.join(dir, 'base.json')
+        cand_path = File.join(dir, 'cand.json')
+        File.write(base_path, JSON.generate(synthetic_receipt))
+        failed = synthetic_receipt
+        failed['incremental_method_edit']['total']['status'] = 'error'
+        File.write(cand_path, JSON.generate(failed))
+
+        _out, err, status = Open3.capture3(RbConfig.ruby, compare_script, base_path, cand_path)
+        expect(status.exitstatus).to eq(2)
+        expect(err).to include('Non-ok extraction status in candidate receipt', 'incremental_method_edit')
       end
     end
   end
