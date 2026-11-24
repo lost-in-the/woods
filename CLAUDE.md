@@ -22,7 +22,7 @@ and deprecated Notion + Unblocked sync, and evaluation harness.
 # found". Bundler 4 no longer exposes gem binstubs. The binstubs work on both.
 bundle install
 bin/rake spec                                    # Full test suite, one process (about 15 minutes)
-script/parallel-rspec                            # Same suite in four processes, as CI runs it (about 4 minutes)
+script/parallel-rspec                            # Same suite in six processes, as CI runs it (about 4 minutes)
 bin/rake spec SPEC=spec/extractors/model_extractor_spec.rb  # Single file
 bin/rubocop -a                                   # Lint + autofix
 bin/rake woods:affected_specs                    # Specs this branch's changes reach, from the self-map (#926)

@@ -35,6 +35,7 @@ RSpec.describe 'release environment protection' do
     {
       'test' => 'Unit specs (Ruby 4.0)',
       'rails-matrix' => 'Booted extraction (Ruby 4.0 / Rails 8.1)',
+      'rails-fixtures' => 'Rails fixture bundles (Ruby 3.3 / Rails 7.2)',
       'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache + Redis)',
       'http-transport' => 'MCP transports (official clients)',
       'minimum-dependencies' => 'Minimum runtime dependencies (Ruby 3.0)'
@@ -42,7 +43,8 @@ RSpec.describe 'release environment protection' do
   end
 
   def full_job_set
-    %w[test rails-matrix live-backends http-transport minimum-dependencies coverage security lint build].map do |id|
+    %w[test rails-matrix rails-fixtures live-backends http-transport minimum-dependencies coverage security lint
+       build].map do |id|
       { 'name' => matrixed_job_names.fetch(id, id), 'conclusion' => 'success' }
     end
   end

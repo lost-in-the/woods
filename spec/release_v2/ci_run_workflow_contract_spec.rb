@@ -37,6 +37,7 @@ RSpec.describe 'release CI workflow contract' do
       { 'name' => 'Unit specs (Ruby 3.0)', 'conclusion' => 'success' },
       { 'name' => 'Unit specs (Ruby 4.0)', 'conclusion' => 'success' },
       { 'name' => 'Booted extraction (Ruby 4.0 / Rails 8.1)', 'conclusion' => 'success' },
+      { 'name' => 'Rails fixture bundles (Ruby 3.3 / Rails 7.2)', 'conclusion' => 'success' },
       { 'name' => 'Live backends (pgvector + Qdrant + Solid Cache + Redis)', 'conclusion' => 'success' },
       { 'name' => 'MCP transports (official clients)', 'conclusion' => 'success' },
       { 'name' => 'Minimum runtime dependencies (Ruby 3.0)', 'conclusion' => 'success' },
@@ -134,6 +135,37 @@ RSpec.describe 'release CI workflow contract' do
 
     expect(status).not_to be_success
     expect(stderr).to include('no job matching required CI contract job "security"')
+  end
+
+  # The booted extraction rows and the optional fixture bundles are separate
+  # contracts, so a run missing either group fails on that group alone.
+  it 'rejects a run whose booted extraction rows are all missing though the fixture bundles ran' do
+    reduced_jobs = full_job_set.reject { |job| job['name'].start_with?('Booted extraction') }
+
+    _stdout, stderr, status = validate_ci_run(jobs: reduced_jobs)
+
+    expect(status).not_to be_success
+    expect(stderr).to include('no job matching required CI contract job "rails-matrix"')
+  end
+
+  it 'rejects a run whose fixture bundles are missing though the booted extraction rows ran' do
+    reduced_jobs = full_job_set.reject { |job| job['name'].start_with?('Rails fixture bundles') }
+
+    _stdout, stderr, status = validate_ci_run(jobs: reduced_jobs)
+
+    expect(status).not_to be_success
+    expect(stderr).to include('no job matching required CI contract job "rails-fixtures"')
+  end
+
+  it 'rejects a run whose fixture bundles ran but did not succeed' do
+    failed_jobs = full_job_set.map do |job|
+      job['name'].start_with?('Rails fixture bundles') ? job.merge('conclusion' => 'failure') : job
+    end
+
+    _stdout, stderr, status = validate_ci_run(jobs: failed_jobs)
+
+    expect(status).not_to be_success
+    expect(stderr).to include('required CI contract job "rails-fixtures"')
   end
 
   it 'rejects a required job that ran but did not succeed' do

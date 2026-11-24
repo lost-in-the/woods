@@ -125,7 +125,11 @@ if ARGV.first == '--update-timings'
   exit
 end
 
-count = Integer(ENV.fetch('WOODS_PARALLEL_PROCESSES', '4'))
+# Six processes on a four-core runner: the unit suite spends much of its time
+# waiting on subprocesses, sleeps and the filesystem (user + sys CPU was about
+# 60% of four cores' wall time), so two more processes fill that wait. Measured
+# with coverage on four cores: 288 s at four, 220-231 s at six, 224 s at eight.
+count = Integer(ENV.fetch('WOODS_PARALLEL_PROCESSES', '6'))
 timings = File.exist?(ParallelRspec::TIMINGS_PATH) ? ParallelRspec.read_json(ParallelRspec::TIMINGS_PATH) : {}
 groups = ParallelRspec.split(ParallelRspec.spec_files(ARGV), timings, count)
 abort 'no spec files found' if groups.empty?
