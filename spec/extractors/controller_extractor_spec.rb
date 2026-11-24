@@ -5,6 +5,7 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/concern'
+require 'active_support/core_ext/object/blank'
 require 'woods'
 require 'woods/extractors/controller_extractor'
 
@@ -1272,6 +1273,67 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
         expect(unit.metadata[:included_concerns]).to eq(['RequiresAuthor'])
         expect(unit.metadata[:inlined_concerns]).to eq(['RequiresAuthor'])
         expect(unit.dependencies).to include(type: :concern, target: 'RequiresAuthor', via: :include)
+      end
+    end
+
+    describe 'single-pass action and filter extraction' do
+      let(:tmp_dir) { Dir.mktmpdir('woods_controller_single_pass') }
+      let(:gem_dir) { Dir.mktmpdir('woods_controller_gem_dir') }
+
+      after do
+        FileUtils.rm_rf(tmp_dir)
+        FileUtils.rm_rf(gem_dir)
+      end
+
+      it 'resolves actions, gem actions, and filters once per controller' do
+        routes_double = double('Routes', routes: [], named_routes: {})
+        app_double = double('Application', routes: routes_double)
+        stub_const('Rails', double('Rails', application: app_double, root: Pathname.new(tmp_dir),
+                                            logger: double('Logger').as_null_object))
+
+        app_file = File.join(tmp_dir, 'app/controllers/widgets_controller.rb')
+        FileUtils.mkdir_p(File.dirname(app_file))
+        File.write(app_file, <<~RUBY)
+          class WidgetsController
+            def index; end
+          end
+        RUBY
+
+        gem_file = File.join(gem_dir, 'gem_actions.rb')
+        File.write(gem_file, <<~RUBY)
+          module GemActions
+            def export; end
+          end
+        RUBY
+
+        gem_mod = Module.new
+        gem_mod.define_singleton_method(:name) { 'GemActions' }
+        gem_mod.module_eval("def export; end\n", gem_file, 2) # rubocop:disable Style/EvalWithLocation
+
+        klass = Class.new
+        klass.include(gem_mod)
+        klass.class_eval("def index; end\n", app_file, 2) # rubocop:disable Style/EvalWithLocation
+        klass.define_singleton_method(:name) { 'WidgetsController' }
+        klass.define_singleton_method(:action_methods) { Set.new(%w[index export]) }
+        callback = build_callback(kind: :before, filter: :authenticate!)
+        klass.define_singleton_method(:_process_action_callbacks) { [callback] }
+        klass.define_singleton_method(:included_modules) { [] }
+
+        extractor = described_class.new
+        allow(extractor).to receive(:routed_actions).with(klass).and_return(Set.new(%w[index export]))
+        allow(extractor).to receive(:action_method_names).with(klass).and_call_original
+        allow(extractor).to receive(:extract_filter_chain).and_call_original
+
+        unit = extractor.extract_controller(klass)
+
+        expect(extractor).to have_received(:action_method_names).with(klass).once
+        expect(extractor).to have_received(:routed_actions).with(klass).once
+        expect(extractor).to have_received(:extract_filter_chain).once
+        expect(unit.metadata[:actions]).to eq(['index'])
+        expect(unit.metadata[:inherited_gem_actions]).to eq('export' => { owner: 'GemActions' })
+        expect(unit.metadata[:filter_count]).to eq(1)
+        expect(unit.metadata[:filters].size).to eq(1)
+        expect(unit.source_code).to include('before   :authenticate!')
       end
     end
   end
