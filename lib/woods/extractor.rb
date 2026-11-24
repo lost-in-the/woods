@@ -810,6 +810,7 @@ module Woods
       end
 
       profile_phase('reconciliation') do
+        @reconcile_discovery_ran = false
         @hybrid_discovery_keys.each { |key| touched.merge(replace_type_wholesale(key, affected_types)) }
         first_reconciled = reconcile_class_based_types(affected_types)
         touched.merge(first_reconciled)
@@ -824,9 +825,12 @@ module Woods
         # Reconcile once more, because pruning can un-know a class the first pass
         # skipped (M1) and extracting newly discovered/reconciled classes can
         # autoload additional descendants (e.g. association targets via
-        # `reflection.klass`). When nothing was added, extracted, or pruned
-        # between the first pass and here, the discovery inventory is unchanged.
-        unless pruned.empty? && first_reconciled.empty? && mixin_touched.empty? && whole_app_touched.empty?
+        # `reflection.klass`), even when an extraction returns nil, rescues, or
+        # rewrites unchanged bytes. Skip only when nothing was pruned, no
+        # discovery-capable extraction ran, and no reconciliation step touched
+        # any unit.
+        unless pruned.empty? && !@reconcile_discovery_ran &&
+               first_reconciled.empty? && mixin_touched.empty? && whole_app_touched.empty?
           touched.merge(reconcile_class_based_types(
                           affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
                         ))
@@ -4213,6 +4217,7 @@ module Woods
         expected = extractor.runtime_unit_type(klass)
         next if previous.empty? || !expected || previous == [expected]
 
+        @reconcile_discovery_ran = true
         unit = extractor.extract_from_runtime_type(klass)
         source_consumer_failed?(:graphql, extractor)
         next unless unit
@@ -4295,6 +4300,7 @@ module Woods
       new_classes = discovered.reject { |k| known.include?(k.name) || excluded.include?(k.name) }
       return Set.new if new_classes.empty?
 
+      @reconcile_discovery_ran = true
       units = timing_collector.time(key) do
         new_classes.filter_map do |klass|
           extractor_for(key).public_send(spec[:method], klass)
@@ -4447,6 +4453,7 @@ module Woods
       # copy taken before them afterwards.
       @published_table_units = nil
 
+      @reconcile_discovery_ran = true unless keys.empty?
       touched = keys.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
       end
@@ -4571,6 +4578,7 @@ module Woods
         current = @dependency_graph.dependencies_of(identifier, via: :table, type: :model).sort
         next if current == Array(catalog.for_model(klass)&.identifier)
 
+        @reconcile_discovery_ran = true
         moved.add(identifier) if re_extract_unit_of_type(identifier, :model, affected_types)
       end
       Rails.logger.info "[Woods] Model table edges reconciled: #{touched.size} model(s) re-extracted"
