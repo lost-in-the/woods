@@ -453,6 +453,42 @@ RSpec.describe Woods::MCP::ToolResponseRenderer do
     end
   end
 
+  # #1041: rows come breadth first, so indenting them by depth alone put D
+  # under its sibling C, which has no edge to it.
+  describe 'a branching traversal result' do
+    let(:branching_result) do
+      {
+        'root' => 'A',
+        'found' => true,
+        'nodes' => {
+          'A' => { 'depth' => 0, 'deps' => %w[B C] },
+          'B' => { 'depth' => 1, 'deps' => ['D'] },
+          'C' => { 'depth' => 1, 'deps' => [] },
+          'D' => { 'depth' => 2, 'deps' => [] }
+        }
+      }
+    end
+
+    it 'puts each row under the row whose deps name it, in markdown and claude' do
+      tree = "- **A**\n  - B\n  - C\n  - **B**\n    - D\n    - **D**\n  - **C**"
+      expect(described_class.for(:markdown).render(:dependencies, branching_result))
+        .to eq("## Dependencies of A\n\n#{tree}")
+      expect(described_class.for(:claude).render(:dependencies, branching_result)).to include(tree)
+    end
+
+    it 'puts each row under the row whose deps name it, in plain text' do
+      expect(described_class.for(:plain).render(:dependencies, branching_result))
+        .to eq("Dependencies of A\n#{'=' * 60}\n  A\n    -> B\n    -> C\n    B\n      -> D\n      D\n    C")
+    end
+
+    it 'shows a row whose parent is not listed at the top level, with its depth' do
+      detached = branching_result.merge('nodes' => branching_result['nodes'].except('B'))
+      expect(described_class.for(:markdown).render(:dependencies, detached))
+        .to end_with("  - **C**\n- **D** (depth 2)")
+      expect(described_class.for(:plain).render(:dependencies, detached)).to end_with("    C\n  D (depth 2)")
+    end
+  end
+
   describe 'a budget-limited traversal result' do
     %i[markdown plain claude].each do |format|
       it "warns about incomplete traversal in #{format}, independently of paging" do

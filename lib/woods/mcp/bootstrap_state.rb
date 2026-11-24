@@ -92,6 +92,28 @@ module Woods
         !@hydration_failures.empty?
       end
 
+      # Forget the boot hydration failures of the store components a
+      # successful reload replaced. The empty stores those failures describe
+      # are no longer served, so +codebase_retrieve+ must stop refusing over
+      # them. When the boot +:degraded+ status came from one of them (not
+      # from an unreachable provider), the status returns to +:hydrated+ once
+      # no failure remains, or names a failure that does remain.
+      #
+      # @param components [Array<Symbol, String>] the store components swapped
+      # @param now [Time] timestamp for a recovery to +:hydrated+
+      # @return [self]
+      def clear_hydration_failures!(components, now: Time.now.utc)
+        cleared = Array(components).filter_map { |component| @hydration_failures.delete(component.to_sym) }
+        return self unless @status == :degraded && cleared.any? { |error| error.equal?(@reason) }
+
+        if @hydration_failures.empty?
+          mark(:hydrated, now: now)
+        else
+          mark(:degraded, reason: @hydration_failures.values.first, now: now)
+        end
+        self
+      end
+
       # Record a failed reload attempt (M7). The reload transaction is
       # all-or-nothing: the failure means the previous generation is still
       # being served, which is what +generation+ names.

@@ -706,8 +706,10 @@ module Woods
             # PageRank from the retired graph.
             retriever.invalidate_context_cache! if retriever.respond_to?(:invalidate_context_cache!)
 
-            # Successful recovery clears the reload-phase degraded condition.
+            # Successful recovery clears the reload-phase degraded condition,
+            # and the boot hydration failures of every store it replaced.
             state&.clear_reload_failure!
+            state&.clear_hydration_failures!(candidates.graph_store ? %i[vector metadata graph] : %i[vector metadata])
 
             run_hook(hooks, :after_swap)
 

@@ -55,6 +55,44 @@ RSpec.describe Woods::Impact::MetadataRisks do
     expect(risk.dig('evidence', 'after').map { |item| item['filter'] }).to eq(%w[enqueue_invoice normalize_total])
   end
 
+  # #1085: positions move whenever lines are added above; they are not the
+  # behaviour being compared.
+  describe 'a line shift alone' do
+    let(:operation) do
+      { 'type' => 'call', 'target' => 'Mailer', 'method' => 'deliver', 'line' => 12, 'file' => 'app/models/post.rb',
+        'then_ops' => [{ 'type' => 'call', 'method' => 'log', 'line' => 13, 'statement_line' => 13 }] }
+    end
+    let(:callback) do
+      { 'filter' => 'notify', 'type' => 'after_save', 'kind' => 'after', 'conditions' => {},
+        'side_effects' => { 'jobs_enqueued' => ['ExampleJob'], 'operations' => [operation] } }
+    end
+    let(:filter) { { 'kind' => 'before', 'filter' => 'set_post', 'line' => 4, 'file' => 'app/controllers/a.rb' } }
+
+    def shifted(operation, by)
+      nested = operation['then_ops'].map do |item|
+        item.merge('line' => item['line'] + by, 'statement_line' => item['statement_line'] + by)
+      end
+      operation.merge('line' => operation['line'] + by, 'then_ops' => nested)
+    end
+
+    it 'raises no callback side-effect change, and a changed job still raises one' do
+      moved = callback.merge('side_effects' => callback['side_effects'].merge('operations' => [shifted(operation, 4)]))
+      expect(evaluate({ 'callbacks' => [callback] }, { 'callbacks' => [moved] })['risks']).to be_empty
+
+      changed = moved.merge('side_effects' => moved['side_effects'].merge('jobs_enqueued' => ['OtherJob']))
+      risks = evaluate({ 'callbacks' => [callback] }, { 'callbacks' => [changed] })['risks']
+      expect(risks).to contain_exactly(include('kind' => 'callback_side_effect_change'))
+      expect(risks.first.dig('evidence', 'after', 0, 'side_effects', 'operations', 0, 'line')).to eq(16)
+    end
+
+    it 'raises no filter-chain change, and a changed filter still raises one' do
+      moved = filter.merge('line' => 9)
+      expect(evaluate({ 'filters' => [filter] }, { 'filters' => [moved] }, 'controller')['risks']).to be_empty
+      expect(evaluate({ 'filters' => [filter] }, { 'filters' => [moved.merge('only' => %w[show])] }, 'controller')
+               .fetch('risks')).to contain_exactly(include('kind' => 'filter_chain_change'))
+    end
+  end
+
   it 'keeps missing applicable evidence unknown even if both endpoints omit it' do
     expect(evaluate({}, {}, 'model')['unknowns']).to include(include('kind' => 'callback_side_effects_unavailable'))
     expect(evaluate({}, {}, 'controller')['unknowns']).to include(include('kind' => 'filters_unavailable'))

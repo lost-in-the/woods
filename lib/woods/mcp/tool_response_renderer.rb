@@ -5,6 +5,7 @@ require_relative 'path_tool'
 require_relative 'routes_without_action'
 require_relative 'traversal_evidence_index'
 require_relative 'traversal_evidence_text'
+require_relative 'traversal_tree'
 
 module Woods
   module MCP
