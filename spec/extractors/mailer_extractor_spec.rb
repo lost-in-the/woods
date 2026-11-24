@@ -366,6 +366,17 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       expect(callback[:only]).to eq(%w[welcome_email])
     end
 
+    it 'publishes the actions every stacked only scope names' do
+      scopes = [build_action_filter(%w[welcome_email reminder]), build_action_filter(%w[welcome_email])]
+      cb = build_callback(kind: :before, filter: :set_locale, if_conditions: scopes)
+      mailer = build_mailer(name: 'UserMailer', actions: %w[welcome_email reminder], callbacks: [cb])
+      create_file('app/mailers/user_mailer.rb', "class UserMailer < ApplicationMailer\nend\n")
+
+      unit = described_class.new.extract_mailer(mailer)
+
+      expect(unit.metadata[:callbacks].first[:only]).to eq(%w[welcome_email])
+    end
+
     it 'extracts callback with :except condition' do
       action_filter = build_action_filter(%w[internal_report])
       cb = build_callback(kind: :after, filter: :log_delivery, unless_conditions: [action_filter])
@@ -376,6 +387,7 @@ RSpec.describe Woods::Extractors::MailerExtractor do
 
       callback = unit.metadata[:callbacks].first
       expect(callback[:except]).to eq(%w[internal_report])
+      expect(callback).not_to have_key(:only)
     end
   end
 

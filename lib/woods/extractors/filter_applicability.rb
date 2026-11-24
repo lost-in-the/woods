@@ -185,10 +185,12 @@ module Woods
       end
 
       # Filter declarations in one source file, parsed once per extractor.
+      # Declaring a filter again replaces the earlier callback, so the later
+      # declaration is the one the chain keeps.
       #
       # @param path [String]
       # @return [Hash{Array(Symbol, String) => Integer}] `[kind, name]` to the
-      #   line of its first declaration
+      #   line of its last declaration
       def filter_declarations(path)
         (@filter_declarations ||= {})[path] ||= begin
           parsed = Woods::ParseCache.parse(SourceFile.read(path))
@@ -202,7 +204,7 @@ module Woods
       def collect_filter_declarations(node, sites)
         if node.is_a?(Prism::CallNode) && node.receiver.nil? && (kind = filter_declaration_kind(node.name))
           Array(node.arguments&.arguments).grep(Prism::SymbolNode).each do |symbol|
-            sites[[kind, symbol.unescaped]] ||= node.location.start_line
+            sites[[kind, symbol.unescaped]] = node.location.start_line
           end
         end
         node.compact_child_nodes.each { |child| collect_filter_declarations(child, sites) }
