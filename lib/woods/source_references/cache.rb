@@ -51,10 +51,18 @@ module Woods
 
         # @param path [String, Pathname] destination within the new payload
         # @param data [Hash] versioned candidate and pass-owned edge evidence
+        # @return [void]
+        # @raise [Invalid] unsupported or invalid cache; previous bytes survive
+        def write(path, data)
+          write_payload(path, data, durable: true)
+        end
+
+        # @param path [String, Pathname] destination within the new payload
+        # @param data [Hash] versioned candidate and pass-owned edge evidence
         # @param durable [Boolean] whether to fsync this file individually
         # @return [void]
         # @raise [Invalid] unsupported or invalid cache; previous bytes survive
-        def write(path, data, durable: true)
+        def write_payload(path, data, durable:)
           validate!(data)
           bytes = JSON.generate(data)
           raise Invalid, 'Source reference cache exceeds size limit' if bytes.bytesize > MAX_BYTES

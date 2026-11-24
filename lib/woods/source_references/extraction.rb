@@ -67,9 +67,14 @@ module Woods
 
       # Called before any incremental consumer mutates the seeded generation.
       def prepare_source_reference_baseline
+        @source_reference_baseline_loaded = false
         discarding_seed_on_refusal do
           @source_reference_baseline = Cache.read(payload_dir.join(Cache::FILE_NAME))
-          empty_source_reference_baseline! unless @source_reference_baseline
+          if @source_reference_baseline
+            @source_reference_baseline_loaded = true
+          else
+            empty_source_reference_baseline!
+          end
         rescue Cache::Invalid
           empty_source_reference_baseline!
         end
@@ -259,13 +264,13 @@ module Woods
       end
 
       def write_source_reference_cache(result)
-        Cache.write(payload_dir.join(Cache::FILE_NAME), result.cache, durable: payload_writes_durable?)
+        Cache.write_payload(payload_dir.join(Cache::FILE_NAME), result.cache, durable: payload_writes_durable?)
         @source_reference_paths = result.paths.to_set
       end
 
       def write_source_reference_cache_if_changed(result)
         cache_path = payload_dir.join(Cache::FILE_NAME)
-        if result.cache == @source_reference_baseline && cache_path.file?
+        if @source_reference_baseline_loaded && result.cache == @source_reference_baseline && cache_path.file?
           @source_reference_paths = result.paths.to_set
           return
         end
