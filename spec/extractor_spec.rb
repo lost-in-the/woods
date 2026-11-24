@@ -1407,6 +1407,117 @@ RSpec.describe Woods::Extractor do
       expect(published_graph_nodes - published_index_identifiers).to be_empty
     end
 
+    it 'skips the second reconcile_class_based_types pass when reconciliation produced no changes or prunes' do
+      seed_published_generation
+      allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_class_based_types).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_model_mixins).and_return(Set.new)
+      allow(extractor).to receive(:rerun_whole_app_extractors).and_return(Set.new)
+      allow(extractor).to receive(:reannotate_packages).and_return(Set.new)
+      allow(extractor).to receive(:prune_vanished_units).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_owner_fallbacks).and_return(Set.new)
+      allow(extractor).to receive(:prune_family_owned_poros).and_return(Set.new)
+      allow(extractor).to receive(:extract_unitless_poro_files).and_return(Set.new)
+      allow(extractor).to receive(:enrich_source_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:enrich_doc_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_unit_json).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_run)
+
+      extractor.extract_changed([])
+      expect(extractor).to have_received(:reconcile_class_based_types).once
+    end
+
+    it 'runs the second reconcile_class_based_types pass when the first pass discovers a new class' do
+      seed_published_generation
+      allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_model_mixins).and_return(Set.new)
+      allow(extractor).to receive(:rerun_whole_app_extractors).and_return(Set.new)
+      allow(extractor).to receive(:reannotate_packages).and_return(Set.new)
+      allow(extractor).to receive(:prune_vanished_units).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_owner_fallbacks).and_return(Set.new)
+      allow(extractor).to receive(:prune_family_owned_poros).and_return(Set.new)
+      allow(extractor).to receive(:extract_unitless_poro_files).and_return(Set.new)
+      allow(extractor).to receive(:enrich_source_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:enrich_doc_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_unit_json).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_run)
+
+      calls = 0
+      allow(extractor).to receive(:reconcile_class_based_types) do
+        calls += 1
+        calls == 1 ? Set.new(['NewlyDiscoveredModel']) : Set.new(['LateLoadedTargetModel'])
+      end
+
+      touched = extractor.extract_changed([])
+      expect(extractor).to have_received(:reconcile_class_based_types).twice
+      expect(touched).to include('NewlyDiscoveredModel', 'LateLoadedTargetModel')
+    end
+
+    it 'runs the second reconcile_class_based_types pass when first-pass discovery extracts a class returning nil' do
+      seed_published_generation
+      allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_model_mixins).and_return(Set.new)
+      allow(extractor).to receive(:rerun_whole_app_extractors).and_return(Set.new)
+      allow(extractor).to receive(:reannotate_packages).and_return(Set.new)
+      allow(extractor).to receive(:prune_vanished_units).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_owner_fallbacks).and_return(Set.new)
+      allow(extractor).to receive(:prune_family_owned_poros).and_return(Set.new)
+      allow(extractor).to receive(:extract_unitless_poro_files).and_return(Set.new)
+      allow(extractor).to receive(:enrich_source_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:enrich_doc_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_unit_json).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_run)
+
+      newly_discovered = double('NewlyDiscoveredModel', name: 'NewlyDiscoveredModel')
+      late_loaded = double('LateLoadedTargetModel', name: 'LateLoadedTargetModel')
+      discovered_lists = [[newly_discovered], [newly_discovered, late_loaded]]
+      model_extractor = double('ModelExtractor')
+      allow(model_extractor).to receive(:discoverable_classes) { discovered_lists.shift || [] }
+      allow(model_extractor).to receive(:extract_model).with(newly_discovered).and_return(nil)
+      allow(model_extractor).to receive(:extract_model).with(late_loaded).and_return(nil)
+
+      allow(extractor).to receive(:extractor_for).and_return(nil)
+      allow(extractor).to receive(:extractor_for).with(:models).and_return(model_extractor)
+      allow(extractor).to receive(:reconcile_class_based_types).and_call_original
+
+      extractor.extract_changed([])
+      expect(extractor).to have_received(:reconcile_class_based_types).twice
+      expect(model_extractor).to have_received(:extract_model).with(late_loaded).once
+    end
+
+    it 'constructs GraphQLExtractor before snapshotting model discovery so autoloaded models are seen on pass one' do
+      seed_published_generation
+      allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_model_mixins).and_return(Set.new)
+      allow(extractor).to receive(:rerun_whole_app_extractors).and_return(Set.new)
+      allow(extractor).to receive(:reannotate_packages).and_return(Set.new)
+      allow(extractor).to receive(:prune_vanished_units).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_owner_fallbacks).and_return(Set.new)
+      allow(extractor).to receive(:prune_family_owned_poros).and_return(Set.new)
+      allow(extractor).to receive(:extract_unitless_poro_files).and_return(Set.new)
+      allow(extractor).to receive(:enrich_source_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:enrich_doc_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_unit_json).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_run)
+
+      loaded_by_graphql = false
+      graphql_model = double('GraphQLAutoloadedModel', name: 'GraphQLAutoloadedModel')
+      model_extractor = double('ModelExtractor')
+      allow(model_extractor).to receive(:discoverable_classes) { loaded_by_graphql ? [graphql_model] : [] }
+      allow(model_extractor).to receive(:extract_model).with(graphql_model).and_return(nil)
+
+      allow(extractor).to receive(:extractor_for).and_return(nil)
+      allow(extractor).to receive(:extractor_for).with(:models).and_return(model_extractor)
+      allow(extractor).to receive(:extractor_for).with(:graphql) do
+        loaded_by_graphql = true
+        nil
+      end
+      allow(extractor).to receive(:reconcile_class_based_types).and_call_original
+
+      extractor.extract_changed([])
+      expect(model_extractor).to have_received(:extract_model).with(graphql_model).at_least(:once)
+    end
+
     # DependencyGraph#register inserts the node before it iterates the unit's
     # dependencies, so a malformed dependency raises AFTER the graph already
     # holds the new node — the same phantom window as a failed unit-file

@@ -30,6 +30,7 @@ module Woods
       live.flat_map do |path, modules|
         next [] if modules.all? { |mod| known.include?(mod.name) }
 
+        @reconcile_discovery_ran = true
         checked_extraction(:concerns, concerns) do
           Array(concerns.extract_model_mixin_file(path)).reject { |unit| known.include?(unit.identifier) }
         end || []
@@ -74,6 +75,7 @@ module Woods
       absolute = File.expand_path(path, Rails.root.to_s)
       return Set.new unless absolute.start_with?("#{Rails.root.join(Extractors::LibExtractor::LIB_DIRECTORY)}/")
 
+      @reconcile_discovery_ran = true
       unit = checked_extraction(:libs, libs) { libs.extract_lib_file(absolute) }
       register_and_write(:libs, [unit].compact, affected_types)
     end

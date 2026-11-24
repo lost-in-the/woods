@@ -810,38 +810,31 @@ module Woods
       end
 
       profile_phase('reconciliation') do
+        @reconcile_discovery_ran = false
         @hybrid_discovery_keys.each { |key| touched.merge(replace_type_wholesale(key, affected_types)) }
-        touched.merge(reconcile_class_based_types(affected_types))
-        touched.merge(reconcile_model_mixins(affected_types))
-        touched.merge(rerun_whole_app_extractors(change_set, affected_types))
+        first_reconciled = reconcile_class_based_types(affected_types)
+        touched.merge(first_reconciled)
+        mixin_touched = reconcile_model_mixins(affected_types)
+        touched.merge(mixin_touched)
+        whole_app_touched = rerun_whole_app_extractors(change_set, affected_types)
+        touched.merge(whole_app_touched)
         touched.merge(reannotate_packages(change_set, affected_types))
         pruned = prune_vanished_units(change_set, affected_types)
         touched.merge(pruned)
 
         # Reconcile once more, because pruning can un-know a class the first pass
-        # skipped. A class-based file moved between autoload directories with its
-        # constant unchanged is still registered under the old path when
-        # reconciliation runs, so it looks known and is not re-extracted; the
-        # prune that follows then removes it for its vanished path. This pass
-        # re-adds it in the same run (M1) instead of leaving the unit missing
-        # until some later run happens to notice. Idempotent when nothing was
-        # pruned: the discovery set is compared against the graph, so an
-        # already-registered class is skipped.
-        #
-        # But not everything pruning removed may come back. `except:` keeps the
-        # *deletion* shape pruned: without a reload, a constant outlives the file
-        # that defined it — so deleting `app/models/user.rb` prunes `User`, and
-        # this pass finds `User` still in `ActiveRecord::Base.descendants`.
-        # Re-registering it would pin the unit to a path that no longer exists,
-        # and nothing could ever remove it: the sweep excludes class-based units
-        # and no future change set names that path again. A resident daemon
-        # processing a batch before its reload hits this every time. What
-        # separates the two shapes is the filesystem — only pruned identifiers
-        # that a still-existing file in the change set actually declares are
-        # re-addable. See {#readdable_pruned_classes}.
-        touched.merge(reconcile_class_based_types(
-                        affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
-                      ))
+        # skipped (M1) and extracting newly discovered/reconciled classes can
+        # autoload additional descendants (e.g. association targets via
+        # `reflection.klass`), even when an extraction returns nil, rescues, or
+        # rewrites unchanged bytes. Skip only when nothing was pruned, no
+        # discovery-capable extraction ran, and no reconciliation step touched
+        # any unit.
+        unless pruned.empty? && !@reconcile_discovery_ran &&
+               first_reconciled.empty? && mixin_touched.empty? && whole_app_touched.empty?
+          touched.merge(reconcile_class_based_types(
+                          affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
+                        ))
+        end
         # Last: ownership is final only after every family reconciled.
         touched.merge(reconcile_owner_fallbacks(affected_types))
         touched.merge(prune_family_owned_poros(affected_types))
@@ -4189,9 +4182,14 @@ module Woods
     def reconcile_class_based_types(affected_types, except: nil)
       touched = Set.new
       excluded = except&.to_set || Set.new
+      # Construct all class-based extractors before snapshotting any
+      # discoverable_classes: GraphQLExtractor#initialize runs runtime schema
+      # discovery and may autoload model constants after :models would otherwise
+      # have snapshotted its descendants.
+      extractors = CLASS_BASED_DISCOVERY.each_key.with_object({}) { |key, map| map[key] = extractor_for(key) }
 
       CLASS_BASED_DISCOVERY.each do |key, spec|
-        extractor = extractor_for(key)
+        extractor = extractors[key]
         next unless extractor.respond_to?(:discoverable_classes)
 
         discovered = extractor.discoverable_classes.reject { |k| k.name.nil? }
@@ -4227,6 +4225,7 @@ module Woods
         expected = extractor.runtime_unit_type(klass)
         next if previous.empty? || !expected || previous == [expected]
 
+        @reconcile_discovery_ran = true
         unit = extractor.extract_from_runtime_type(klass)
         source_consumer_failed?(:graphql, extractor)
         next unless unit
@@ -4309,6 +4308,7 @@ module Woods
       new_classes = discovered.reject { |k| known.include?(k.name) || excluded.include?(k.name) }
       return Set.new if new_classes.empty?
 
+      @reconcile_discovery_ran = true
       units = timing_collector.time(key) do
         new_classes.filter_map do |klass|
           extractor_for(key).public_send(spec[:method], klass)
@@ -4461,6 +4461,7 @@ module Woods
       # copy taken before them afterwards.
       @published_table_units = nil
 
+      @reconcile_discovery_ran = true unless keys.empty?
       touched = keys.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
       end
@@ -4585,6 +4586,7 @@ module Woods
         current = @dependency_graph.dependencies_of(identifier, via: :table, type: :model).sort
         next if current == Array(catalog.for_model(klass)&.identifier)
 
+        @reconcile_discovery_ran = true
         moved.add(identifier) if re_extract_unit_of_type(identifier, :model, affected_types)
       end
       Rails.logger.info "[Woods] Model table edges reconciled: #{touched.size} model(s) re-extracted"

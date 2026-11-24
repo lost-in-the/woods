@@ -8,6 +8,9 @@ module Woods
     # Projects admitted occurrences only through proven original source placement.
     # Missing maps are not identity; sliced/generated/scrubbed text is omitted.
     class Projector
+      NEWLINE = "\n".b.freeze
+      private_constant :NEWLINE
+
       # @param source_reader [#call] captured original bytes for a relative path
       def initialize(source_reader:)
         @reader = source_reader
@@ -45,9 +48,10 @@ module Woods
         placement = placement(unit, path, original, contributors)
         return [] unless placement
 
-        @original_offsets = line_offsets(original)
+        source = unit['source_code']
+        @original_offsets = source.b == original.b ? @published_offsets : line_offsets(original)
         own_file = path == unit['file_path']
-        records.filter_map { |record| project(record, original, unit['source_code'], placement, own_file) }
+        records.filter_map { |record| project(record, original, source, placement, own_file) }
       end
 
       def placement(unit, path, original, contributors)
@@ -110,8 +114,14 @@ module Woods
       end
 
       def line_offsets(source)
+        bytes = source.b
         offsets = [0]
-        source.b.each_line { |line| offsets << (offsets.last + line.bytesize) }
+        pos = 0
+        while (nl = bytes.index(NEWLINE, pos))
+          pos = nl + 1
+          offsets << pos
+        end
+        offsets << bytes.bytesize if pos < bytes.bytesize
         offsets
       end
 

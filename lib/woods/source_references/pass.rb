@@ -185,6 +185,8 @@ module Woods
       end
 
       def normalize_edge(edge)
+        return edge if edge.all? { |key, value| key.is_a?(String) && !value.is_a?(Symbol) }
+
         edge.transform_keys(&:to_s).transform_values { |value| value.is_a?(Symbol) ? value.to_s : value }
       end
 

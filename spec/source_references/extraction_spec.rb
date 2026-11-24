@@ -442,4 +442,38 @@ RSpec.describe 'Source-reference extraction integration' do
     expect(Woods::Generation.new(output_dir: @output).current.token).to eq(token)
     expect(File.binread(previous.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME))).to eq(old_cache)
   end
+
+  it 'skips rewriting source_references.json on an unchanged incremental run while keeping path verification' do
+    full
+    extractor = incremental
+    expect(Woods::SourceReferences::Cache).not_to receive(:write_payload)
+    expect(extractor.send(:enrich_source_references_incremental, Set.new)).to be_empty
+    expect(extractor.instance_variable_get(:@source_reference_paths)).to include('app/models/caller.rb')
+  end
+
+  it 'passes payload_writes_durable? to Cache.write_payload when the cache changes' do
+    full(target: false)
+    extractor = incremental
+    allow(extractor).to receive(:annotate_package)
+    allow(extractor).to receive(:source_consumer_failed?).and_return(false)
+    affected = Set.new
+    extractor.send(:register_and_write, :poros, [unit('RefIntegrationTarget', 'target')], affected)
+    expect(Woods::SourceReferences::Cache)
+      .to receive(:write_payload)
+      .with(extractor.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME), kind_of(Hash), durable: false)
+      .and_call_original
+    extractor.send(:enrich_source_references_incremental, affected)
+  end
+
+  it 'rewrites a malformed cache file on an empty-reference incremental run instead of skipping' do
+    extractor = Woods::Extractor.new(output_dir: @output)
+    extractor.send(:begin_source_inputs, 'incremental')
+    extractor.send(:begin_payload!)
+    cache_path = extractor.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME)
+    File.write(cache_path, 'not valid json')
+    extractor.send(:prepare_source_reference_baseline)
+    extractor.send(:enrich_source_references_incremental, Set.new)
+    expect(Woods::SourceReferences::Cache.read(cache_path))
+      .to include('version' => Woods::SourceReferences::Cache::VERSION, 'files' => {}, 'owners' => [])
+  end
 end

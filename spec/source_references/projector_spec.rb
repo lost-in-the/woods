@@ -21,6 +21,14 @@ RSpec.describe Woods::SourceReferences::Projector do
       .to eq(references.map { |record| record.except('file_path').merge('file_line' => 2) })
   end
 
+  it 'projects references on the final line when the source has no trailing newline' do
+    no_newline = "class Caller\n  Target.call"
+    local_unit = { 'type' => 'poro', 'file_path' => path, 'source_code' => no_newline, 'metadata' => {} }
+    ref = references.first.merge('line' => 2, 'column' => 2, 'length' => 6)
+    mapper = described_class.new(source_reader: ->(_path) { no_newline })
+    expect(mapper.call(local_unit, [ref])).to eq([ref.except('file_path').merge('file_line' => 2)])
+  end
+
   it 'preserves optional selector evidence alongside bare constant spans through annotated source mapping' do
     references.first['method'] = 'call'
     unit['source_code'] = "# header\n#{original}"
