@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'English'
 require 'json'
 require 'securerandom'
 require 'digest'
@@ -93,6 +94,7 @@ require_relative 'doc_references'
 require_relative 'extraction/manifest_facts'
 require_relative 'extraction/git_capture'
 require_relative 'extraction/extractor_timings'
+require_relative 'extraction/profile_report'
 require_relative 'extraction/flow_reach'
 
 module Woods
@@ -501,6 +503,12 @@ module Woods
     # @return [Integer, nil] nil before any incremental run
     attr_reader :last_blast_radius_size
 
+    # Structured profile report from the most recent profiled run, or nil when
+    # profiling was disabled.
+    #
+    # @return [Woods::Extraction::ProfileReport, nil]
+    attr_reader :last_profile
+
     # Units {#remove_stale_classes} pruned although this process still
     # resolves their constant: the runtime no longer discovers the class, so a
     # full extraction here would not produce the unit either, but a fresh
@@ -577,7 +585,8 @@ module Woods
     end
 
     def perform_extract_all
-      profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
+      profile = start_profile_run('full')
+      completed = false
       reset_git_capture
       setup_output_directory
       @results = {}
@@ -734,9 +743,10 @@ module Woods
 
       profile_phase('summary') { log_summary }
 
+      completed = true
       @results
     ensure
-      log_profile_total('full', profile_started)
+      finish_profile_run('full', profile, error: completed ? @publication_error : ($ERROR_INFO || @publication_error))
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -770,7 +780,8 @@ module Woods
     # @raise [Woods::ExtractionError] when boot-captured inputs require a fresh
     #   Rails process and full extraction instead of reusing this runtime
     def perform_extract_changed(changed_files)
-      profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
+      profile = start_profile_run('incremental')
+      completed = false
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
       require_relative 'input_rules'
       restart_paths = change_set.relative_paths.select { |path| InputRules.new.action(path) == :full }
@@ -865,9 +876,11 @@ module Woods
 
       finalize_incremental_run(touched)
 
+      completed = true
       touched.to_a
     ensure
-      log_profile_total('incremental', profile_started)
+      finish_profile_run('incremental', profile,
+                         error: completed ? @publication_error : ($ERROR_INFO || @publication_error))
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -902,7 +915,8 @@ module Woods
     #   extractor
     # @raise [ArgumentError] when no recognized key is given
     def refresh(*keys)
-      profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
+      profile = start_profile_run('refresh')
+      completed = false
       keys = Array(keys).flatten.map(&:to_sym).uniq
       known, unknown = keys.partition { |key| EXTRACTORS.key?(key) }
       raise ArgumentError, "No known extractor in #{keys.inspect}" if known.empty?
@@ -929,10 +943,12 @@ module Woods
       profile_phase('type index') { affected_types.each { |type_key| regenerate_type_index(type_key) } }
       finalize_incremental_run(touched, reason: "refresh:#{known.sort.join(',')}")
 
+      completed = true
       { types: known, touched: touched.to_a, unknown: unknown }
     ensure
       discard_unpromoted_stage
-      log_profile_total('refresh', profile_started)
+      finish_profile_run('refresh', profile,
+                         error: completed ? @publication_error : ($ERROR_INFO || @publication_error))
     end
 
     # The whole-app families a refresh re-runs with the named ones (#1124): each
@@ -1007,16 +1023,41 @@ module Woods
       @timing_collector ||= Extraction::ExtractorTimings.new
     end
 
-    # Whole-run wall time, including unprofiled setup and failed runs. This
-    # separate log family must never be added to the individual phase times.
-    def log_profile_total(name, started)
-      return unless started
+    # Start structured run profiling when WOODS_PROFILE=1 or WOODS_PROFILE_OUT
+    # is set. Returns nil and touches no clocks when profiling is disabled.
+    def start_profile_run(operation)
+      @last_profile = nil
+      @active_profile = nil
+      @publication_error = nil
+      @timing_collector = Extraction::ExtractorTimings.new
+      return nil unless profiling?
 
-      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+      @active_profile = Extraction::ProfileReport.new(operation: operation).start
+    end
+
+    # Finish structured run profiling, log whole-run wall time, and write the
+    # JSON report when WOODS_PROFILE_OUT is configured.
+    def finish_profile_run(name, profile, error: nil)
+      return unless profile
+
+      elapsed = profile.finish(extractor_timings: extractor_timings, error: error)
+      @last_profile = profile
+      @active_profile = nil
+      write_profile_report(profile)
       Rails.logger.info "[Woods] [profile total] #{name} in #{elapsed.round(2)}s"
     end
 
-    # Time one phase of a run and log how long it took, when WOODS_PROFILE=1.
+    def write_profile_report(profile)
+      path = profile_output_path
+      return unless path
+
+      profile.write_json(path)
+    rescue StandardError => e
+      Rails.logger.warn "[Woods] Failed to write profile report to #{path}: #{e.class}: #{e.message}"
+    end
+
+    # Time one phase of a run and log how long it took, when WOODS_PROFILE=1
+    # or WOODS_PROFILE_OUT is set.
     #
     # The per-extractor lines (see {#extract_all_sequential}) already report
     # extraction itself. Everything after it (the graph load, the analysis,
@@ -1028,12 +1069,16 @@ module Woods
     #
     # @param name [String] phase name, as it appears in the log line
     # @return [Object] whatever the block returned
-    def profile_phase(name)
+    def profile_phase(name, &block)
       return yield unless profiling?
 
-      start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      result = yield
-      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time
+      if @active_profile
+        result, elapsed = @active_profile.measure_phase(name, &block)
+      else
+        start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        result = yield
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time
+      end
       Rails.logger.info "[Woods] [profile] #{name} in #{elapsed.round(2)}s"
       result
     end
@@ -1107,7 +1152,16 @@ module Woods
 
     # @return [Boolean] whether phase timing is enabled for this process
     def profiling?
-      ENV.fetch('WOODS_PROFILE', nil) == '1'
+      ENV.fetch('WOODS_PROFILE', nil) == '1' || !profile_output_path.nil?
+    end
+
+    # @return [String, nil] destination path for structured JSON profile output
+    def profile_output_path
+      raw = ENV.fetch('WOODS_PROFILE_OUT', nil)
+      return nil if raw.nil?
+
+      stripped = raw.strip
+      stripped.empty? ? nil : stripped
     end
 
     # Load the persisted graph and reset the per-run bookkeeping that the

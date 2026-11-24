@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Local test -> lint -> profile -> compare loop for Woods performance work.
+#
+# Usage:
+#   script/perf-loop baseline                  # Capture tmp/perf/baseline.json
+#   script/perf-loop check [spec/file_spec.rb] # Lint changed files, run specs, profile & compare
+#   script/perf-loop compare [base] [cand]     # Compare two receipts (defaults to tmp/perf/*.json)
+#
+# Environment:
+#   BASE_REF=main     Git ref to diff against for RuboCop (must resolve in this checkout)
+#   SCALE=1           Fixture scale multiplier for bench/full_and_incremental_profile.rb
+#   PERF_DIR=tmp/perf Output directory for local JSON receipts (gitignored under tmp/)
+
+set -euo pipefail
+
+PERF_DIR="${PERF_DIR:-tmp/perf}"
+BASE_REF="${BASE_REF:-main}"
+BASELINE="${PERF_DIR}/baseline.json"
+CANDIDATE="${PERF_DIR}/candidate.json"
+mkdir -p "${PERF_DIR}"
+
+cmd="${1:-check}"
+shift || true
+
+case "${cmd}" in
+  baseline)
+    echo "[perf-loop] Capturing baseline receipt -> ${BASELINE}"
+    PROFILE_OUT="${BASELINE}" bundle exec ruby bench/full_and_incremental_profile.rb
+    ;;
+  check)
+    if ! git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null; then
+      echo "[perf-loop] Comparison ref '${BASE_REF}' does not resolve. Set BASE_REF (e.g. origin/main)." >&2
+      exit 2
+    fi
+    diff_tmp="$(mktemp)"
+    trap 'rm -f "${diff_tmp}"' EXIT
+    git diff -z --name-only --no-renames --diff-filter=AM "${BASE_REF}" -- '*.rb' > "${diff_tmp}"
+    changed_rb=()
+    while IFS= read -r -d '' path; do
+      changed_rb+=("${path}")
+    done < "${diff_tmp}"
+    if [[ "${#changed_rb[@]}" -gt 0 ]]; then
+      echo "[perf-loop] Running RuboCop on ${#changed_rb[@]} changed Ruby file(s)..."
+      bin/rubocop -- "${changed_rb[@]}"
+    fi
+    if [[ "$#" -gt 0 ]]; then
+      echo "[perf-loop] Running targeted specs: $*"
+      bin/rspec "$@"
+    fi
+    echo "[perf-loop] Running end-to-end profile -> ${CANDIDATE}"
+    PROFILE_OUT="${CANDIDATE}" bundle exec ruby bench/full_and_incremental_profile.rb
+    if [[ -f "${BASELINE}" ]]; then
+      echo "[perf-loop] Comparing against ${BASELINE}"
+      ruby script/profile-compare "${BASELINE}" "${CANDIDATE}"
+    else
+      case "${PERF_DIR}" in
+        /*) abs_perf_dir="${PERF_DIR}" ;;
+        *)  abs_perf_dir="$(pwd)/${PERF_DIR}" ;;
+      esac
+      echo "[perf-loop] No baseline receipt at ${BASELINE}."
+      echo "[perf-loop] Capture one from a revision containing bench/full_and_incremental_profile.rb:"
+      echo "[perf-loop]   PERF_DIR=\"${abs_perf_dir}\" script/perf-loop baseline"
+    fi
+    ;;
+  compare)
+    base="${1:-${BASELINE}}"
+    cand="${2:-${CANDIDATE}}"
+    ruby script/profile-compare "${base}" "${cand}"
+    ;;
+  *)
+    echo "Usage: script/perf-loop {baseline|check [specs...]|compare [base] [cand]}" >&2
+    exit 2
+    ;;
+esac

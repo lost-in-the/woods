@@ -1,0 +1,254 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Compare two JSON receipts produced by `bench/full_and_incremental_profile.rb`
+# (or two `WOODS_PROFILE_OUT` JSON files).
+#
+# Usage:
+#   ruby script/profile-compare BASELINE.json CANDIDATE.json
+#   ruby script/profile-compare --markdown BASELINE.json CANDIDATE.json
+#   ruby script/profile-compare --allow-drift BASELINE.json CANDIDATE.json
+
+require 'json'
+
+# Formatter and fingerprint gate for Woods profiling JSON receipts.
+module ProfileCompare
+  SUBSYSTEM_ROWS = [
+    ['graph_analyzer.analyze', %w[graph_analyzer analyze]],
+    ['graph_analyzer.cycles', %w[graph_analyzer cycles]],
+    ['graph_analyzer.bridges', %w[graph_analyzer bridges]],
+    ['flow_precomputer.precompute', %w[flow_precomputer precompute]],
+    ['flow_precomputer.delta', %w[flow_precomputer recompute_delta]],
+    ['reader.edges_via', %w[reader_and_lexical edges_via]],
+    ['reader.dependents_via', %w[reader_and_lexical dependents_via]],
+    ['reader.deep_search', %w[reader_and_lexical deep_search]],
+    ['lexical.build', %w[reader_and_lexical lexical_build]],
+    ['lexical.query', %w[reader_and_lexical lexical_query]]
+  ].freeze
+
+  module_function
+
+  def run(argv)
+    allow_drift = !argv.delete('--allow-drift').nil?
+    markdown = !argv.delete('--markdown').nil?
+    if argv.size != 2
+      warn 'Usage: ruby script/profile-compare [--markdown] [--allow-drift] BASELINE.json CANDIDATE.json'
+      exit 2
+    end
+
+    base = JSON.parse(File.read(argv[0]))
+    cand = JSON.parse(File.read(argv[1]))
+    kind = validate_schemas!(base, cand)
+    rows = collect_rows(base, cand, kind: kind)
+    markdown ? Formatter.print_markdown(base, cand, rows) : Formatter.print_text(base, cand, rows, kind: kind)
+    check_fingerprints(base, cand, kind: kind, allow_drift: allow_drift)
+  end
+
+  def classify_receipt(receipt)
+    return :synthetic_suite if receipt.is_a?(Hash) && receipt.key?('full_extraction')
+    return :raw_profile if raw_profile_ok?(receipt)
+
+    :unknown
+  end
+
+  def raw_profile_ok?(receipt)
+    receipt.is_a?(Hash) && receipt['total'].is_a?(Hash) && receipt['phases'].is_a?(Array) &&
+      receipt.dig('total', 'status') == 'ok'
+  end
+
+  def validate_schemas!(base, cand)
+    base_kind = classify_receipt(base)
+    cand_kind = classify_receipt(cand)
+    return base_kind if base_kind != :unknown && base_kind == cand_kind
+
+    warn "Incompatible receipt schemas: baseline=#{base_kind}, candidate=#{cand_kind}"
+    exit 2
+  end
+
+  def collect_rows(base, cand, kind:)
+    return [metric_row('total', base['total'], cand['total'], prefix: nil)] if kind == :raw_profile
+
+    keys = Gate.validate_workloads!(base, cand)
+    rows = keys.map { |key| metric_row(key, base.dig(key, 'total'), cand.dig(key, 'total'), prefix: nil) }
+    SUBSYSTEM_ROWS.each { |label, path| rows << metric_row(label, base.dig(*path), cand.dig(*path), prefix: 'median_') }
+    rows
+  end
+
+  def metric_row(label, base_hash, cand_hash, prefix:)
+    {
+      label: label,
+      b_wall: fetch_number(base_hash, "#{prefix}wall_ms", label, 'baseline'),
+      c_wall: fetch_number(cand_hash, "#{prefix}wall_ms", label, 'candidate'),
+      b_cpu: fetch_number(base_hash, "#{prefix}cpu_ms", label, 'baseline'),
+      c_cpu: fetch_number(cand_hash, "#{prefix}cpu_ms", label, 'candidate'),
+      b_alloc: fetch_number(base_hash, "#{prefix}allocations", label, 'baseline'),
+      c_alloc: fetch_number(cand_hash, "#{prefix}allocations", label, 'candidate')
+    }
+  end
+
+  def fetch_number(hash, key, label, side)
+    val = hash.is_a?(Hash) ? hash[key] : nil
+    return val if val.is_a?(Numeric)
+
+    warn "Missing numeric metric #{key} for #{label} in #{side} receipt"
+    exit 2
+  end
+
+  def phase_rows(base, cand, min_ms: 5.0)
+    b_phases = index_phases(base)
+    c_phases = index_phases(cand)
+    (b_phases.keys & c_phases.keys).filter_map do |name|
+      row = metric_row(name, b_phases[name], c_phases[name], prefix: nil)
+      row unless row[:b_wall] < min_ms && row[:c_wall] < min_ms
+    end
+  end
+
+  def index_phases(receipt)
+    (receipt.dig('full_extraction', 'phases') || []).to_h { |p| [p['name'], p] }
+  end
+
+  def check_fingerprints(base, cand, kind:, allow_drift:)
+    if kind == :raw_profile
+      puts 'Fixture fingerprints: N/A (raw profile receipt — no fixture fingerprints)'
+      return
+    end
+
+    issues = Gate.issues(base, cand)
+    if issues.empty?
+      puts "Fixture fingerprints: PASS (all #{Gate.extract(base).size} synthetic digests match)"
+    else
+      puts "Fixture fingerprints: DRIFT (#{issues.join('; ')})"
+      exit 1 unless allow_drift
+    end
+  end
+
+  # Fingerprint and internal clean-rebuild integrity gate.
+  module Gate
+    module_function
+
+    def required_workloads(receipt)
+      if receipt.key?('incremental_extraction') && !receipt.key?('incremental_noop')
+        %w[full_extraction incremental_extraction]
+      else
+        %w[full_extraction incremental_noop incremental_method_edit]
+      end
+    end
+
+    def validate_workloads!(base, cand)
+      b_keys = required_workloads(base)
+      c_keys = required_workloads(cand)
+      if b_keys != c_keys
+        warn "Incompatible synthetic workloads: baseline=#{b_keys.join(',')}, candidate=#{c_keys.join(',')}"
+        exit 2
+      end
+      [['baseline', base], ['candidate', cand]].each do |side, receipt|
+        missing = b_keys.reject { |k| receipt[k].is_a?(Hash) }
+        unless missing.empty?
+          warn "Missing required workload(s) in #{side} receipt: #{missing.join(', ')}"
+          exit 2
+        end
+
+        failed = b_keys.reject { |k| receipt.dig(k, 'total', 'status') == 'ok' }
+        next if failed.empty?
+
+        warn "Non-ok extraction status in #{side} receipt: #{failed.join(', ')}"
+        exit 2
+      end
+      b_keys
+    end
+
+    def extract(receipt)
+      fp = receipt['fixture_fingerprints'] || receipt['equivalence']
+      return nil unless fp.is_a?(Hash) && !fp.empty?
+      return nil unless fp.values.all? { |v| v.is_a?(String) && !v.strip.empty? }
+
+      fp
+    end
+
+    def issues(base, cand)
+      out = internal_rebuild_issues(base, cand)
+      b_fp = extract(base)
+      c_fp = extract(cand)
+      return out << 'missing, empty, or invalid fixture_fingerprints' unless b_fp && c_fp
+
+      mismatches = (b_fp.keys | c_fp.keys).reject { |k| b_fp[k] == c_fp[k] }
+      out << "cross-receipt drift in #{mismatches.join(', ')}" unless mismatches.empty?
+      out
+    end
+
+    def internal_rebuild_issues(base, cand)
+      [['baseline', base], ['candidate', cand]].filter_map do |label, receipt|
+        val = receipt['incremental_matches_clean_rebuild']
+        if val == false
+          "#{label} incremental_matches_clean_rebuild is false"
+        elsif val != true
+          "#{label} incremental_matches_clean_rebuild is missing or unverified (#{val.inspect})"
+        end
+      end
+    end
+  end
+
+  # Text and Markdown table rendering for comparison rows.
+  module Formatter
+    module_function
+
+    def pct(before, after)
+      return 'n/a' if before.nil? || after.nil? || before.zero?
+
+      format('%<delta>+.1f%%', delta: ((after.to_f - before.to_f) / before.to_f) * 100.0)
+    end
+
+    def fmt_alloc(val)
+      val.is_a?(Float) && val != val.to_i ? format('%<v>.1f', v: val) : val.to_i.to_s
+    end
+
+    def sha_label(receipt)
+      sha = receipt['git_sha']
+      sha ? sha.to_s[0, 12] : (receipt['operation'] || 'raw')
+    end
+
+    def print_text(base, cand, rows, kind:)
+      puts "Comparing baseline (#{sha_label(base)}) -> candidate (#{sha_label(cand)})"
+      puts '-' * 136
+      rows.each { |r| puts format_text_row(r) }
+      print_phase_deltas(base, cand) if kind == :synthetic_suite
+      puts '-' * 136
+    end
+
+    def format_text_row(row)
+      format(
+        '%<label>-28s wall %<bw>8.2f->%<cw>8.2f ms (%<wp>7s) | cpu %<bc>7.2f->%<cc>7.2f ms (%<cp>7s) | ' \
+        'allocs %<ba>9s->%<ca>9s (%<ap>7s)',
+        label: row[:label], bw: row[:b_wall], cw: row[:c_wall], wp: pct(row[:b_wall], row[:c_wall]),
+        bc: row[:b_cpu], cc: row[:c_cpu], cp: pct(row[:b_cpu], row[:c_cpu]),
+        ba: fmt_alloc(row[:b_alloc]), ca: fmt_alloc(row[:c_alloc]), ap: pct(row[:b_alloc], row[:c_alloc])
+      )
+    end
+
+    def print_phase_deltas(base, cand)
+      puts '-' * 136
+      puts 'Phase deltas (full_extraction, >= 5ms):'
+      ProfileCompare.phase_rows(base, cand).each { |row| puts "  #{format_text_row(row)}" }
+    end
+
+    def print_markdown(base, cand, rows)
+      header = "| Workload (`#{sha_label(base)}` -> `#{sha_label(cand)}`) | " \
+               'Wall (ms) | Wall Δ | CPU (ms) | CPU Δ | Allocs | Alloc Δ |'
+      puts header
+      puts '|---|---:|---:|---:|---:|---:|---:|'
+      rows.each { |r| puts format_markdown_row(r) }
+    end
+
+    def format_markdown_row(row)
+      format(
+        '| `%<label>s` | %<bw>.2f -> %<cw>.2f | %<wp>s | %<bc>.2f -> %<cc>.2f | %<cp>s | ' \
+        '%<ba>s -> %<ca>s | %<ap>s |',
+        label: row[:label], bw: row[:b_wall], cw: row[:c_wall], wp: pct(row[:b_wall], row[:c_wall]),
+        bc: row[:b_cpu], cc: row[:c_cpu], cp: pct(row[:b_cpu], row[:c_cpu]),
+        ba: fmt_alloc(row[:b_alloc]), ca: fmt_alloc(row[:c_alloc]), ap: pct(row[:b_alloc], row[:c_alloc])
+      )
+    end
+  end
+end
+
+ProfileCompare.run(ARGV) if $PROGRAM_NAME == __FILE__

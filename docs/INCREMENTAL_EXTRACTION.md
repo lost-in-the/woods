@@ -1054,6 +1054,13 @@ to find unaccounted work; each line rounds to hundredths of a second. Rails
 boot, Bundler and watch reload work outside the call require separate wall
 measurements. Do not infer that all unaccounted time is boot.
 
+Set `WOODS_PROFILE_OUT=/path/to/profile.json` to write a structured JSON
+report at the end of `extract_all`, `extract_changed`, or `refresh`.
+Each report records per-phase and whole-run wall time, CPU time, object
+allocations, GC counts, and `extractor_timings`, and is exposed in-process
+through `Woods::Extractor#last_profile` (nil when profiling is disabled).
+Compare two raw JSON receipts with `ruby script/profile-compare BASE.json CAND.json`.
+
 Per-family extractor time needs no flag: every run records the wall seconds
 each extractor family spent (per file or wholesale, whichever the run reached)
 in the manifest's `extractor_timings` and ends the task output with a sorted
