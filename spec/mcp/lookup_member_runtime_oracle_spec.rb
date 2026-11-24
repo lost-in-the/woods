@@ -783,7 +783,7 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
   # recently included first), with the application checks answered for the
   # fixtures.
   def model_modules(klass)
-    extractor = Woods::Extractors::ModelExtractor.allocate
+    extractor = Woods::Extractors::ModelExtractor.new
     extractor.define_singleton_method(:app_source?) { |*| true }
     extractor.define_singleton_method(:defined_in_app?) { |mod| LookupMemberOracle::CONCERNS.include?(mod.name) }
     extractor.send(:extract_included_modules, klass)

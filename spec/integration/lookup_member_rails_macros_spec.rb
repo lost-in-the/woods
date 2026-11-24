@@ -309,7 +309,7 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
   # The model extractor's own concern order and inlining, kept to the
   # fixture concerns (its application check is stubbed to answer yes).
   def inlined(klass, original)
-    extractor = Woods::Extractors::ModelExtractor.allocate
+    extractor = Woods::Extractors::ModelExtractor.new
     extractor.define_singleton_method(:app_source?) { |*| true }
     extractor.define_singleton_method(:defined_in_app?) { |mod| RailsMacroOracle::CONCERNS.include?(mod.name) }
     modules = extractor.send(:extract_included_modules, klass).select do |mod|
