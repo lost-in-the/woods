@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'time'
+require_relative '../diagnostic_redaction'
 
 module Woods
   module MCP
@@ -255,7 +256,7 @@ module Woods
             started_at: @started_at&.utc&.iso8601(3),
             finished_at: @finished_at&.utc&.iso8601(3),
             duration_seconds: duration&.round(3),
-            error: @error && { class: @error.class.name, message: @error.message }
+            error: @error && { class: @error.class.name, message: DiagnosticRedaction.redact(@error.message) }
           }
         end
       end

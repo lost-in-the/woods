@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'time'
+require_relative '../diagnostic_redaction'
 
 module Woods
   module MCP
@@ -157,18 +158,21 @@ module Woods
         self
       end
 
-      # Returns a hash suitable for embedding in a +woods_status+ MCP response.
+      # Returns a hash suitable for embedding in a +woods_status+ MCP response,
+      # with connection details redacted from every reason.
       #
       # @return [Hash]
       def to_h
         h = { status: @status }
-        h[:reason] = "#{@reason.class}: #{@reason.message}" if @reason
+        h[:reason] = DiagnosticRedaction.describe(@reason) if @reason
         h[:hydrated_at] = @hydrated_at.iso8601 if @hydrated_at
         h[:degraded_since] = @degraded_since.iso8601 if @degraded_since
         if hydration_failed?
-          h[:hydration_failures] = @hydration_failures.transform_values { |e| "#{e.class}: #{e.message}" }
+          h[:hydration_failures] = @hydration_failures.transform_values { |e| DiagnosticRedaction.describe(e) }
         end
-        h[:reload_failure] = @reload_failure.dup if @reload_failure
+        if @reload_failure
+          h[:reload_failure] = @reload_failure.merge(reason: DiagnosticRedaction.redact(@reload_failure[:reason]))
+        end
         h
       end
     end

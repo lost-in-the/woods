@@ -216,6 +216,28 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     end
   end
 
+  describe 'when the run fails on a database error' do
+    let(:logger) { double('Logger', error: nil) }
+
+    before do
+      allow(Logger).to receive(:new).and_call_original
+      allow(Logger).to receive(:new).with($stderr).and_return(logger)
+      allow(fake_extractor).to receive(:extract_all)
+        .and_raise(StandardError, 'connection to server at "db-fakesecretmarker" failed: ' \
+                                  'password=pw-fakesecretmarker user=u-fakesecretmarker')
+    end
+
+    it 'records and logs the failure without its connection details' do
+      task_id = extract_call(tasks_meta).dig('result', 'taskId')
+      settle { rpc('tasks/get', task_params(task_id)).dig('result', 'status') == 'failed' }
+
+      task = rpc('tasks/get', task_params(task_id)).fetch('result')
+      expect(task.dig('error', 'message')).to include('connection to server at', '[REDACTED]')
+      expect(JSON.generate(task)).not_to include('fakesecretmarker')
+      expect(logger).to have_received(:error).with(satisfy { |line| !line.include?('fakesecretmarker') })
+    end
+  end
+
   describe 'when the run fails with a ScriptError (not a StandardError)' do
     before do
       allow(Logger).to receive(:new).and_call_original

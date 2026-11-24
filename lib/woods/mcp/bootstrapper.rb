@@ -232,7 +232,7 @@ module Woods
         warn '[woods-mcp] lexical retrieval: hydrated (published extraction units; no embeddings)'
         [retriever, state]
       rescue StandardError => e
-        raise BootstrapError, "lexical index could not be loaded: #{e.class}: #{e.message}"
+        raise BootstrapError, "lexical index could not be loaded: #{e.class}: #{e.message}", cause: nil
       end
       private_class_method :build_lexical_retriever
 
@@ -384,7 +384,7 @@ module Woods
             'reload could not resolve the index configuration; the previous generation is still ' \
             "being served: #{e.class}: #{e.message}",
             generation: served.number, stores: %w[vector metadata graph], error: e
-          )
+          ), cause: nil
         end
         resolved = build_resolved_config(config)
 
@@ -449,7 +449,7 @@ module Woods
         raise
       rescue StandardError => e
         raise ReloadDegraded.new("lexical snapshot reload failed: #{e.class}: #{e.message}",
-                                 generation: reader.loaded_generation || 0, stores: ['metadata'])
+                                 generation: reader.loaded_generation || 0, stores: ['metadata']), cause: nil
       end
       private_class_method :reload_lexical_stores!
 
@@ -612,7 +612,7 @@ module Woods
         raise ReloadDegraded.new(
           "vector store refresh failed: #{e.class}: #{e.message}",
           generation: served.number, stores: [:vector], error: e
-        )
+        ), cause: nil
       end
       private_class_method :reload_vector_candidate
 
@@ -626,7 +626,7 @@ module Woods
         raise ReloadDegraded.new(
           "metadata store refresh failed: #{e.class}: #{e.message}",
           generation: served.number, stores: [:metadata], error: e
-        )
+        ), cause: nil
       end
       private_class_method :reload_metadata_candidate
 
@@ -636,7 +636,7 @@ module Woods
         raise ReloadDegraded.new(
           "graph store refresh failed: #{e.class}: #{e.message}",
           generation: served.number, stores: [:graph], error: e
-        )
+        ), cause: nil
       end
       private_class_method :reload_graph_candidate
 
@@ -812,9 +812,21 @@ module Woods
       # hand-edited woods.json, or a snapshot written before unset stores were
       # defaulted), not a programming bug: surface it as the one-line operator
       # message the exes print for BootstrapError instead of a backtrace. Every
-      # other ArgumentError keeps propagating.
+      # other ArgumentError keeps propagating. A store the Builder cannot open
+      # (pgvector schema setup against a database that refuses the
+      # connection, a durable graph store) raises a {Woods::Error}, which gets
+      # the same message.
       def self.build_stores_or_fail(config, resolved, artifact, state)
         build_retriever_from_config(config, resolved, artifact, state)
+      rescue BootstrapError, Woods::ConfigurationError
+        raise
+      rescue Woods::Error => e
+        # One line: a PostgreSQL refusal carries a line per host it tried.
+        raise BootstrapError.new(
+          "index stores could not be opened: #{e.message.split("\n").map(&:strip).reject(&:empty?).join(' ')}",
+          details: { stores: { vector_store: config.vector_store, metadata_store: config.metadata_store,
+                               graph_store: config.graph_store } }
+        ), cause: nil
       rescue ArgumentError => e
         raise unless e.message.match?(UNKNOWN_STORE_MESSAGE)
 
@@ -823,7 +835,7 @@ module Woods
           'build. Re-run woods:embed, or set vector_store, metadata_store and graph_store explicitly.',
           details: { stores: { vector_store: config.vector_store, metadata_store: config.metadata_store,
                                graph_store: config.graph_store } }
-        )
+        ), cause: nil
       end
       private_class_method :build_stores_or_fail
 
@@ -927,7 +939,7 @@ module Woods
       rescue StandardError => e
         raise if strict
 
-        warn "[woods-mcp] graph hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        warn "[woods-mcp] graph hydration failed (#{DiagnosticRedaction.describe(e)}); starting with empty store"
         state&.record_hydration_failure(:graph, e)
         nil
       end
@@ -1050,7 +1062,7 @@ module Woods
       rescue StandardError => e
         raise if strict
 
-        warn "[woods-mcp] vector hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        warn "[woods-mcp] vector hydration failed (#{DiagnosticRedaction.describe(e)}); starting with empty store"
         state&.record_hydration_failure(:vector, e)
         nil
       end
@@ -1066,7 +1078,7 @@ module Woods
       rescue StandardError => e
         raise if strict
 
-        warn "[woods-mcp] metadata hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        warn "[woods-mcp] metadata hydration failed (#{DiagnosticRedaction.describe(e)}); starting with empty store"
         state&.record_hydration_failure(:metadata, e)
         nil
       end

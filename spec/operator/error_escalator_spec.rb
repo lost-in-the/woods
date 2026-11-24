@@ -9,6 +9,12 @@ RSpec.describe Woods::Operator::ErrorEscalator do
   subject(:escalator) { described_class.new }
 
   describe '#classify' do
+    it 'reports the message without connection details' do
+      error = StandardError.new('could not connect: host=db-fakesecretmarker password=pw-fakesecretmarker')
+
+      expect(escalator.classify(error)[:message]).to eq('could not connect: host=[REDACTED] password=[REDACTED]')
+    end
+
     context 'with transient errors' do
       it 'classifies Timeout::Error as transient' do
         result = escalator.classify(Timeout::Error.new('connection timed out'))

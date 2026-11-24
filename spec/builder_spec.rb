@@ -416,12 +416,18 @@ RSpec.describe Woods::Builder do
         .to raise_error(Woods::Error, /pgvector schema setup failed.*connection to server was lost/)
     end
 
-    it 'preserves the original error as the cause' do
-      allow(pg_store).to receive(:ensure_schema!)
-        .and_raise(StandardError, 'no pg_hba.conf entry')
+    # An uncaught error prints its cause chain, so the adapter's own message
+    # must not travel with it.
+    it 'names the original error without its connection details, and not as the cause' do
+      allow(pg_store).to receive(:ensure_schema!).and_raise(
+        StandardError, 'no pg_hba.conf entry for host "db-fakesecretmarker", user "u-fakesecretmarker"'
+      )
 
-      expect { described_class.new(config).build_vector_store }
-        .to raise_error(Woods::Error) { |e| expect(e.cause.message).to eq('no pg_hba.conf entry') }
+      expect { described_class.new(config).build_vector_store }.to raise_error(Woods::Error) do |e|
+        expect(e.message).to include('StandardError: no pg_hba.conf entry for host "[REDACTED]"')
+        expect(e.message).not_to include('fakesecretmarker')
+        expect(e.cause).to be_nil
+      end
     end
 
     it 'rejects dimensions that disagree with the embedding provider' do

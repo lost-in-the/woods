@@ -158,6 +158,10 @@ config.vector_store_options = {
 
 The adapter constructor takes these as keyword arguments (`Woods::Storage::VectorStore::Qdrant`); `Builder#build_vector_store` splats `vector_store_options` straight into it. Works identically whether your application database is MySQL or PostgreSQL. Qdrant is a separate service either way.
 
+`woods:embed` and `woods:embed_incremental` write the `woods.json` snapshot for pgvector and Qdrant indexes too.
+The vectors stay in the backend.
+The promoted dump holds `woods.json` and, when metadata is in memory, `metadata.msgpack`.
+
 When an installed `woods-mcp` process reopens `woods.json` without the host initializer, non-secret options such as collection, distance, table, schema, and dimensions come from the snapshot. Credentials and process-specific connections remain serve-time settings:
 
 - `OPENAI_API_KEY` supplies the embedding credential for OpenAI snapshots.
