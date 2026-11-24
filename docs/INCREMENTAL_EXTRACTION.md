@@ -1092,6 +1092,32 @@ Full seeding also preserves on-demand framework units when framework extraction
 is disabled, and non-JSON files in existing type directories; dropping the seed
 wholesale would change that behavior.
 
+### Review an extraction performance change
+
+1. **Pick one workload.** Write down what should get faster and what result would disprove it.
+   Record both Woods revisions, Ruby and Rails versions, database adapter, application revision, and exact edit.
+   Treat a method-body edit, a new constant, and a day of edits as different workloads.
+2. **Measure the whole command.** Use the same machine, fixture, configuration, and index filesystem for both arms.
+   For each incremental attempt, restore the same starting app state and published index before applying the edit.
+   Alternate baseline-first and candidate-first pairs to reduce run-order bias.
+   Time from launcher invocation to exit, including boot and publication.
+   Keep setup and independent verification outside the timer; compare resident cycles separately.
+3. **Profile a separate run.** Start with the built-in phase and extractor timings above.
+   If using a profiler, confirm one untimed pass through the real launcher writes fresh, readable output.
+   A missing profile invalidates the diagnostic, not the correctness check.
+   Keep source text, raw SQL, and bind values out of shared artifacts.
+4. **Confirm the win without the profiler.** Compare the resulting incremental index against an independent full rebuild
+   of the same edited tree, using the [differential harness](#running-the-differential-harness) where applicable.
+   Check the affected public behavior if the change can alter what consumers see.
+   If the change touches publication, check that a failed rebuild leaves the last good index intact.
+5. **Report what the comparison supports.** Give the paired timings and their spread, not just the fastest run.
+   Retain failed or invalid attempts and explain any exclusions.
+   Note memory or complexity tradeoffs and which workloads or adapters were not tested.
+   A component benchmark explains one cost; it does not establish a whole-command speedup.
+
+The performance specs in `spec/performance/` still serve as regression guards.
+Use this checklist for a performance claim, not as another gate for routine changes.
+
 ### Choosing full versus incremental for CI
 
 Measure repeated full and representative-day incremental runs with

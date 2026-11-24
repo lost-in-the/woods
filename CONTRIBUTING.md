@@ -89,6 +89,10 @@ behavior or executed test coverage.
 
 Woods extracts Rails behavior through a booted runtime. Features that depend on routes, Active Record reflections, descendants, or framework internals must use runtime introspection. Unit tests may isolate collaborators, but version-sensitive behavior also needs the booted-app lane.
 
+For extraction performance changes, follow the
+[maintainer profiling checklist](docs/INCREMENTAL_EXTRACTION.md#review-an-extraction-performance-change).
+It reuses existing profiling and correctness checks; it is not required for routine fixes.
+
 ## Validate in proportion to the change
 
 Start with the smallest command that exercises your work:
