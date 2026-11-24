@@ -80,7 +80,7 @@ Gem::Specification.new do |spec|
   # The floor is json_schemer's own. Remove this line once either gem fixes it.
   spec.add_dependency 'regexp_parser', '>= 2.0', '!= 2.13.2'
   # Older supported Active Support encoders pass quirks_mode, removed in JSON 3.
-  spec.add_dependency 'json', '>= 2.19.9', '< 3'
+  spec.add_dependency 'json', '>= 2.19.9', '< 4'
   spec.add_dependency 'msgpack', '>= 1.8.2', '< 2'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
   # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
