@@ -165,10 +165,10 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
   end
 
   describe 'script/profile-compare' do
-    let(:raw_receipt) do
+    def raw_receipt(status: 'ok')
       {
         'operation' => 'full',
-        'total' => { 'wall_ms' => 100.0, 'cpu_ms' => 80.0, 'allocations' => 10_000 },
+        'total' => { 'wall_ms' => 100.0, 'cpu_ms' => 80.0, 'allocations' => 10_000, 'status' => status },
         'phases' => [{ 'name' => 'extraction', 'wall_ms' => 50.0, 'cpu_ms' => 45.0, 'allocations' => 5_000 }]
       }
     end
@@ -273,6 +273,34 @@ RSpec.describe 'Woods profiling and A/B comparison tooling' do
         out, _err, status = Open3.capture3(RbConfig.ruby, compare_script, base_path, cand_path)
         expect(status.exitstatus).to eq(0)
         expect(out).to include('Fixture fingerprints: N/A')
+      end
+    end
+
+    it 'rejects raw profile receipts whose total status is not ok' do
+      Dir.mktmpdir('profile_compare_spec') do |dir|
+        base_path = File.join(dir, 'raw_ok.json')
+        cand_path = File.join(dir, 'raw_err.json')
+        File.write(base_path, JSON.generate(raw_receipt(status: 'ok')))
+        File.write(cand_path, JSON.generate(raw_receipt(status: 'error')))
+
+        _out, err, status = Open3.capture3(RbConfig.ruby, compare_script, base_path, cand_path)
+        expect(status.exitstatus).to eq(2)
+        expect(err).to include('candidate=unknown')
+      end
+    end
+
+    it 'rejects synthetic receipts missing a required workload instead of silently omitting it' do
+      Dir.mktmpdir('profile_compare_spec') do |dir|
+        base_path = File.join(dir, 'base.json')
+        cand_path = File.join(dir, 'cand.json')
+        File.write(base_path, JSON.generate(synthetic_receipt))
+        incomplete = synthetic_receipt
+        incomplete.delete('incremental_noop')
+        File.write(cand_path, JSON.generate(incomplete))
+
+        _out, err, status = Open3.capture3(RbConfig.ruby, compare_script, base_path, cand_path)
+        expect(status.exitstatus).to eq(2)
+        expect(err).to include('incremental_noop')
       end
     end
   end

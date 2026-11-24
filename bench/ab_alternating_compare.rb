@@ -12,6 +12,7 @@
 #   ruby bench/ab_alternating_compare.rb --suite graph --pairs 5 --base /path/base --cand /path/cand
 #   ruby bench/ab_alternating_compare.rb --suite reader --pairs 5 --base ... --cand ... --out receipt.json
 
+require 'digest'
 require 'json'
 require 'open3'
 require 'optparse'
@@ -468,7 +469,31 @@ module WoodsABCompare
       status, st_err, st_ok = Open3.capture3(CLEAN_GIT_ENV, 'git', '-C', dir, 'status', '--porcelain')
       raise "git status failed for #{dir}: #{st_err.strip}" unless st_ok.success?
 
-      { dir: dir, sha: sha.strip, clean: status.strip.empty? }
+      clean = status.strip.empty?
+      meta = { dir: dir, sha: sha.strip, clean: clean }
+      meta[:dirty_digest] = working_tree_digest!(dir, status) unless clean
+      meta
+    end
+
+    def working_tree_digest!(dir, status)
+      diff = git_stdout!(dir, 'diff', 'HEAD')
+      untracked = git_stdout!(dir, 'ls-files', '--others', '--exclude-standard', '-z').split("\0").sort
+      digest = Digest::SHA256.new
+      digest << status << "\0" << diff << "\0"
+      untracked.each { |rel| hash_untracked_file(digest, dir, rel) }
+      digest.hexdigest
+    end
+
+    def hash_untracked_file(digest, dir, rel)
+      path = File.join(dir, rel)
+      digest << rel << "\0" << (File.file?(path) ? File.binread(path) : '') << "\0"
+    end
+
+    def git_stdout!(dir, *args)
+      out, err, st = Open3.capture3(CLEAN_GIT_ENV, 'git', '-C', dir, *args)
+      raise "git #{args.first} failed for #{dir}: #{err.strip}" unless st.success?
+
+      out
     end
   end
 

@@ -46,31 +46,31 @@ module ProfileCompare
 
   def classify_receipt(receipt)
     return :synthetic_suite if receipt.is_a?(Hash) && receipt.key?('full_extraction')
-    return :raw_profile if receipt.is_a?(Hash) && receipt['total'].is_a?(Hash) && receipt['phases'].is_a?(Array)
+    return :raw_profile if raw_profile_ok?(receipt)
 
     :unknown
+  end
+
+  def raw_profile_ok?(receipt)
+    receipt.is_a?(Hash) && receipt['total'].is_a?(Hash) && receipt['phases'].is_a?(Array) &&
+      receipt.dig('total', 'status') == 'ok'
   end
 
   def validate_schemas!(base, cand)
     base_kind = classify_receipt(base)
     cand_kind = classify_receipt(cand)
-    if base_kind == :unknown || cand_kind == :unknown || base_kind != cand_kind
-      warn "Incompatible receipt schemas: baseline=#{base_kind}, candidate=#{cand_kind}"
-      exit 2
-    end
-    base_kind
+    return base_kind if base_kind != :unknown && base_kind == cand_kind
+
+    warn "Incompatible receipt schemas: baseline=#{base_kind}, candidate=#{cand_kind}"
+    exit 2
   end
 
   def collect_rows(base, cand, kind:)
     return [metric_row('total', base['total'], cand['total'], prefix: nil)] if kind == :raw_profile
 
-    keys = %w[full_extraction incremental_noop incremental_method_edit incremental_extraction]
-    rows = keys.select { |k| base.key?(k) && cand.key?(k) }.map do |key|
-      metric_row(key, base.dig(key, 'total'), cand.dig(key, 'total'), prefix: nil)
-    end
-    SUBSYSTEM_ROWS.each do |label, path|
-      rows << metric_row(label, base.dig(*path), cand.dig(*path), prefix: 'median_')
-    end
+    keys = Gate.validate_workloads!(base, cand)
+    rows = keys.map { |key| metric_row(key, base.dig(key, 'total'), cand.dig(key, 'total'), prefix: nil) }
+    SUBSYSTEM_ROWS.each { |label, path| rows << metric_row(label, base.dig(*path), cand.dig(*path), prefix: 'median_') }
     rows
   end
 
@@ -125,6 +125,31 @@ module ProfileCompare
   # Fingerprint and internal clean-rebuild integrity gate.
   module Gate
     module_function
+
+    def required_workloads(receipt)
+      if receipt.key?('incremental_extraction') && !receipt.key?('incremental_noop')
+        %w[full_extraction incremental_extraction]
+      else
+        %w[full_extraction incremental_noop incremental_method_edit]
+      end
+    end
+
+    def validate_workloads!(base, cand)
+      b_keys = required_workloads(base)
+      c_keys = required_workloads(cand)
+      if b_keys != c_keys
+        warn "Incompatible synthetic workloads: baseline=#{b_keys.join(',')}, candidate=#{c_keys.join(',')}"
+        exit 2
+      end
+      [['baseline', base], ['candidate', cand]].each do |side, receipt|
+        missing = b_keys.reject { |k| receipt[k].is_a?(Hash) }
+        next if missing.empty?
+
+        warn "Missing required workload(s) in #{side} receipt: #{missing.join(', ')}"
+        exit 2
+      end
+      b_keys
+    end
 
     def extract(receipt)
       fp = receipt['fixture_fingerprints'] || receipt['equivalence']

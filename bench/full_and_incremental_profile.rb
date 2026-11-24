@@ -532,7 +532,8 @@ module WoodsEndToEndProfile
   REPO_ROOT = File.expand_path('..', __dir__)
   CLEAN_GIT_ENV = {
     'GIT_DIR' => nil, 'GIT_WORK_TREE' => nil, 'GIT_INDEX_FILE' => nil,
-    'GIT_OBJECT_DIRECTORY' => nil, 'GIT_ALTERNATE_OBJECT_DIRECTORIES' => nil, 'GIT_COMMON_DIR' => nil
+    'GIT_OBJECT_DIRECTORY' => nil, 'GIT_ALTERNATE_OBJECT_DIRECTORIES' => nil, 'GIT_COMMON_DIR' => nil,
+    'WOODS_GIT_DIR' => nil
   }.freeze
 
   module_function
@@ -545,7 +546,7 @@ module WoodsEndToEndProfile
   end
 
   def run(scale: 1)
-    Dir.mktmpdir('woods_e2e_profile') { |tmpdir| execute_in(tmpdir, scale: scale) }
+    with_env(CLEAN_GIT_ENV) { Dir.mktmpdir('woods_e2e_profile') { |dir| execute_in(dir, scale: scale) } }
   end
 
   def execute_in(tmpdir, scale:)
