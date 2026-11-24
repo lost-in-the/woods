@@ -212,9 +212,8 @@ RSpec.describe Woods::MCP::OriginGuard do
     end
   end
 
-  # Request-time enablement — the railtie passes a proc reading
-  # Woods.configuration.console_mcp_enabled so a flag set in
-  # config/initializers takes effect (#183).
+  # Request-time enablement: the predicate is read on every request, so a
+  # flag set after the middleware was built still takes effect (#183).
   describe 'enabled predicate (enabled: kwarg)' do
     it 'passes requests through unguarded while the predicate returns false' do
       middleware = described_class.new(inner_app, enabled: -> { false })

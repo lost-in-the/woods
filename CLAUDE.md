@@ -8,8 +8,8 @@ extraction (one extractor per `lib/woods/extractors/*_extractor.rb`,
 counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities),
 retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters),
 embedding (OpenAI, Ollama),
-two MCP servers (32-tool index server, 16 always-on + 16 wiring-conditional;
-31-tool console server, deprecated in 2.2.0 and removed in 3.0),
+the MCP Index Server (32 tools, 16 always-on + 16 wiring-conditional;
+the Console server was removed in 2.2.0),
 AST analysis, flow extraction, temporal snapshots, Markdown export (plain or Obsidian flavor)
 and deprecated Notion + Unblocked sync, and evaluation harness.
 
@@ -54,7 +54,7 @@ bundle exec rake woods:evaluate          # Score retrieval against a ground-trut
 bundle exec rake "woods:evaluate:baseline[grep]" # Score a naive baseline for comparison
 bundle exec rake "woods:flow[entry]"     # Execution flow document for an entry point
 bundle exec rake "woods:diagram[kind,id]" # Mermaid for one unit (neighbourhood, schema, lifecycle, impact)
-bundle exec rake woods:console           # Embedded Console MCP server (stdio); deprecated, removed in 3.0
+bundle exec rake woods:console           # Removed in 2.2.0: prints the removal message and exits 1
 bundle exec rake woods:notion_sync       # Deprecated: sync models/columns to Notion (use woods:markdown)
 bundle exec rake woods:unblocked_sync    # Deprecated: sync to an Unblocked collection (use woods:markdown)
 bundle exec rake woods:markdown          # Export plain Markdown notes (WOODS_MARKDOWN_OBSIDIAN=1 for Obsidian flavor)
@@ -85,7 +85,10 @@ ordinary runtime extractor; never substitute the self-map for that validation.
 
 ## Host app for integration testing: `woods-testbed`
 
-Extraction and the Console MCP server both require a booted Rails environment to validate. We maintain a companion repo, [`lost-in-the/woods-testbed`](https://github.com/lost-in-the/woods-testbed), with one Rails app per supported Rails version. Clone it alongside this gem and `docker compose up` the variant you need.
+Extraction requires a booted Rails environment to validate.
+We maintain a companion repo, [`lost-in-the/woods-testbed`](https://github.com/lost-in-the/woods-testbed),
+with one Rails app per supported Rails version.
+Clone it alongside this gem and `docker compose up` the variant you need.
 
 **Variants** (add more by contributing a new `apps/rails-X.Y/` directory):
 
@@ -128,7 +131,9 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 
 **Extraction output** lands under `apps/rails-<version>/tmp/woods/` inside the testbed checkout, bind-mounted read-write, so the host can read `_index.json`, `dependency_graph.json`, etc. directly.
 
-**Adding coverage.** Smoke scripts go in the testbed's `scripts/` directory so they run unchanged against every variant. Each variant's `config/initializers/woods_console.rb` can be tweaked independently when a test needs version-specific configuration.
+**Adding coverage.** Smoke scripts go in the testbed's `scripts/` directory so they run unchanged against every variant.
+Each variant's Woods initializer under `config/initializers/` can be tweaked independently
+when a test needs version-specific configuration.
 
 **The testbed is a playground.** Agents working on the gem have permission to modify anything under the testbed's `apps/`, add models, migrations, controllers, initializers, smoke scripts, seeds. Reshape it to fit the scenario. Only gem changes under `lib/woods/` go through the normal review gate.
 
@@ -205,7 +210,8 @@ lib/
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
 │   ├── obsidian/                        # Obsidian vault export (VaultExporter, NoteBuilder, NameMapper, VaultAssets)
 │   ├── mcp/                             # MCP Index Server (32 tools, 16 always-on + 16 wiring-conditional: 5 operator / 4 feedback / 5 snapshot-impact / 1 session_trace / 1 notion; 2 resources, 2 templates)
-│   ├── console/                         # Console MCP Server (31 tool schemas across 4 tiers: 9 read-only / 9 domain-aware / 10 analytics / 3 guarded; only Tier 1 plus the two read tools register)
+│   ├── console.rb                       # Tombstones of the Console MCP Server removed in 2.2.0 (REMOVED_MESSAGE, RackMiddleware)
+│   ├── credential_scanner.rb            # Credential-shape redaction for extracted source and exports (best effort)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
 │   ├── operator/                        # Pipeline management (StatusReporter, ErrorEscalator, PipelineGuard)
@@ -228,7 +234,7 @@ exe/
 ├── woods-mcp                            # MCP Index Server executable (stdio)
 ├── woods-mcp-start                      # Preflight wrapper: validates, then execs woods-mcp (no restart loop)
 ├── woods-mcp-http                       # MCP Index Server executable (HTTP/Rack)
-└── woods-console-mcp                    # Console MCP Server executable (deprecated)
+└── woods-console-mcp                    # Tombstone: prints the Console removal message and exits 1
 ```
 
 ## Key Design Decisions
@@ -429,16 +435,14 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   - Orphan detection marks a `working` record whose producer is gone as `failed`. A pid table can only judge a producer that shares the reader's boot identity and pid namespace; a foreign one is believed on age alone, up to `Store::FOREIGN_PRODUCER_GRACE_SECONDS` (24h from `updated_at`), then resolved to `failed` so a rebooted host stops answering `working` forever.
   - A task handle is returned only to a client that declared `io.modelcontextprotocol/tasks`. The opt-in is captured per request into a thread-local cleared in an `ensure`.
 
-### Console server
+### Console server (removed)
 
-- The Console is deprecated in 2.2.0 and removed in 3.0 (#1098). Add no Console features; security fixes still land.
-  Every start path prints one notice per process through `Woods::Console.warn_deprecated`, on stderr only.
-- The console needs a booted Rails environment; it validates models against `ActiveRecord::Base.descendants` at startup.
-- `SafeContext` wraps every request in a rolled-back transaction. Writes are silently discarded. On MySQL the statement timeout is session-scoped and is restored in `ensure`.
-- `SqlValidator` rejects DML/DDL at the string level. Do not bypass it.
-- `SqlNoiseStripper` must know every comment form the host database executes (`--`, `#`, `/* */`, and MySQL `/*! */`, which is live SQL). Table gating runs on the stripped text, so a stripping gap is a gate bypass.
-- Redacted columns are refused as aggregate, scope, find, and order inputs, not only masked on output. A comparison oracle over a secret is still a leak.
-- `EmbeddedExecutor` blocks `console_sql`/`console_query` by default. Enable with `embedded_read_tools:` on `RackMiddleware` or `config.console_embedded_read_tools` for the stdio server.
+- The Console MCP server was removed in 2.2.0 (`docs/CONSOLE_REMOVED.md`). Do not add live-data access back.
+- `lib/woods/console.rb` is the only Console code left: `REMOVED_MESSAGE` and a `RackMiddleware` that raises it.
+  The `console_*` setters (`Configuration::REMOVED_CONSOLE_SETTINGS`), `exe/woods-console`, `exe/woods-console-mcp`
+  and `woods:console` stop with the same message; turning the Console on raises, anything else is ignored.
+- `Woods::CredentialScanner` (formerly `Console::CredentialScanner`) redacts extracted configuration and
+  documentation source and the exports. It recognizes credential shapes, not secrets.
 
 ### Storage, embedding, retrieval
 

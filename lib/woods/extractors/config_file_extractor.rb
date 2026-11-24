@@ -79,7 +79,7 @@ module Woods
       GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
       ERB_PLACEHOLDER = '__WOODS_ERB__'
       ERB_MARKER = '[ERB]'
-      # Same marker as Woods::Console::CredentialScanner::REDACTED.
+      # Same marker as Woods::CredentialScanner::REDACTED.
       REDACTED = '[REDACTED]'
       ENV_REFERENCE = /ENV(?:\.fetch\(|\[)\s*+["']([A-Za-z_][A-Za-z0-9_]*+)["']/
       # `scheme://user:password@host` in any scheme, which the scanner's
@@ -125,9 +125,9 @@ module Woods
       def initialize
         # Loaded here, not at require time: the dispatch rules and the reload
         # policy name this class without ever scanning a value.
-        require_relative '../console/credential_scanner'
+        require_relative '../credential_scanner'
         @root = Rails.root.to_s
-        @scanner = Console::CredentialScanner.new
+        @scanner = CredentialScanner.new
       end
 
       # Extract every configured YAML file.

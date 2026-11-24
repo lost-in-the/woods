@@ -37,6 +37,8 @@ require_relative 'woods/graph_analyzer'
 # Configuration's `source_reference_callers` default lives with the pass it feeds.
 require_relative 'woods/source_references/caller_policy'
 require_relative 'woods/javascript_paths'
+# The removed Console's settings raise its removal message.
+require_relative 'woods/console'
 
 module Woods
   class Error < StandardError; end
@@ -49,89 +51,10 @@ module Woods
 
   CONFIG_MUTEX = Mutex.new
 
-  # Console MCP secure defaults — Layer 3 column-name redaction.
-  #
-  # Columns named here are replaced with `[REDACTED]` in every MCP tool
-  # response. This list targets credential columns that appear with the
-  # same names across Devise, Doorkeeper, Rodauth, has_secure_password,
-  # devise-two-factor, OAuth integrations, and hand-rolled auth code.
-  #
-  # Intentionally omitted because they cause over-redaction in apps that
-  # use them for non-secret purposes:
-  #   - `key` — ActiveStorage blob keys, EAV key columns, translation keys
-  #   - `name` — universal non-secret identifier
-  #   - PII columns (`ssn`, `tax_id`, `dob`) — org-specific compliance concern
-  #
-  # Host apps extend this by reassigning `console_redacted_columns` to
-  # `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[extra_column]`, or
-  # override entirely to remove a default.
-  DEFAULT_CONSOLE_REDACTED_COLUMNS = %w[
-    password
-    password_digest
-    password_salt
-    encrypted_password
-    crypted_password
-    salt
-    otp_secret
-    encrypted_otp_secret
-    two_factor_secret
-    backup_codes
-    consumed_timestep
-    reset_password_token
-    confirmation_token
-    unlock_token
-    remember_token
-    invitation_token
-    access_token
-    refresh_token
-    auth_token
-    api_token
-    api_key
-    bearer_token
-    client_secret
-    webhook_secret
-    signing_secret
-    session_secret
-    private_key
-    encrypted_private_key
-    key_hash
-    token
-    secret
-  ].freeze
-
-  # Console MCP secure defaults — Layer 1 table-level blocking.
-  #
-  # Tables named here are rejected outright before any SQL reaches the
-  # database. This list targets authentication and credential storage
-  # tables that carry secrets or session state across all major auth
-  # stacks (Devise, Doorkeeper, Rodauth, has_secure_password, Sorcery,
-  # OmniAuth, and hand-rolled token systems).
-  #
-  # Intentionally omitted to avoid over-blocking benign apps:
-  #   - `users` / `accounts` — many apps expose safe columns from these
-  #     tables and operators should decide explicitly.
-  #   - PII-heavy but auth-unrelated tables (`payments`, `addresses`) —
-  #     org-specific compliance concern, not a universal default.
-  #
-  # To keep the defaults and add more tables:
-  #   Woods.configure { |c| c.console_blocked_tables =
-  #     Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[extra_table] }
-  #
-  # To replace the defaults entirely (including removing entries):
-  #   Woods.configure { |c| c.console_blocked_tables = %w[only_this] }
-  #
-  # To disable Layer 1 (gate becomes inactive; other layers still apply):
-  #   Woods.configure { |c| c.console_blocked_tables = [] }
-  DEFAULT_CONSOLE_BLOCKED_TABLES = %w[
-    sessions
-    api_keys
-    credentials
-    oauth_applications
-    oauth_access_tokens
-    oauth_refresh_tokens
-    identities
-    active_storage_blobs
-  ].freeze
+  # Kept, empty, from the Console MCP server removed in Woods 2.2.0, so an
+  # initializer that extends them still loads. Nothing reads them.
+  DEFAULT_CONSOLE_REDACTED_COLUMNS = [].freeze
+  DEFAULT_CONSOLE_BLOCKED_TABLES = [].freeze
 
   # ════════════════════════════════════════════════════════════════════════
   # Configuration
@@ -167,21 +90,34 @@ module Woods
       **/CHANGELOG*.md **/node_modules/**/* **/vendor/**/* doc/api/**/* docs/api/**/*
     ].freeze
 
+    # Settings of the Console MCP server, removed in Woods 2.2.0. Each stays
+    # assignable, and the value is ignored, so an initializer that turns the
+    # Console off keeps booting; each reads as nil. See {Woods::Console}.
+    REMOVED_CONSOLE_SETTINGS = %i[
+      console_mcp_enabled console_mcp_http_enabled console_mcp_path console_mcp_token console_mcp_allowed_origins
+      console_redacted_columns console_redacted_key_values console_embedded_read_tools
+      console_sql_default_limit console_sql_max_limit console_blocked_tables console_disabled_scanner_patterns
+      console_credential_defense_enabled console_credential_rotation_warning console_unsafe_eval_enabled
+      console_unsafe_eval_confirmation console_unsafe_eval_audit_log_path
+    ].freeze
+
+    # The removed settings whose truthy value, off by default, turned a
+    # Console surface on. Assigning one raises {Woods::Console::REMOVED_MESSAGE}.
+    REMOVED_CONSOLE_SWITCHES = %i[console_mcp_enabled console_embedded_read_tools].freeze
+
+    REMOVED_CONSOLE_SETTINGS.each do |name|
+      define_method(name) { nil }
+      define_method(:"#{name}=") do |value|
+        raise ConfigurationError, Console::REMOVED_MESSAGE if value && REMOVED_CONSOLE_SWITCHES.include?(name)
+      end
+    end
+
     attr_accessor :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider,
                   :vector_store_options, :metadata_store_options, :embedding_options,
                   :concurrent_extraction, :extract_navigation_edges, :enable_snapshots,
                   :session_tracer_enabled, :session_tracer_allow_production,
                   :session_store, :session_id_proc, :session_exclude_paths,
-                  :console_mcp_enabled, :console_mcp_http_enabled, :console_mcp_path, :console_mcp_token,
-                  :console_mcp_allowed_origins,
-                  :console_redacted_columns,
-                  :console_redacted_key_values, :console_embedded_read_tools,
-                  :console_sql_default_limit, :console_sql_max_limit,
-                  :console_blocked_tables, :console_disabled_scanner_patterns,
-                  :console_credential_defense_enabled,
-                  :console_credential_rotation_warning, :console_unsafe_eval_enabled,
-                  :console_unsafe_eval_confirmation, :console_unsafe_eval_audit_log_path,
                   :notion_api_token, :notion_database_ids, :notion_export_column_defaults,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options,
@@ -222,38 +158,6 @@ module Woods
       @session_store = nil
       @session_id_proc = nil
       @session_exclude_paths = []
-      @console_mcp_enabled = false
-      # Preserve existing HTTP setups. Stdio-only hosts explicitly disable
-      # HTTP while leaving the Console master switch enabled.
-      @console_mcp_http_enabled = true
-      @console_mcp_path = '/mcp/console'
-      # Accept token from config or env var. Nil by default — the railtie
-      # rejects production boot when HTTP Console is enabled without a real
-      # token, and warns in non-production. Stdio does not use this token.
-      @console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN', nil)
-      # Origins allowed to reach the embedded console MCP. Loopback only
-      # by default; override in host initializers for tunneled or internal
-      # dashboard access.
-      @console_mcp_allowed_origins = %w[
-        http://localhost
-        http://127.0.0.1
-        http://[::1]
-      ]
-      @console_redacted_columns = DEFAULT_CONSOLE_REDACTED_COLUMNS.dup
-      @console_redacted_key_values = []
-      @console_embedded_read_tools = false
-      @console_sql_default_limit = 100
-      @console_sql_max_limit = 1_000
-      @console_blocked_tables = DEFAULT_CONSOLE_BLOCKED_TABLES.dup
-      @console_disabled_scanner_patterns = []
-      @console_credential_defense_enabled = true
-      @console_credential_rotation_warning = true
-      @console_unsafe_eval_enabled = nil # nil = fall back to env WOODS_CONSOLE_UNSAFE_EVAL
-      # Required collaborators when the opt-in is on. Both default to nil;
-      # the server refuses to boot with the opt-in set unless the host has
-      # wired them (fail-closed — see Server.build_embedded).
-      @console_unsafe_eval_confirmation = nil
-      @console_unsafe_eval_audit_log_path = nil
       @notion_api_token = nil
       @notion_database_ids = {}
       @notion_export_column_defaults = false

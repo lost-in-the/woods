@@ -38,12 +38,11 @@ end
   - [Component directories](#component-directories)
   - [Event patterns](#event-patterns)
   - [Source-reference callers](#source-reference-callers)
-- [Console MCP options](#console-mcp-options)
+- [Removed Console options](#removed-console-options)
 - [Environment variables](#environment-variables)
   - [Index server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)](#index-server-woods-mcp--woods-mcp-http--woods-mcp-start)
   - [Rake tasks](#rake-tasks)
   - [HTTP transport (`woods-mcp-http`)](#http-transport-woods-mcp-http)
-  - [Console server (`woods-console-mcp`)](#console-server-woods-console-mcp)
   - [Watch daemon (`woods:watch`)](#watch-daemon-woodswatch)
   - [Extraction rake tasks](#extraction-rake-tasks)
   - [Exporters](#exporters)
@@ -1323,33 +1322,12 @@ extracted. The plugin's change hook and a process that has not loaded Woods'
 extractors recognize the default roots only; the watch daemon and the rake
 tasks use the configured ones.
 
-## Console MCP options
+## Removed Console options
 
-These options configure the Console MCP server (live database queries via
-MCP). See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for the full
-deployment guide including defense layers.
-
-The Console MCP server is deprecated and will be removed in Woods 3.0, together with these options.
-They keep working through 2.x; a new setup should leave `console_mcp_enabled` off.
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `console_mcp_enabled` | Boolean | `false` | Master switch. When `false`, stdio exits and the mounted Console middleware passes requests through to Rails. Setting it prints nothing; each Console start prints one deprecation line. |
-| `console_mcp_http_enabled` | Boolean | `true` | HTTP transport switch; effective only while the master switch is on. Set `false` for stdio-only use without HTTP token validation or an active HTTP endpoint. Read at request time. |
-| `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every enabled Console HTTP request. With both Console flags enabled, production boot raises on a missing token; other environments warn and requests fail closed with 401. A configured token shorter than 32 characters raises at boot while HTTP is enabled. Explicit stdio-only configurations skip HTTP token validation. Generate with `SecureRandom.hex(32)`. |
-| `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | Shared guard/SDK allowlist (included in Woods 2.1). Exact cross-origin entries include the port; portless entries also permit same-authority traffic. Include the actual browser origin and non-loopback endpoint authority. Restart after changes. |
-| `console_mcp_path` | String | `/mcp/console` | URL path captured when Rack middleware mounts. Set a custom path in `config/application.rb` before Railtie initialization, then restart. |
-| `console_embedded_read_tools` | Boolean | `false` | Register `console_sql` and `console_query` in supported stdio and Rack modes. |
-| `console_sql_default_limit` | Integer | `100` | Rows `console_sql` returns when the caller passes no `limit`. |
-| `console_sql_max_limit` | Integer | `1000` | Ceiling applied to a requested `console_sql` `limit`. The tool schema still rejects a `limit` above 10000. |
-| `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |
-| `console_redacted_columns` | Array\<String\> | `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS` | Column names whose values are replaced with `[REDACTED]` in responses, and which are refused as aggregate, scope, find, and order inputs. |
-| `console_redacted_key_values` | Array\<Hash\> | `[]` | EAV-style redaction patterns. Each entry: `{ key_column:, value_column:, sensitive_keys: [] }`. |
-| `console_credential_defense_enabled` | Boolean | `true` | Layer 5 toggle for the CredentialScanner. Leave on unless you have a specific reason to disable. |
-| `console_credential_rotation_warning` | Boolean | `true` | Emit a structured log warning when any Rails credentials file is modified after process start. |
-| `console_unsafe_eval_enabled` | Boolean | `nil` | Legacy setting. `console_eval` is unavailable; enabling it fails closed at server construction. |
-| `console_unsafe_eval_confirmation` | `Confirmation` | `nil` | Legacy option retained for compatibility; passing it fails closed. |
-| `console_unsafe_eval_audit_log_path` | String/Pathname | `nil` | Legacy option retained for compatibility; passing it fails closed. |
+The Console MCP server was removed in Woods 2.2.0.
+The former `console_*` settings are accepted and ignored, except that turning `console_mcp_enabled` or
+`console_embedded_read_tools` on raises `Woods::ConfigurationError`.
+See [CONSOLE_REMOVED.md](CONSOLE_REMOVED.md).
 
 ## Notion export
 
@@ -1423,14 +1401,6 @@ existing index before deciding another extraction is needed.
 | `WOODS_MCP_HTTP_TOKEN` | unset | Bearer token required for non-loopback binds; startup refuses without one. A token shorter than 32 characters is refused before hydration with a `ConfigurationError` (exit 2). |
 | `WOODS_MCP_HTTP_ALLOWED_ORIGINS` | loopback only | Comma-separated origin allow-list. |
 | `WOODS_MCP_HTTP_STATELESS` | `1` (stateless) | Set to `0`/`false`/`no` to restore session-based mode. |
-
-### Console server (`woods-console-mcp`)
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `WOODS_CONSOLE_CONFIG` | `~/.woods/console.yml` when present | Explicit launcher YAML path. An explicit missing path fails startup. |
-| `WOODS_CONSOLE_MCP_TOKEN` | unset | Bearer token for the embedded Rack middleware; see `console_mcp_token` above. |
-| `WOODS_CONSOLE_UNSAFE_EVAL` | unset | Legacy setting. The exact value `true` requests unavailable eval capability and fails server construction closed. |
 
 ### Watch daemon (`woods:watch`)
 

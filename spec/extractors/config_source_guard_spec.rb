@@ -6,12 +6,12 @@ require 'fileutils'
 require 'woods/extractors/config_source_guard'
 
 RSpec.describe Woods::Extractors::ConfigSourceGuard do
-  it 'uses the Console scanner marker' do
-    require 'woods/console/credential_scanner'
+  it 'uses the credential scanner marker' do
+    require 'woods/credential_scanner'
     require 'woods/extractors/config_file_extractor'
 
-    expect(described_class::REDACTED).to eq(Woods::Console::CredentialScanner::REDACTED)
-    expect(Woods::Extractors::ConfigFileExtractor::REDACTED).to eq(Woods::Console::CredentialScanner::REDACTED)
+    expect(described_class::REDACTED).to eq(Woods::CredentialScanner::REDACTED)
+    expect(Woods::Extractors::ConfigFileExtractor::REDACTED).to eq(Woods::CredentialScanner::REDACTED)
   end
 
   describe '.redact' do

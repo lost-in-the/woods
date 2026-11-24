@@ -115,7 +115,7 @@ module Woods
       def redact_credentials(body)
         return body if body.nil? || body.empty?
 
-        require 'woods/console/credential_scanner'
+        require 'woods/credential_scanner'
         redacted, _counts = credential_scanner.scan(body)
         redacted
       rescue StandardError
@@ -123,7 +123,7 @@ module Woods
       end
 
       def credential_scanner
-        @credential_scanner ||= Woods::Console::CredentialScanner.new
+        @credential_scanner ||= Woods::CredentialScanner.new
       end
 
       # ── Model formatting ─────────────────────────────────────────────

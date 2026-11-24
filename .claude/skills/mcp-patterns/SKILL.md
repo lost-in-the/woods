@@ -20,11 +20,15 @@ Read `lib/woods/mcp/server.rb` before building any new MCP server or tool. It de
 
 ## Design Rules
 
-1. **Structured tools over raw eval.** Every tool has a named operation, typed parameters, and bounded output. Never expose `eval` or arbitrary code execution without explicit safety layers (see `docs/CONSOLE_MCP_SETUP.md` — Safety Model).
-2. **Read-only by default.** Tools that query data need no special guards. Tools that mutate state require safety layers documented in `docs/CONSOLE_MCP_SETUP.md` (transaction rollback, statement timeout, human confirmation).
+1. **Structured tools over raw eval.** Every tool has a named operation, typed parameters, and bounded output.
+   Never expose `eval` or arbitrary code execution.
+2. **Read-only, and no live data.** Tools read the published index.
+   The Console, which queried live data behind output filters, was removed in 2.2.0:
+   such filters cannot be made complete (`docs/CONSOLE_REMOVED.md`).
 3. **Truncation and budgeting.** All tools that return variable-length data must accept a `limit` parameter and truncate results. Use `truncate_section` pattern from the index server.
 4. **Error responses are tool responses.** Return errors with `error_response` (sets `isError`, an `error_code`, and any structured hints such as `suggestions`), not exceptions. Say what was wrong and what to call next. An answer that found nothing because the input was wrong must read as an error or a not-found, never as an empty result.
-5. **No Rails boot in the Index Server.** It reads the published index from disk and never calls `Rails.application` or `ActiveRecord`. The Console Server is the opposite: it runs inside a booted Rails environment (`rake woods:console`, or the Rack middleware) and every request goes through `SafeContext`.
+5. **No Rails boot in the Index Server.** It reads the published index from disk and never calls `Rails.application` or
+   `ActiveRecord`.
 6. **Backend agnostic.** MySQL and PostgreSQL must both work. If a tool generates SQL, handle dialect differences or delegate to ActiveRecord.
 7. **YARD-document every tool definition** — description, parameter types, example responses.
 
@@ -37,8 +41,8 @@ Read `lib/woods/mcp/server.rb` before building any new MCP server or tool. It de
 
 ## Building a New MCP Server
 
-1. Read the relevant reference doc first (e.g., `docs/CONSOLE_MCP_SETUP.md`).
+1. Read the relevant reference doc first (e.g., `docs/MCP_SERVERS.md`).
 2. Follow the `Server.build` pattern — single entry point, tools as private method definitions.
-3. Create an executable in `exe/` (e.g., `exe/woods-console-mcp`).
+3. Create an executable in `exe/` (e.g., `exe/woods-mcp`).
 4. Spec the server in `spec/mcp/`.
 5. Update `docs/MCP_SERVERS.md` and `docs/AGENT_GUIDE.md` with the new server's tools and when agents should use them.

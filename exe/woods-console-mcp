@@ -1,32 +1,8 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Launches the real embedded Console MCP server through direct, Docker, or SSH
-# process execution. The child owns stdio and lifecycle directly.
-#
-# Configuration precedence:
-#   1. WOODS_CONSOLE_CONFIG, when set (the file must exist)
-#   2. ~/.woods/console.yml, when present
-#   3. direct mode with executable app bin/rake, otherwise bundle exec rake
+# The Console MCP server was removed in Woods 2.2.0 (see Woods::Console).
+require_relative '../lib/woods/console'
 
-require 'yaml'
-require_relative '../lib/woods/console/connection_manager'
-
-explicit_path = ENV.fetch('WOODS_CONSOLE_CONFIG', nil)
-config_path = explicit_path || File.expand_path('~/.woods/console.yml')
-
-if explicit_path && !File.file?(config_path)
-  warn "[woods-console-mcp] Config file does not exist: #{config_path}"
-  exit 1
-end
-
-begin
-  config = File.file?(config_path) ? YAML.safe_load_file(config_path, aliases: false) : {}
-  config = {} if config.nil?
-  raise Woods::Console::ConnectionError, "#{config_path} must contain a YAML mapping" unless config.is_a?(Hash)
-
-  Woods::Console::ConnectionManager.new(config: config).replace_process!
-rescue Psych::Exception, Woods::Console::ConnectionError => e
-  warn "[woods-console-mcp] #{e.message}"
-  exit 1
-end
+warn Woods::Console::REMOVED_MESSAGE
+exit 1

@@ -7,46 +7,56 @@ require 'open3'
 require 'shellwords'
 require 'tmpdir'
 
-RSpec.describe 'Console MCP deprecation notices' do
+RSpec.describe 'Console removal notices' do
   let(:root) { File.expand_path('..', __dir__) }
 
   def read(path)
     File.read(File.join(root, path), encoding: Encoding::UTF_8)
   end
 
-  it 'opens docs/CONSOLE_MCP_SETUP.md with the deprecation, the removal release and what to use instead' do
-    head = read('docs/CONSOLE_MCP_SETUP.md').lines.first(14).join
-
-    expect(head).to match(/\*\*Deprecated\.\*\*/)
-    expect(head).to include('Woods 3.0', 'Index Server', 'bin/rails runner')
+  let(:current_pages) do
+    %w[README.md SECURITY.md CLAUDE.md AGENTS.md CONTRIBUTING.md lib/generators/woods/templates/woods.rb.tt] +
+      Dir.chdir(root) { Dir['docs/*.md'] + Dir['plugin/skills/*/SKILL.md'] }
   end
 
-  %w[README.md docs/README.md SECURITY.md CLAUDE.md docs/MCP_SERVERS.md
-     plugin/skills/woods-mcp-config/SKILL.md plugin/skills/woods-setup/SKILL.md].each do |path|
-    it "marks the Console deprecated in #{path}, naming the removal release" do
-      expect(read(path)).to match(/Console[^\n]*deprecated[^\n]*3\.0|deprecated[^\n]*Console[^\n]*3\.0/i)
+  it 'gives the removal its own page: the release, why, and how to clean up' do
+    require 'woods/console'
+    page = read('docs/CONSOLE_REMOVED.md')
+
+    expect(page).to include('Woods 2.2.0', Woods::Console::REMOVED_MESSAGE)
+    expect(page.scan(/^## .*$/)).to eq(['## Why', '## Cleaning up after an upgrade'])
+  end
+
+  it 'suggests no replacement for the Console on any current page or skill' do
+    suggesting = (current_pages + %w[docs/CONSOLE_REMOVED.md]).uniq.select do |path|
+      read(path).match?(/what-to-use-instead|database MCP|scrubbed replica/i)
+    end
+
+    expect(suggesting).to eq([])
+  end
+
+  it 'keeps the Console guide as a pointer to the removal for the 2.1.x and 1.6.x lines' do
+    head = read('docs/CONSOLE_MCP_SETUP.md').lines.first(8).join
+
+    expect(head).to include('Removed in Woods 2.2.0', 'CONSOLE_REMOVED.md', '2.1.x', '1.6.x')
+  end
+
+  %w[docs/README.md SECURITY.md CLAUDE.md docs/MCP_SERVERS.md].each do |path|
+    it "names the removal release in #{path}" do
+      expect(read(path)).to match(/Console[^\n]*removed[^\n]*2\.2\.0/i)
     end
   end
 
-  it 'gives the Console guide a "What to use instead" section for other pages to link to' do
-    expect(read('docs/CONSOLE_MCP_SETUP.md')).to match(/^## What to use instead$/)
+  it 'names the removal in README.md, which names versions only inside release-state fences' do
+    expect(read('README.md')).to match(/Console[^\n]*removed/).and include('docs/CONSOLE_REMOVED.md')
   end
 
-  %w[docs/AGENT_SETUP.md docs/GETTING_STARTED.md docs/INTERNALS.md docs/MCP_SERVERS.md docs/DOCKER_SETUP.md
-     docs/FAQ.md docs/README.md README.md].each do |path|
-    it "limits the Console to existing setups in #{path} and links the alternatives" do
-      text = read(path)
-
-      expect(text).to include('Existing setups keep working; new setups should not enable it.')
-      expect(text).to match(/CONSOLE_MCP_SETUP\.md#what-to-use-instead/)
+  it 'leaves no current page or skill calling the Console deprecated' do
+    deprecated = current_pages.select do |path|
+      read(path).match?(/Console[^\n]{0,80}deprecated|deprecated[^\n]{0,80}Console/i)
     end
-  end
 
-  it 'marks the Console section of the install template deprecated and tells new setups to leave it off' do
-    section = read('lib/generators/woods/templates/woods.rb.tt')[/# ── Console MCP.*?(?=# ── )/m]
-
-    expect(section).to include('DEPRECATED', 'Woods 3.0', 'New setups')
-    expect(section).to match(/^\s*#\s*config\.console_mcp_enabled\s*=\s*false/)
+    expect(deprecated).to eq([])
   end
 
   describe 'turning the Console off' do

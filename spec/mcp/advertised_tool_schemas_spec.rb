@@ -11,7 +11,6 @@ require 'woods/mcp/server'
 require 'woods/operator/error_escalator'
 require 'woods/operator/pipeline_guard'
 require 'woods/operator/status_reporter'
-require 'woods/console/server'
 
 # Every Woods MCP server mode serializes its tools through `tools/list`. Some
 # MCP clients reject or mishandle a tool whose input schema has a combinator
@@ -46,14 +45,7 @@ RSpec.describe 'Advertised tool input schemas across every Woods MCP server mode
       value.notion_database_ids = { data_models: 'test-database' }
     end
   end
-  let(:console_validator) { Woods::Console::ModelValidator.new(registry: { 'Post' => %w[id title] }) }
-  let(:console_connection) { double('Connection', adapter_name: 'SQLite', execute: nil) }
-  let(:console_safe_context) { Woods::Console::SafeContext.new(connection: console_connection) }
-
-  before do
-    FileUtils.cp_r(source_fixture_dir, fixture_dir)
-    allow(console_connection).to receive(:transaction) { |&block| block.call }
-  end
+  before { FileUtils.cp_r(source_fixture_dir, fixture_dir) }
 
   after { FileUtils.rm_rf(runtime_root) }
 
@@ -67,13 +59,6 @@ RSpec.describe 'Advertised tool input schemas across every Woods MCP server mode
     Woods::MCP::Server.build(index_dir: fixture_dir, warmup: false, **collaborators)
   end
 
-  def console_server(read_tools_enabled:)
-    Woods::Console::Server.build_embedded(
-      model_validator: console_validator, safe_context: console_safe_context,
-      connection: console_connection, read_tools_enabled: read_tools_enabled
-    )
-  end
-
   # Mode name => listed tools. Built lazily inside the example so each index
   # mode sees its own stubbed configuration.
   def tools_by_mode
@@ -83,9 +68,7 @@ RSpec.describe 'Advertised tool input schemas across every Woods MCP server mode
         index_server(operator: operator, feedback_store: feedback_store, snapshot_store: snapshot_store,
                      retriever: retriever)
       ),
-      'index: session tracer and Notion wired' => listed_tools(index_server(config: session_and_notion_config)),
-      'console: embedded' => listed_tools(console_server(read_tools_enabled: false)),
-      'console: embedded with read tools' => listed_tools(console_server(read_tools_enabled: true))
+      'index: session tracer and Notion wired' => listed_tools(index_server(config: session_and_notion_config))
     }
   end
 
@@ -103,27 +86,10 @@ RSpec.describe 'Advertised tool input schemas across every Woods MCP server mode
     end
   end
 
-  it 'covers every registrable tool of both servers' do
-    modes = tools_by_mode
-    index_names = modes.select { |mode, _| mode.start_with?('index') }.values.flatten.map { |t| t['name'] }.uniq
-    console_names = modes.select { |mode, _| mode.start_with?('console') }.values.flatten.map { |t| t['name'] }.uniq
+  it 'covers every registrable tool of the Index Server' do
+    index_names = tools_by_mode.values.flatten.map { |t| t['name'] }.uniq
 
     # 32 index tools: 16 always-on plus 16 wiring-conditional.
     expect(index_names.size).to eq(32)
-    executable = Woods::Console::Server::EXECUTABLE_MODES.values.flatten.uniq
-    expect(console_names).to match_array(executable)
-  end
-
-  it 'still advertises the find and aggregate properties and states their rules in the description' do
-    tools = tools_by_mode.fetch('console: embedded').to_h { |tool| [tool.fetch('name'), tool] }
-
-    find = tools.fetch('console_find')
-    expect(find.dig('inputSchema', 'properties').keys).to include('id', 'by')
-    expect(find.fetch('description')).to include('exactly one of id or by', 'never both')
-
-    aggregate = tools.fetch('console_aggregate')
-    expect(aggregate.dig('inputSchema', 'required')).to eq(%w[model function])
-    expect(aggregate.fetch('description'))
-      .to include('column is required for sum, average, minimum and maximum')
   end
 end

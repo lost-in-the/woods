@@ -16,19 +16,10 @@ MCP client                              Rails App + Woods bundle
 
 Extraction commands ─────────────────▶   bundle exec rake woods:extract
                                           writes /app/tmp/woods/
-
-Console Server (deprecated, existing setups only), two launch paths:
-
-  Embedded (9 tools)                    rake woods:console
-  MCP client spawns via                   boots Rails, runs MCP in-process
-  docker compose exec -T ────────────▶    Tier 1 read-only tools only
-
-  Configured launcher (same tools)
-  woods-console-mcp on host          rake woods:console
-  execs docker exec -i ──────────────▶  same embedded server
 ```
 
-The Index Server reads static files and does not boot Rails, even when its process runs in the application container. The Console Server queries live application state and does boot Rails. Treat Console access as a separate security decision.
+The Index Server reads static files and does not boot Rails, even when its process runs in the application container.
+The Console MCP server was removed in Woods 2.2.0. See [CONSOLE_REMOVED.md](CONSOLE_REMOVED.md).
 
 ## Installation
 
@@ -315,140 +306,10 @@ where that path is visible, and update export/archive paths together. A single
 shared volume for every worktree would mix their indexes. See
 [incremental profiling](INCREMENTAL_EXTRACTION.md#profiling-fixed-costs).
 
-## Console Server Setup
-
-> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-> Existing setups keep working; new setups should not enable it.
-> This section is for existing setups; see [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
-
-The Console Server queries live Rails state. There are two launch paths for the same embedded server.
-
-Before either path can start, deliberately enable live-data access in the Rails initializer:
-
-```ruby
-Woods.configure do |config|
-  config.console_mcp_enabled = true
-  config.console_mcp_http_enabled = false # stdio-only
-end
-```
-
-The process exits with status 1 while this master switch is false. Review [Console MCP setup and security](CONSOLE_MCP_SETUP.md) before enabling it.
-
-This explicitly disables HTTP Console while retaining stdio access; no HTTP
-token is needed at boot. Existing configurations default to HTTP enabled.
-For HTTP deployment, enable the HTTP flag and configure its token, origins
-and TLS using the [Console setup guide](CONSOLE_MCP_SETUP.md#option-c-http-rack-middleware).
-
-### Comparison
-
-| | Direct Docker command | Configured launcher |
-|---|---|---|
-| **Where it runs** | Inside container via Docker stdio | `woods-console-mcp` execs `docker exec -i` |
-| **Config needed** | Rails master switch + `.mcp.json` | Rails master switch + `console.yml` + `.mcp.json` |
-| **Tools available** | 9 by default; 11 with read tools enabled | Same 9 or 11 |
-| **Setup complexity** | Minimal | Moderate |
-| **Best for** | Quick setup | Reusable launcher config |
-
-### Option 1: Embedded (9 Tier 1 tools)
-
-The MCP client spawns a Docker stdio process directly. The container boots Rails and runs the MCP server in-process. Only Tier 1 read-only tools are available (count, sample, find, pluck, aggregate, association_count, schema, recent, status).
-
-```json
-{
-  "mcpServers": {
-    "woods-console": {
-      "command": "docker",
-      "args": [
-        "compose", "exec", "-T", "app",
-        "bundle", "exec", "rake", "woods:console"
-      ],
-      "cwd": "/absolute/host/path/to/app"
-    }
-  }
-}
-```
-
-> **Compose uses `-T`; plain Docker uses `-i`.** Compose attaches stdin by default, and `-T` prevents a pseudo-TTY from corrupting MCP framing. Plain `docker exec` needs `-i` to keep stdin attached.
-
-If you use `docker exec` (not `docker compose exec`), provide the exact container name:
-
-```json
-{
-  "mcpServers": {
-    "woods-console": {
-      "command": "docker",
-      "args": [
-        "exec", "-i", "my_app_web_1",
-        "bundle", "exec", "rake", "woods:console"
-      ]
-    }
-  }
-}
-```
-
-### Option 2: Configured launcher
-
-The `woods-console-mcp` binary runs on the host and replaces itself with
-`docker exec -i ... bundle exec rake woods:console`. It exposes the same
-embedded tool surface as Option 1.
-
-This optional path requires Woods and the `woods-console-mcp` executable on
-the host. If Woods is installed only in the application container, use the
-direct Docker command in Option 1. If the host executable comes from the
-application bundle, configure the client with `bundle exec` and an absolute
-host `cwd`, as shown in the [launcher guide](CONSOLE_MCP_SETUP.md#option-d-launcher-wrapper).
-
-**Step 1: Create `console.yml`**
-
-```yaml
-# ~/.woods/console.yml
-mode: docker
-container: my_app_web_1
-```
-
-Find your container name with:
-
-```bash
-docker ps --format '{{.Names}}'
-```
-
-For Docker Compose, names follow the pattern `<project>-<service>-<number>` (e.g., `my_app-app-1`).
-
-**Step 2: Configure `.mcp.json`**
-
-```json
-{
-  "mcpServers": {
-    "woods-console": {
-      "command": "woods-console-mcp"
-    }
-  }
-}
-```
-
-The launcher reads `~/.woods/console.yml` by default. To use a different path:
-
-```json
-{
-  "mcpServers": {
-    "woods-console": {
-      "command": "woods-console-mcp",
-      "env": {
-        "WOODS_CONSOLE_CONFIG": "/path/to/console.yml"
-      }
-    }
-  }
-}
-```
-
 ## Complete `.mcp.json` Example
 
-A new setup uses only the `woods` entry.
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-An existing Console setup, with `config.console_mcp_enabled = true` already set, configures both servers together.
-The `woods` entry is the path-free one from Woods `2.2.0` (before that, use the container form with `cwd` above);
-the deprecated Console entry still names the host application root, so this file stays per machine:
+An application uses one entry, the Index Server.
+It is the path-free form from Woods `2.2.0` (before that, use the container form with `cwd` above):
 
 ```json
 {
@@ -457,32 +318,6 @@ the deprecated Console entry still names the host application root, so this file
       "type": "stdio",
       "command": "sh",
       "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
-    },
-    "woods-console": {
-      "command": "docker",
-      "args": [
-        "compose", "exec", "-T", "app",
-        "bundle", "exec", "rake", "woods:console"
-      ],
-      "cwd": "/absolute/host/path/to/app"
-    }
-  }
-}
-```
-
-This uses the embedded console directly. To use the equivalent configured
-launcher, replace the `woods-console` entry:
-
-```json
-{
-  "mcpServers": {
-    "woods": {
-      "type": "stdio",
-      "command": "sh",
-      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
-    },
-    "woods-console": {
-      "command": "woods-console-mcp"
     }
   }
 }
@@ -500,7 +335,6 @@ Which tasks need Docker and which don't:
 | `woods:extract_framework` | Yes | `docker compose exec app bundle exec rake ...` |
 | `woods:embed` | Yes | `docker compose exec app bundle exec rake ...` |
 | `woods:embed_incremental` | Yes | `docker compose exec app bundle exec rake ...` |
-| `woods:console` | Yes | `docker compose exec app bundle exec rake ...` |
 | `woods:flow[EntryPoint]` | Yes | `docker compose exec app bundle exec rake ...` |
 | `woods:notion_sync` | Yes | `docker compose exec app bundle exec rake ...` |
 | `woods:validate` | Yes | `docker compose exec app bundle exec rake ...` |
@@ -538,7 +372,7 @@ Then re-run extraction and verify it inside the container with `woods:validate` 
 
 ### MCP client shows "connection refused" or no tools
 
-**Symptom:** The Index or Console server doesn't respond.
+**Symptom:** The Index Server doesn't respond.
 
 **Check:**
 1. Container is running: `docker ps`
@@ -547,7 +381,7 @@ Then re-run extraction and verify it inside the container with `woods:validate` 
 
 ### Incorrect stdio flags
 
-**Symptom:** Console server starts but immediately exits, or MCP client reports "broken pipe."
+**Symptom:** The server starts but immediately exits, or MCP client reports "broken pipe."
 
 **Fix:** Disable Compose's pseudo-TTY, or keep stdin open for plain Docker:
 
@@ -560,7 +394,7 @@ Docker:  "args": ["exec", "-i", "container-name", ...]
 
 **Symptom:** `Error response from daemon: No such container: ...`
 
-**Fix:** Check the actual name with `docker ps --format '{{.Names}}'` and update your `.mcp.json` or `console.yml`.
+**Fix:** Check the actual name with `docker ps --format '{{.Names}}'` and update your `.mcp.json`.
 
 ### Path confusion between host and container
 
@@ -594,24 +428,6 @@ Or keep the host launch and set `WOODS_SOURCE_ROOT` to the host path of the chec
 Extracting again does not help: the next index records `/app` again.
 See [source freshness](SOURCE_FRESHNESS.md#a-checkout-served-under-another-path).
 
-### Rails boot noise breaks MCP protocol
-
-**Symptom:** MCP client shows JSON parse errors.
-
-**Fix:** The `woods:console` rake task redirects stdout to stderr before Rails boots. If you still see issues, check for `puts` or `print` calls in your initializers that run before the task captures stdout.
-
-### A tool from the 31-schema inventory is not listed
-
-**Expected behavior.** Supported servers register 9 Tier 1 tools by default.
-Tier 2, Tier 3, and `console_eval` are inventory only.
-
-To register `console_sql` and `console_query`, enable
-`console_embedded_read_tools` in Woods configuration or pass
-`embedded_read_tools: true` to the Rack middleware. See
-[CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for details.
-
 ### Woods MCP tools not available in a git worktree
 
 A separate Claude Code session launched in a worktree may have different project-scoped MCP registrations. Subagents inherit the parent session's MCP tools, subject to tool restrictions; changing their working directory does not select a different Woods index. Check registration, the Compose service's mounted checkout, and the served index using [MCP worktree setup](MCP_WORKTREE_SETUP.md).
-
-See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for detailed console server documentation.

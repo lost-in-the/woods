@@ -6,12 +6,11 @@ description: Install, upgrade, and first-run-configure the Woods Rails code-inte
 # Woods setup
 
 Install a structural Index Server first. Embeddings are a separate opt-in.
-Do not offer Console MCP for a new setup, even when the user needs live data.
-The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
-Existing setups keep working; new setups should not enable it.
-For a runtime observation, suggest `bin/rails runner` or a focused spec.
-For live data, suggest an agent owned by the application, with its own limited permissions.
-Keep an existing Console configuration working during an upgrade.
+The Console MCP server was removed in Woods 2.2.0; never set it up, on any version.
+After an upgrade to 2.2.0 or later, an application that enabled the Console stops at boot with the removal message.
+Remove its Console settings, client entry, Rack mount and token as the
+[clean-up steps](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_REMOVED.md#cleaning-up-after-an-upgrade)
+describe.
 
 For builds containing #590 (included in Woods 2.1), managed preflight retains
 intended bundle settings, project receipts omit the unused user config directory,
@@ -37,9 +36,8 @@ and removal. Preserve manual setup for older installed versions.
 For v1-to-v2 upgrades, follow the [migration runbook](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/UPGRADING_TO_2.md).
 A clean removes snapshot history inside the output directory as well as generated
 index files. Back up consistently and choose whether to retain history before
-cleaning. Remove legacy no-op `log_level` and unsafe-eval settings. Set custom
-Console paths and session-tracer setup in `config/application.rb` before Railtie
-initialization; other Console flags can remain in the normal initializer.
+cleaning. Remove legacy no-op `log_level` and unsafe-eval settings. Set
+session-tracer setup in `config/application.rb` before Railtie initialization.
 
 ## Preflight
 
@@ -285,13 +283,18 @@ rebuilds. See the [source evidence limits](https://github.com/lost-in-the/woods/
 
 For pgvector, match the provider output and migration dimensions within 1–2,000. Default `text-embedding-3-large` output (3,072) needs an explicit smaller provider width or another backend; never silently truncate vectors. Early adapter/generator refusal is included in Woods `2.0.0`, so check the installed revision. See the [dimension contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONFIGURATION_REFERENCE.md#pgvector-postgresql).
 
-Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets, Console MCP/live-data access, HTTP transport, or purge overrides. The `:local` preset avoids cloud keys but requires the `sqlite3` gem, an installed/running Ollama service, and a pulled model (`ollama pull nomic-embed-text` by default); `:shared_filesystem` avoids sqlite3 but still uses Ollama. Do not claim that installing a tokenizer gem establishes exact counts for every model. Woods 2.1 splits complete prefixed inputs and requests Ollama `truncate: false`; consult the installed embedding guide and its model-specific limits.
-For Console MCP, approval covers changes to an existing setup only; never add the Console to a new setup.
+Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets, live-data access, HTTP transport, or
+purge overrides.
+The `:local` preset avoids cloud keys but requires the `sqlite3` gem, an installed/running Ollama service, and a pulled
+model (`ollama pull nomic-embed-text` by default); `:shared_filesystem` avoids sqlite3 but still uses Ollama.
+Do not claim that installing a tokenizer gem establishes exact counts for every model.
+Woods 2.1 splits complete prefixed inputs and requests Ollama `truncate: false`; consult the installed embedding guide
+and its model-specific limits.
 
 ## Handoff
 
 Report the Woods version/revision, branch, files changed, commands/results, index
-path, MCP calls verified, semantic retrieval and Console status, and unresolved
+path, MCP calls verified, semantic retrieval status, and unresolved
 risks. For automatic maintenance record the owner, actual startup command,
 completed catch-up, observed edit/restart, and worktree verification. Report
 refresh hooks, session checks, and context hints separately. Never infer
@@ -338,10 +341,8 @@ for output/time limits, container root mapping and emitted-hint suppression.
 
 ### Security-patch compatibility preflight
 
-For an authorized Console installation on the 2.0 line, use Woods `2.0.1` or
-later and review the [2.0.1 Console compatibility guide](https://github.com/lost-in-the/woods/blob/v2.0.1/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
-before upgrading. Applications remaining on 1.6 should use `1.6.4` and its
-[tagged Console guide](https://github.com/lost-in-the/woods/blob/v1.6.4/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility),
+Applications remaining on 1.6 should use `1.6.4` and its
+[tagged guides](https://github.com/lost-in-the/woods/blob/v1.6.4/docs/README.md),
 rather than applying this skill's 2.x setup instructions.
 
 Record the installed version and loaded gem path; also record the locked revision

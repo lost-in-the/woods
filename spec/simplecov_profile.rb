@@ -27,7 +27,6 @@ module SimpleCovProfile
     add_group 'Extraction', 'lib/woods/extractors'
     add_group 'Retrieval', 'lib/woods/retrieval'
     add_group 'MCP', 'lib/woods/mcp'
-    add_group 'Console', 'lib/woods/console'
     add_group 'Storage', 'lib/woods/storage'
     add_group 'Embedding', ['lib/woods/embedding', 'lib/woods/chunking']
     add_group 'Coordination', 'lib/woods/coordination'

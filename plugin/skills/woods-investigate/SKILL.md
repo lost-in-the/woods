@@ -14,7 +14,7 @@ this plugin. That feature (#402) is available in Woods `2.0.0.beta3`; check the
 installed server version, and do not require it from protocol `2024-11-05`.
 Follow the [agent guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_GUIDE.md)
 when instructions are absent. A registered tool does not establish retrieval
-readiness or authorize maintenance or live Console access.
+readiness or authorize maintenance or access to live application data.
 
 Call `woods_status` before relying on the index. Require a ready index with a current generation and non-zero counts for the types you need; verify the retrieval mode and its data before using `codebase_retrieve` (see Conceptual questions below). If status is unhealthy or the generation predates the code under review, report that and ask the owner to run `woods:incremental` or `woods:extract` — do not present "not found" as proof the code does not exist. Where the installed version reports them (Woods `2.2.0`), also check that `identity.client_matches` is not `false` (otherwise the index belongs to another checkout), and treat `hydration.state: warming`, or a retryable `warming` result from `codebase_retrieve`, as a short wait, not a failure.
 
@@ -54,7 +54,7 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 The normal packaged Index Server registers 16 tools (15 before Woods `2.2.0`, which adds `path`).
 Conditional schemas register only when their wiring is configured:
 use the connected server's own tool list, never the source inventory.
-Console MCP is authorized live-data access, not another code-search mode; use Index tools for structure.
+Use Index tools for structure; the Console MCP server, which read live data, was removed in Woods 2.2.0.
 Never work around a block, validation error, or redaction.
 
 ## Partial search answers

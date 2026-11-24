@@ -2893,7 +2893,7 @@ module Woods
         end
 
         # Build the woods_status payload. Exposed at module level so specs (and future
-        # console/unified-server entry points) can assemble the same shape without
+        # entry points) can assemble the same shape without
         # reaching through the MCP::Server internals.
         #
         # +features.embedding_model+ / +features.embedding_provider+ /
@@ -3397,12 +3397,6 @@ module Woods
         # embedding_provider, vector_store. Everything else is host-process
         # state (snapshots_enabled, notion_configured, session_tracer_enabled)
         # and comes from the running config.
-        #
-        # +console_mcp_enabled+ is intentionally omitted — the index MCP process
-        # has no visibility into the host Rails app's Woods initializer, so
-        # historic status payloads always reported +false+ regardless of the
-        # actual console MCP state. Advertising a misleading field is worse
-        # than not advertising it at all.
         def retrieval_features(config, resolved, retriever)
           features = features_from(config, resolved)
           return features unless retriever.respond_to?(:mode) && retriever.mode == :lexical

@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
-require_relative '../console/credential_scanner'
+require_relative '../credential_scanner'
 require_relative 'config_source_guard'
 
 module Woods
   module Extractors
     # Best-effort credential redaction for published documentation source.
     #
-    # Applies the shape patterns of {Woods::Console::CredentialScanner} line by
-    # line, so a published `doc` unit carries `[REDACTED]` where a Console
-    # response would, then the URL-userinfo pass configuration source gets
+    # Applies the shape patterns of {Woods::CredentialScanner} line by line,
+    # so a published `doc` unit carries `[REDACTED]` where the scanner finds
+    # a credential, then the URL-userinfo pass configuration source gets
     # ({ConfigSourceGuard.redact_url_userinfo}): `https://token@host` keeps
     # its scheme and host. Three things differ from scanning the document
     # whole:
@@ -28,7 +28,7 @@ module Woods
     #   text, counts = DocRedaction.new.call("key: sk_test_...\n")
     #   counts # => { "stripe_secret_key" => 1 }
     class DocRedaction
-      REDACTED = Console::CredentialScanner::REDACTED
+      REDACTED = CredentialScanner::REDACTED
       # One scanner call never sees more than this. Some scanner shapes cost
       # quadratic time in a run of near-matches on Ruby before 3.2, so the cap
       # is what keeps a hostile document linear: about a second per megabyte
@@ -49,8 +49,8 @@ module Woods
         CREDENTIAL_KEY.match?(key.to_s)
       end
 
-      # @param scanner [Woods::Console::CredentialScanner]
-      def initialize(scanner: Console::CredentialScanner.new)
+      # @param scanner [Woods::CredentialScanner]
+      def initialize(scanner: CredentialScanner.new)
         @scanner = scanner
       end
 

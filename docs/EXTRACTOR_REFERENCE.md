@@ -713,7 +713,9 @@ otherwise eligible files and the manifest records `metadata.git_filter: "unavail
 - **The file's text is never published.** `source_code` is an outline of key paths, so comments and values cannot reach the index
 - `metadata` holds `top_level_keys`, `environments` (top-level keys among `development`, `test`, `staging`, `production`), `environment_keys` (the keys of each environment section, merge keys resolved), `key_paths` (dotted, `[]` for a sequence of mappings), `root_type`, `entry_count`, `erb`, `env_vars` (the names ERB reads from `ENV`), `documents`, `loc`, `values_stored`, `parse_error`, `oversized` and `key_paths_truncated`
 - **Secret-bearing files are never opened**, whatever the globs say: a basename containing `credential`, `secret`, `password`, `passwd`, `token`, `private_key`, `api_key`, `apikey` or `keystore`, a `.enc` or `.key` file, and anything under `config/credentials/`. The check also runs on the path a symlink resolves to, and a file that resolves outside `Rails.root` is refused
-- `config.config_file_values = true` stores leaf values in `source_code` (`payments.api_host = ledger.example`). A value under a credential-named key, a credential-shaped value (the Console scanner patterns, URL userinfo, a long mixed letter-and-digit run) and ERB source are still replaced by a marker
+- `config.config_file_values = true` stores leaf values in `source_code` (`payments.api_host = ledger.example`).
+  A value under a credential-named key, a credential-shaped value (the credential scanner patterns, URL userinfo, a long
+  mixed letter-and-digit run) and ERB source are still replaced by a marker
 - A key that is itself shaped like a credential, or that reads as a generated token, is redacted in either mode, so a mapping keyed by secrets lists `[REDACTED]` in `key_paths`
 - ERB is never evaluated: output tags become a placeholder and other tags are dropped before parsing. YAML is read as a syntax tree, so no object is built from file content. Aliases and merge keys are followed under a visit budget and a 2,000-path budget
 - A file that does not parse still yields a unit, with `parse_error: true` and its top-level keys from a line scan. A file over 1 MB yields a unit with `oversized: true` and is not read
@@ -1775,7 +1777,16 @@ Resolution needs the whole index, so it runs as a post-pass after every extracto
 
 **Graph.** `doc` is listed in `DependencyGraph::DOCUMENTATION_UNIT_TYPES`. Documentation edges are published (`dependents` on a model lists the documents that mention it), but documents take no part in PageRank (they score `0.0`, pass no rank, and are left out of the `pagerank` tool's node count), in the incremental blast radius, or in `graph_analysis.json` (orphans, dead ends, hubs, cycles, bridges).
 
-**Redaction.** Published source passes through the credential shapes of the Console scanner (`Woods::Console::CredentialScanner`): API keys, tokens, connection strings with a password, PEM private key blocks. The userinfo of any URL (`https://token@host`, `ftp://user:secret@host`) is then replaced the same way configuration source is redacted, keeping the scheme and host; a URL without userinfo is untouched. A front matter key that names a credential (`password`, `token`, `secret`, `api_key`, ...) has its value replaced whatever its shape. Headings, mentions, front matter and chunks are read from the redacted text. `metadata.redactions` counts what was replaced. This is best effort: it recognizes shapes, so a credential in a form the scanner does not know is published as written. Keep secrets out of documentation.
+**Redaction.** Published source passes through the credential shapes of the credential scanner
+(`Woods::CredentialScanner`): API keys, tokens, connection strings with a password, PEM private key blocks.
+The userinfo of any URL (`https://token@host`, `ftp://user:secret@host`) is then replaced the same way configuration
+source is redacted, keeping the scheme and host; a URL without userinfo is untouched.
+A front matter key that names a credential (`password`, `token`, `secret`, `api_key`, ...) has its value replaced
+whatever its shape.
+Headings, mentions, front matter and chunks are read from the redacted text.
+`metadata.redactions` counts what was replaced.
+This is best effort: it recognizes shapes, so a credential in a form the scanner does not know is published as written.
+Keep secrets out of documentation.
 
 ---
 
