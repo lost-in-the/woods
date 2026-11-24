@@ -27,7 +27,7 @@ RSpec.describe 'notion_sync MCP tool deprecation' do
   it 'still syncs and warns on stderr, pointing at the Markdown export' do
     response = nil
     expect { response = tool.call(server_context: {}) }
-      .to output(/DEPRECATED.*notion_sync.*woods:markdown/).to_stderr
+      .to output(/DEPRECATED.*notion_sync.*removed in Woods 3\.0.*woods:markdown/).to_stderr
     expect(response.error?).to be_falsey
   end
 

@@ -271,8 +271,10 @@ receiverless call that mixed it in:
 - Like `method`, it records syntax. It does not prove that the module exists at
   runtime or that the call ran.
 
-The generation-local internal reference cache is format 8 for this writer;
-format 7 and earlier require a full baseline rebuild before incremental writes.
+The generation-local internal reference cache is format 9 for this writer; Woods 2.1 wrote format 3.
+An incremental write or targeted refresh refuses format 8 and earlier and asks for one full `woods:extract`
+when the index holds a model, controller, service or other class-based unit whose Ruby file is under `app/` or `lib/`.
+An index without such a unit runs on with an empty cache baseline.
 Readers may continue to serve their original generation throughout a refused
 upgrade. Copy the complete selected payload, including its reference cache.
 See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)
@@ -896,16 +898,5 @@ protect any later destination pruning with that destination's own reader protoco
 
 ## Compatibility within Woods 2.x
 
-Consumers may rely on the pointer field meanings, relative payload resolution,
-the complete-payload publication boundary, manifest/graph locations, and JSON unit
-identity described here. Additive JSON fields, new extractor families, new reason
-values, optional artifacts and additional root-level state may appear in 2.x.
-Ignore unknown fields and inspect available types instead of hardcoding a directory
-count. Existing field meanings and required-file locations are compatibility
-surfaces; incompatible changes require an explicit migration contract.
-
-Do not bind to temporary names, a fixed token length, directory listing order,
-retention count, internal lock sidecars, or Markdown summary formatting. Check the
-installed Woods version and its release's documentation when consuming older
-prereleases; this guide describes the current source contract, not a promise that
-every prerelease contains every optional field or retention improvement.
+[Compatibility](COMPATIBILITY.md#index-readers) says what an index reader can rely on within a major release,
+and which changes a minor release makes only with an upgrade note.

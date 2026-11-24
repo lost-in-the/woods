@@ -840,7 +840,7 @@ namespace :woods do
 
     Woods::Deprecation.warn_once(
       :notion_sync,
-      'woods:notion_sync (and woods:send) is deprecated and will be removed in the next minor release. ' \
+      'woods:notion_sync (and woods:send) is deprecated and will be removed in Woods 3.0. ' \
       'Use the Markdown export instead: woods:markdown (see docs/MARKDOWN_EXPORT.md).'
     )
 
@@ -896,7 +896,7 @@ namespace :woods do
 
     Woods::Deprecation.warn_once(
       :unblocked_sync,
-      'woods:unblocked_sync (and woods:relay) is deprecated and will be removed in the next minor release. ' \
+      'woods:unblocked_sync (and woods:relay) is deprecated and will be removed in Woods 3.0. ' \
       'Use the Markdown export instead: woods:markdown (see docs/MARKDOWN_EXPORT.md).'
     )
 
@@ -996,7 +996,7 @@ namespace :woods do
     require 'woods/deprecation'
     Woods::Deprecation.warn_once(
       :markdown_export_aliases,
-      'woods:obsidian and woods:vault are deprecated and will be removed in the next minor release. ' \
+      'woods:obsidian and woods:vault are deprecated and will be removed in Woods 3.0. ' \
       'Use woods:markdown (set WOODS_MARKDOWN_OBSIDIAN=1 for the Obsidian flavor).'
     )
     Woods::RakeHelpers.woods_markdown_export(obsidian: true, default_dir: 'obsidian_vault')

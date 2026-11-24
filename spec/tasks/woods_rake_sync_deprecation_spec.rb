@@ -63,7 +63,7 @@ RSpec.describe 'Notion and Unblocked sync task deprecation' do
         expect(status).to be_success, "#{out}\n#{err}"
         expect(out).to include('complete')
         expect(err.lines.grep(/DEPRECATED/).size).to eq(1)
-        expect(err).to include('woods:markdown')
+        expect(err).to include('woods:markdown', 'removed in Woods 3.0')
       end
 
       it 'warns once per process across repeated runs' do
