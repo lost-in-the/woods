@@ -142,7 +142,7 @@ module Woods
           rewrite_source_references(record, edges, references, affected_types)
           touched.add(identity.last)
         end
-        write_source_reference_cache(result)
+        write_source_reference_cache_if_changed(result)
         touched
       end
 
@@ -259,8 +259,18 @@ module Woods
       end
 
       def write_source_reference_cache(result)
-        Cache.write(payload_dir.join(Cache::FILE_NAME), result.cache)
+        Cache.write(payload_dir.join(Cache::FILE_NAME), result.cache, durable: payload_writes_durable?)
         @source_reference_paths = result.paths.to_set
+      end
+
+      def write_source_reference_cache_if_changed(result)
+        cache_path = payload_dir.join(Cache::FILE_NAME)
+        if result.cache == @source_reference_baseline && cache_path.file?
+          @source_reference_paths = result.paths.to_set
+          return
+        end
+
+        write_source_reference_cache(result)
       end
 
       # The final source scan is already required by provenance publication.

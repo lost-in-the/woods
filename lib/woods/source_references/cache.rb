@@ -16,32 +16,6 @@ module Woods
     class Cache # rubocop:disable Metrics/ClassLength
       class Invalid < StandardError; end
 
-      # Older JSON parsers pass pairs through #[]=; newer ones must also use
-      # allow_duplicate_key: false before constructing custom objects. A plain
-      # builder avoids optimized Hash writes and returns ordinary consumer data.
-      class UniqueObject
-        attr_reader :data
-
-        def initialize
-          @data = {}
-        end
-
-        def []=(key, value)
-          raise Invalid, 'Source reference cache contains a duplicate JSON key' if @data.key?(key)
-
-          @data[key] = unwrap(value)
-        end
-
-        def unwrap(value)
-          case value
-          when UniqueObject then value.data
-          when Array then value.map { |item| unwrap(item) }
-          else value
-          end
-        end
-      end
-      private_constant :UniqueObject
-
       FILE_NAME = 'source_references.json'
       # Analysis record groups and the validator of each record.
       CHECKS = { 'declarations' => :declaration!, 'references' => :reference!, 'skipped' => :skipped!,
@@ -68,8 +42,7 @@ module Woods
         def read(path)
           return unless regular_file?(path)
 
-          data = JSON.parse(read_bytes(path), object_class: UniqueObject, allow_duplicate_key: false)
-          data = data.data if data.is_a?(UniqueObject)
+          data = JSON.parse(read_bytes(path), allow_duplicate_key: false)
           validate!(data)
           data
         rescue JSON::ParserError, EncodingError, SystemCallError, IOError => e
@@ -78,15 +51,16 @@ module Woods
 
         # @param path [String, Pathname] destination within the new payload
         # @param data [Hash] versioned candidate and pass-owned edge evidence
+        # @param durable [Boolean] whether to fsync this file individually
         # @return [void]
         # @raise [Invalid] unsupported or invalid cache; previous bytes survive
-        def write(path, data)
+        def write(path, data, durable: true)
           validate!(data)
           bytes = JSON.generate(data)
           raise Invalid, 'Source reference cache exceeds size limit' if bytes.bytesize > MAX_BYTES
 
           regular_file?(path)
-          AtomicFile.write(path, bytes)
+          AtomicFile.write(path, bytes, durable: durable)
         rescue JSON::GeneratorError, EncodingError => e
           raise Invalid, "Cannot encode source reference cache: #{e.class}"
         end

@@ -237,6 +237,17 @@ RSpec.describe Woods::SourceReferences::Cache do
     expect { described_class.read(path) }.to raise_error(described_class::Invalid)
   end
 
+  it 'rejects nested duplicate JSON keys natively' do
+    File.write(path, '{"version":9,"callers":{},"files":{"a.rb":{"identity":"a","identity":"b"}},"owners":[]}')
+    expect { described_class.read(path) }.to raise_error(described_class::Invalid)
+  end
+
+  it 'forwards durable: false to AtomicFile.write when requested' do
+    expect(Woods::AtomicFile).to receive(:write).with(path, kind_of(String), durable: false).and_call_original
+    described_class.write(path, data, durable: false)
+    expect(described_class.read(path)).to eq(data)
+  end
+
   it 'rejects duplicate owner identities instead of choosing an edge ownership record' do
     data['owners'] << data['owners'].first.dup
     expect { described_class.write(path, data) }.to raise_error(described_class::Invalid)

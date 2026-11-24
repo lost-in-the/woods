@@ -839,9 +839,11 @@ module Woods
         # separates the two shapes is the filesystem — only pruned identifiers
         # that a still-existing file in the change set actually declares are
         # re-addable. See {#readdable_pruned_classes}.
-        touched.merge(reconcile_class_based_types(
-                        affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
-                      ))
+        unless pruned.empty?
+          touched.merge(reconcile_class_based_types(
+                          affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
+                        ))
+        end
         # Last: ownership is final only after every family reconciled.
         touched.merge(reconcile_owner_fallbacks(affected_types))
         touched.merge(prune_family_owned_poros(affected_types))
