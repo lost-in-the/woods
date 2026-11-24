@@ -6,6 +6,7 @@ require 'json'
 require 'openssl'
 require 'socket'
 require 'uri'
+require_relative '../diagnostic_redaction'
 require_relative 'vector_store'
 require_relative '../util/host_guard'
 require_relative '../util/uuid5'
@@ -173,8 +174,8 @@ module Woods
           validate_host_present!(uri, url)
           validate_host_visibility!(uri.host.to_s, allow_private_hosts: allow_private_hosts)
           uri
-        rescue URI::InvalidURIError => e
-          raise ArgumentError, "Qdrant URL is not a valid URI: #{e.message}"
+        rescue URI::InvalidURIError
+          raise ArgumentError, 'Qdrant URL is not a valid URI (the URL is left out of this message)', cause: nil
         end
 
         def self.validate_scheme!(uri)
@@ -187,7 +188,7 @@ module Woods
         def self.validate_host_present!(uri, url)
           return unless uri.host.nil? || uri.host.empty?
 
-          raise ArgumentError, "Qdrant URL must include a host: #{url.inspect}"
+          raise ArgumentError, "Qdrant URL must include a host: #{DiagnosticRedaction.redact(url.inspect)}"
         end
 
         def self.validate_host_visibility!(host, allow_private_hosts:)
@@ -621,17 +622,17 @@ module Woods
             parse_response(response, path)
           rescue OpenSSL::SSL::SSLError => e
             discard_http_client
-            raise RequestError, "Qdrant TLS error: #{e.message}"
+            raise RequestError, "Qdrant TLS error: #{DiagnosticRedaction.redact(e.message)}", cause: nil
           rescue Errno::ECONNREFUSED, SocketError, Net::OpenTimeout => e
             discard_http_client
             retry if attempt == 1
 
-            raise transport_error(e, ambiguous: false)
+            raise transport_error(e, ambiguous: false), cause: nil
           rescue Errno::ECONNRESET, Net::ReadTimeout, Net::WriteTimeout, IOError => e
             discard_http_client
             retry if attempt == 1 && !write_request?(method, path)
 
-            raise transport_error(e, ambiguous: write_request?(method, path))
+            raise transport_error(e, ambiguous: write_request?(method, path)), cause: nil
           end
         end
 
@@ -658,7 +659,7 @@ module Woods
 
         def transport_error(error, ambiguous:)
           RequestError.new(
-            "Qdrant transport error: #{error.class}: #{error.message}",
+            "Qdrant transport error: #{DiagnosticRedaction.describe(error)}",
             retryable: true,
             ambiguous: ambiguous
           )

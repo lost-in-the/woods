@@ -21,8 +21,11 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'json'
 require 'net/http'
+require 'open3'
 require 'securerandom'
+require 'timeout'
 require 'uri'
 require 'woods/embedding/fake'
 require 'woods/embedding/indexer'
@@ -33,6 +36,7 @@ require 'woods/storage/pgvector'
 require 'woods/storage/qdrant'
 require 'woods/retrieval/scope'
 require 'woods/retrieval/scoped_vector_store'
+require 'woods/version'
 
 # Also tagged :integration so IntegrationHelpers (build_extracted_unit) is
 # included — see spec/support/integration_helpers.rb.
@@ -682,6 +686,124 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       store.store_batch(entries)
 
       expect(store.each_id.to_a.size).to eq(25)
+    end
+  end
+
+  # The packaged server opens its own connection from WOODS_PG_URL. On
+  # Active Record 8.0 and later a pool has lease_connection only, which a
+  # booted host application never exercises.
+  describe 'woods-mcp serving a pgvector index' do
+    let(:pg_url) { ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test') }
+    let(:table) { "woods_vectors_#{SecureRandom.hex(8)}" }
+    let(:index_dir) { Dir.mktmpdir('woods-live-mcp') }
+    let(:connection) do
+      require 'active_record'
+      ActiveRecord::Base.establish_connection(pg_url)
+      ActiveRecord::Base.connection
+    end
+
+    before do
+      reset_pg_schema!(connection, Woods::Storage::VectorStore::Pgvector.new(connection: connection,
+                                                                             dimensions: 8, table: table))
+      FileUtils.cp(File.expand_path('../fixtures/woods/manifest.json', __dir__), index_dir)
+      File.write(File.join(index_dir, 'woods.json'), JSON.generate(
+                                                       schema_version: 1, gem_version: Woods::VERSION,
+                                                       created_at: '2026-11-16T00:00:00Z',
+                                                       embedding_provider: {
+                                                         class: 'Woods::Embedding::Provider::Fake',
+                                                         model: 'live', dimension: 8
+                                                       },
+                                                       stores: { vector_store: 'pgvector', metadata_store: 'in_memory',
+                                                                 graph_store: 'in_memory' },
+                                                       store_options: { vector_store: { dimensions: 8, table: table } }
+                                                     ))
+    end
+
+    after { FileUtils.rm_rf(index_dir) }
+
+    # Writes each request to woods-mcp and reads its response within one
+    # deadline, then closes stdin and allows 30 seconds to exit. The child
+    # is killed past either limit and reaped whatever happens.
+    #
+    # @return [Array(Array<Hash>, String, Process::Status)] responses, stderr, status
+    def run_woods_mcp(url, *requests)
+      exe = File.expand_path('../../exe/woods-mcp', __dir__)
+      stdin, stdout, stderr, wait = Open3.popen3({ 'WOODS_PG_URL' => url, 'OPENAI_API_KEY' => nil },
+                                                 'bundle', 'exec', 'ruby', exe, index_dir)
+      errors = Thread.new { stderr.read }
+      responses = exchange(stdin, stdout, errors, requests)
+      stdin.close
+      wait.join(30) || stop_child(wait)
+      [responses, errors.value.force_encoding(Encoding::UTF_8).scrub, wait.value]
+    ensure
+      stop_child(wait) if wait
+      [stdin, stdout, stderr].compact.each { |io| io.close unless io.closed? }
+    end
+
+    def exchange(stdin, stdout, errors, requests)
+      Timeout.timeout(60, Timeout::Error, 'woods-mcp did not answer within 60 seconds') do
+        requests.map do |request|
+          stdin.puts(JSON.generate(request))
+          JSON.parse(stdout.gets || raise("woods-mcp exited: #{errors.value}"))
+        end
+      end
+    end
+
+    def stop_child(wait)
+      Process.kill('KILL', wait.pid) if wait.alive?
+    rescue Errno::ESRCH
+      nil
+    ensure
+      wait.join
+    end
+
+    it 'boots, and answers a semantic query from the real database' do
+      responses, errors = run_woods_mcp(
+        pg_url,
+        { jsonrpc: '2.0', id: 1, method: 'initialize',
+          params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'live', version: '1' } } },
+        { jsonrpc: '2.0', id: 2, method: 'tools/call',
+          params: { name: 'codebase_retrieve', arguments: { query: 'User model' } } }
+      )
+
+      expect(errors).to include('[woods-mcp] semantic search:')
+      expect(errors).not_to include('BootstrapError', 'NoMethodError')
+      expect(responses.first.fetch('result').fetch('protocolVersion')).to eq('2025-06-18')
+      expect(responses.last).to include('result')
+      expect(responses.last.dig('result', 'isError')).not_to be(true), responses.last.to_s
+    end
+
+    it 'exits 2 without connection details when the database rejects the credentials' do
+      rejected = URI.parse(pg_url).tap do |uri|
+        uri.user = 'u-fakesecretmarker'
+        uri.password = 'pw-fakesecretmarker'
+        uri.path = '/d-fakesecretmarker'
+      end.to_s
+      _responses, err, status = run_woods_mcp(rejected)
+
+      expect(status.exitstatus).to eq(2), err.gsub('fakesecretmarker', 'MARKER')
+      expect(err).to include('[woods-mcp] BootstrapError:')
+      expect(err).not_to include('fakesecretmarker')
+      expect(err).not_to match(/from .+\.rb:\d+:in/)
+    end
+
+    it 'exits 2 with one BootstrapError line when the database refuses the connection' do
+      refused = URI.parse(pg_url).tap { |uri| uri.port = 1 }.to_s
+      _responses, err, status = run_woods_mcp(refused)
+
+      expect(status.exitstatus).to eq(2), err
+      # Before Active Record 7.2 the resolver's checkout connects; later
+      # versions connect lazily, at the Builder's schema setup.
+      opened = /pgvector index could not open|index stores could not be opened/
+      # Active Record replaces libpq's message with its own when that
+      # message names the host as the URL does (an address, for one).
+      refusal = Regexp.union(
+        /ActiveRecord::ConnectionNotEstablished: .*refused/,
+        /ActiveRecord::DatabaseConnectionError: .*connecting with your hostname: \[REDACTED\]\./
+      )
+      expect(err).to match(/^\[woods-mcp\] BootstrapError: (?:#{opened}).*#{refusal}/)
+      expect(err.lines.grep(/BootstrapError/).size).to eq(1)
+      expect(err).not_to match(/from .+\.rb:\d+:in/)
     end
   end
 end

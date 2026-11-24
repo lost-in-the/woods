@@ -102,7 +102,7 @@ module Woods
       rescue StandardError => e
         raise if e.is_a?(Woods::InvalidQueryError) || e.is_a?(ArgumentError)
 
-        raise Retriever::StoreError, "lexical index read failed: #{e.class}: #{e.message}"
+        raise Retriever::StoreError, "lexical index read failed: #{e.class}: #{e.message}", cause: nil
       end
 
       # Serve +candidate+'s built generation, taking its whole build state
