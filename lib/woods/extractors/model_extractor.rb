@@ -317,7 +317,7 @@ module Woods
       def table_schema(model)
         pool = model.connection_pool
         table_name = model.table_name
-        pool_cache = (@table_schema_cache[pool] ||= {})
+        pool_cache = ((@table_schema_cache ||= {}.compare_by_identity)[pool] ||= {})
         return pool_cache[table_name] if pool_cache.key?(table_name)
 
         result = pool.with_connection do |connection|
@@ -476,7 +476,7 @@ module Woods
       def non_app_const_location?(mod, app_root)
         return false unless Object.respond_to?(:const_source_location)
 
-        cache = (@non_app_const_cache[app_root] ||= {}.compare_by_identity)
+        cache = ((@non_app_const_cache ||= {})[app_root] ||= {}.compare_by_identity)
         return cache[mod] if cache.key?(mod)
 
         loc = Object.const_source_location(mod.name)
@@ -489,7 +489,7 @@ module Woods
       # @return [Boolean] true if the module is defined within Rails.root
       def defined_in_app?(mod)
         app_root = Rails.root.to_s
-        cache = (@defined_in_app_cache[app_root] ||= {}.compare_by_identity)
+        cache = ((@defined_in_app_cache ||= {})[app_root] ||= {}.compare_by_identity)
         return cache[mod] if cache.key?(mod)
 
         cache[mod] = compute_defined_in_app?(mod, app_root)
