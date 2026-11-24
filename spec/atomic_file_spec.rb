@@ -173,6 +173,67 @@ RSpec.describe Woods::AtomicFile do
       end
     end
 
+    describe 'replace: false' do
+      it 'creates a brand-new file directly without temp_path or File.rename' do
+        path = File.join(@dir, 'nested', 'unit.json')
+        content = JSON.generate('identifier' => 'User', 'note' => 'em dash \u2014 here')
+
+        expect(described_class).not_to receive(:temp_path)
+        expect(File).not_to receive(:rename)
+
+        described_class.write(path, content, durable: false, replace: false)
+
+        expect(File.binread(path)).to eq(content.b)
+        expect(File.stat(path).mode & 0o777).to eq(0o600)
+      end
+
+      it 'publishes exact requested permissions even under a restrictive umask' do
+        path = File.join(@dir, 'masked_direct.json')
+        previous = File.umask(0o200)
+        begin
+          described_class.write(path, 'data', mode: 0o644, durable: false, replace: false)
+        ensure
+          File.umask(previous)
+        end
+
+        expect(File.stat(path).mode & 0o777).to eq(0o644)
+      end
+
+      it 'falls back to atomic temp+rename when target exists, preserving hardlinked inodes' do
+        previous_gen = File.join(@dir, 'prev.json')
+        staged_gen = File.join(@dir, 'staged.json')
+        File.write(previous_gen, 'v1')
+        File.link(previous_gen, staged_gen)
+        original_ino = File.stat(previous_gen).ino
+
+        described_class.write(staged_gen, 'v2', durable: false, replace: false)
+
+        expect(File.read(previous_gen)).to eq('v1')
+        expect(File.read(staged_gen)).to eq('v2')
+        expect(File.stat(previous_gen).ino).to eq(original_ino)
+        expect(File.stat(staged_gen).ino).not_to eq(original_ino)
+      end
+
+      it 'unlinks the partial file and re-raises when writing fails mid-stream' do
+        path = File.join(@dir, 'partial.json')
+        allow_any_instance_of(File).to receive(:write).and_raise(IOError, 'disk full')
+
+        expect { described_class.write(path, 'data', durable: false, replace: false) }
+          .to raise_error(IOError, 'disk full')
+        expect(File).not_to exist(path)
+      end
+
+      it 'still fsyncs file and directory when durable: true' do
+        fsyncs = 0
+        allow_any_instance_of(File).to receive(:fsync) { fsyncs += 1 }
+        expect(described_class).to receive(:fsync_directory).with(@dir).and_call_original
+
+        described_class.write(File.join(@dir, 'durable_direct.json'), 'data', durable: true, replace: false)
+
+        expect(fsyncs).to eq(2)
+      end
+    end
+
     it 'uses unique temporary names for concurrent writers' do
       path = File.join(@dir, 'note.md')
       temporary_paths = Queue.new

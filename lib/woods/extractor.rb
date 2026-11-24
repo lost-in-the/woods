@@ -3250,6 +3250,7 @@ module Woods
     # ──────────────────────────────────────────────────────────────────────
 
     def write_results
+      replace_existing = @payload_dir.nil?
       @results.each do |type, units|
         type_dir = payload_dir.join(type.to_s)
 
@@ -3257,7 +3258,8 @@ module Woods
           AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
             json_serialize(unit.to_h),
-            durable: payload_writes_durable?
+            durable: payload_writes_durable?,
+            replace: replace_existing
           )
         end
 
@@ -3265,7 +3267,8 @@ module Woods
         AtomicFile.write(
           type_dir.join('_index.json'),
           json_serialize(type_index_entries(units)),
-          durable: payload_writes_durable?
+          durable: payload_writes_durable?,
+          replace: replace_existing
         )
       end
     end

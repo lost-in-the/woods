@@ -37,7 +37,7 @@ RSpec.describe 'payload durability' do
     @original_config = Woods.configuration
     Woods.configuration = Woods::Configuration.new
     allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content, **options|
-      writes << { path: path.to_s, durable: options.fetch(:durable, true) }
+      writes << { path: path.to_s, durable: options.fetch(:durable, true), replace: options.fetch(:replace, true) }
       events << [:write, path.to_s]
       original.call(path, content, **options)
     end
@@ -90,6 +90,22 @@ RSpec.describe 'payload durability' do
       extractor.send(:write_dependency_graph)
 
       expect(fsyncs).to eq(0)
+    end
+
+    it 'uses replace: false for staged write_results and keeps replace: true for flat output' do
+      extractor.send(:write_results)
+      staged_result_writes = payload_writes.select { |write| write[:path].include?('/model/') }
+      expect(staged_result_writes.size).to eq(3)
+      expect(staged_result_writes.map { |write| write[:replace] }).to all(be(false))
+
+      flat_extractor = Woods::Extractor.new(output_dir: File.join(tmpdir, 'flat_output'))
+      flat_models = [unit(:model, 'User')]
+      flat_extractor.instance_variable_set(:@results, { model: flat_models })
+      writes.clear
+
+      flat_extractor.send(:write_results)
+      expect(writes.size).to eq(2)
+      expect(writes.map { |write| write[:replace] }).to all(be(true))
     end
   end
 
