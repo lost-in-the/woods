@@ -4179,9 +4179,14 @@ module Woods
     def reconcile_class_based_types(affected_types, except: nil)
       touched = Set.new
       excluded = except&.to_set || Set.new
+      # Construct all class-based extractors before snapshotting any
+      # discoverable_classes: GraphQLExtractor#initialize runs runtime schema
+      # discovery and may autoload model constants after :models would otherwise
+      # have snapshotted its descendants.
+      extractors = CLASS_BASED_DISCOVERY.each_key.with_object({}) { |key, map| map[key] = extractor_for(key) }
 
       CLASS_BASED_DISCOVERY.each do |key, spec|
-        extractor = extractor_for(key)
+        extractor = extractors[key]
         next unless extractor.respond_to?(:discoverable_classes)
 
         discovered = extractor.discoverable_classes.reject { |k| k.name.nil? }
