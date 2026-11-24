@@ -47,30 +47,25 @@ module Woods
     # @param durable [Boolean] force the bytes to disk before returning
     #   (default true). Pass false only for a file that something else makes
     #   durable before any reader can resolve it.
+    # @param replace [Boolean] when true (default), always write to a sibling
+    #   tempfile and atomically rename into place. Pass false only when creating
+    #   brand-new files inside an unpublished private staging directory; uses
+    #   O_CREAT|O_EXCL directly and falls back to temp+rename if +path+ already
+    #   exists, so an existing or hardlinked inode is never mutated in place.
     # @return [void]
     DEFAULT_MODE = 0o600
 
-    def write(path, content, mode: DEFAULT_MODE, durable: true)
+    def write(path, content, mode: DEFAULT_MODE, durable: true, replace: true)
       path = path.to_s
       directory = File.dirname(path)
+      return if !replace && write_exclusive_new?(path, directory, content, mode: mode, durable: durable)
+
       # O_EXCL so a name collision fails instead of truncating a sibling's
       # temp file. Binary mode so the content's bytes (e.g. UTF-8) are
       # written verbatim regardless of the process's default external
       # encoding.
       tmp, file = open_exclusive(directory, mode)
-      begin
-        # fchmod on the open descriptor: the umask applied at creation can
-        # strip bits from any mode, the default 0600 included (a mask of
-        # 0200 would publish 0400), so the destination is born with exactly
-        # the requested permissions.
-        file.chmod(mode)
-        file.binmode
-        file.write(content)
-        file.flush
-        file.fsync if durable
-      ensure
-        file.close
-      end
+      write_stream(file, content, mode: mode, durable: durable)
       File.rename(tmp, path)
       fsync_directory(directory) if durable
     rescue StandardError
@@ -78,6 +73,52 @@ module Woods
       # already taken never got this far (see {.open_exclusive}).
       File.unlink(tmp) if tmp && File.exist?(tmp)
       raise
+    end
+
+    # Fast path for creating a brand-new file inside a private staging directory.
+    # Returns true when written directly, false when +path+ already exists so the
+    # caller falls back to atomic temp+rename without touching the existing inode.
+    def write_exclusive_new?(path, directory, content, mode:, durable:)
+      file = open_exclusive_path(path, directory, mode)
+      return false unless file
+
+      begin
+        write_stream(file, content, mode: mode, durable: durable)
+      rescue StandardError
+        FileUtils.rm_f(path)
+        raise
+      end
+      fsync_directory(directory) if durable
+      true
+    end
+
+    def write_stream(file, content, mode:, durable:)
+      # fchmod on the open descriptor: the umask applied at creation can
+      # strip bits from any mode, the default 0600 included (a mask of
+      # 0200 would publish 0400), so the destination is born with exactly
+      # the requested permissions.
+      file.chmod(mode)
+      file.binmode
+      file.write(content)
+      file.flush
+      file.fsync if durable
+    ensure
+      file.close
+    end
+
+    def open_exclusive_path(path, directory, mode)
+      retried = false
+      begin
+        File.open(path, File::WRONLY | File::CREAT | File::EXCL, mode)
+      rescue Errno::ENOENT
+        raise if retried
+
+        FileUtils.mkdir_p(directory)
+        retried = true
+        retry
+      rescue Errno::EEXIST
+        nil
+      end
     end
 
     # A sibling name no other writer will pick: pid, thread, and a counter.
