@@ -1998,6 +1998,71 @@ RSpec.describe Woods::Extractors::ModelExtractor do
                                                     column: 'account_id' }])
       expect(connection).to have_received(:foreign_keys).once
     end
+
+    it 'batches indexes and foreign keys into one checkout and caches per pool and table across models' do
+      parent = invoice_model
+      child = stub_bare_model('CreditInvoice')
+      allow(parent).to receive_messages(column_names: %w[id], attribute_names: %w[id], attribute_aliases: {})
+      allow(child).to receive_messages(table_name: 'invoices', table_exists?: true, columns: [column],
+                                       column_names: %w[id], attribute_names: %w[id], attribute_aliases: {})
+      connection = double('Connection')
+      allow(connection).to receive(:indexes).with('invoices').and_return([index])
+      allow(connection).to receive(:foreign_keys).with('invoices').and_return([foreign_key])
+      pool = stub_pool_connection(parent, connection)
+      allow(child).to receive(:connection_pool).and_return(pool)
+      allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                           source_file_for: nil)
+
+      parent_unit = extractor.extract_model(parent)
+      child_unit = extractor.extract_model(child)
+
+      expect(pool).to have_received(:with_connection).once
+      expect(connection).to have_received(:indexes).once
+      expect(connection).to have_received(:foreign_keys).once
+      expect(parent).to have_received(:table_exists?).once
+      expect(parent_unit.source_code).to include('#   index_invoices_on_account_id: [account_id]')
+      expect(child_unit.source_code).to include('#   index_invoices_on_account_id: [account_id]')
+      expect(child_unit.metadata[:foreign_keys]).to eq([{ from_table: 'invoices', to_table: 'accounts',
+                                                          column: 'account_id' }])
+    end
+
+    it 'does not cache a failed schema read and preserves the sibling section' do
+      model = invoice_model
+      allow(model).to receive_messages(column_names: %w[id], attribute_names: %w[id], attribute_aliases: {})
+      connection = double('Connection')
+      index_calls = 0
+      allow(connection).to receive(:indexes).with('invoices') do
+        index_calls += 1
+        raise StandardError, 'transient' if index_calls == 1
+
+        [index]
+      end
+      allow(connection).to receive(:foreign_keys).with('invoices').and_return([foreign_key])
+      stub_pool_connection(model, connection)
+      allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                           source_file_for: nil)
+
+      first = extractor.extract_model(model)
+      second = extractor.extract_model(model)
+
+      expect(first.source_code).to include('# Indexes: unknown (could not be read)')
+      expect(first.source_code).to include('#   invoices.account_id → accounts')
+      expect(second.source_code).to include('#   index_invoices_on_account_id: [account_id]')
+    end
+
+    it 'skips parsing in extract_scopes when source contains no scope keyword' do
+      source = "class PlainModel < ApplicationRecord\n  has_many :items\nend\n"
+      expect(Woods::ParseCache).not_to receive(:parse)
+
+      expect(extractor.send(:extract_scopes, nil, source)).to eq([])
+    end
+
+    it 'skips lexical scope collection when scope appears only in a comment' do
+      source = "class PlainModel < ApplicationRecord\n  # scope comment only\nend\n"
+      expect(Woods::Extractors::SourceNesting).not_to receive(:lexical_scopes)
+
+      expect(extractor.send(:extract_scopes, nil, source)).to eq([])
+    end
   end
 
   describe '#extract_metadata database fields' do

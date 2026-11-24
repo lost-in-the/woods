@@ -69,6 +69,10 @@ module Woods
       # @param table_catalog [TableCatalog, nil] defaults to the running application's tables
       def initialize(table_catalog: nil)
         @concern_cache = {}
+        @table_schema_cache = {}.compare_by_identity
+        @non_app_const_cache = {}
+        @defined_in_app_cache = {}
+        @builtin_singleton_modules = nil
         @warnings = []
         @table_catalog = table_catalog
       end
@@ -110,18 +114,36 @@ module Woods
         source = source_path && File.exist?(source_path) ? SourceFile.read(source_path) : nil
 
         unit.namespace = model.module_parent.name unless model.module_parent == Object
-        inlined_source, inlined_concerns = build_model_source_with_concerns(model, source)
-        foreign_keys = table_foreign_keys(model)
-        unit.source_code = build_composite_source(model, inlined_source, foreign_keys: foreign_keys)
-        unit.metadata = extract_metadata(model, source, inlined_concerns: inlined_concerns, foreign_keys: foreign_keys)
-        unit.dependencies = extract_dependencies(model, source)
+        included_modules = extract_included_modules(model)
+        concern_sources = source ? included_modules.filter_map { |mod| concern_source(mod) } : []
+        inlined_source, inlined_concerns = build_model_source_with_concerns(
+          model, source, concern_sources: concern_sources
+        )
+        table_exists = model.table_exists?
+        columns = table_exists ? model.columns : []
+        schema = table_exists ? table_schema(model) : { indexes: [], foreign_keys: [] }
+        unit.source_code = build_composite_source(
+          model, inlined_source,
+          table_exists: table_exists, columns: columns,
+          indexes: schema[:indexes], foreign_keys: schema[:foreign_keys]
+        )
+        unit.metadata = extract_metadata(
+          model, source,
+          inlined_concerns: inlined_concerns,
+          table_exists: table_exists, columns: columns, foreign_keys: schema[:foreign_keys]
+        )
+        unit.dependencies = extract_dependencies(model, source, included_modules: included_modules)
 
         # Enrich callbacks with side-effect analysis. The analyzer parses real
         # Ruby, so it gets the raw analysis composite — the display composite
         # comments concern bodies out, which Prism cannot see.
-        analysis_source, segments = build_analysis_source(model, source, source_path)
-        enrich_callbacks_with_side_effects(unit, source, analysis_source: analysis_source, segments: segments,
-                                                         model: model)
+        if source && unit.metadata[:callbacks]&.any?
+          analysis_source, segments = build_analysis_source(
+            model, source, source_path, concern_sources: concern_sources
+          )
+          enrich_callbacks_with_side_effects(unit, source, analysis_source: analysis_source, segments: segments,
+                                                           model: model)
+        end
         MethodEffects.apply(unit, source, column_names: unit.metadata[:column_names])
 
         # Build semantic chunks for all models (summary, associations, callbacks, validations)
@@ -181,13 +203,18 @@ module Woods
       #   inlined (see {#build_model_source_with_concerns})
       # @param foreign_keys [Array, nil] the table's foreign keys (see {#table_foreign_keys})
       # @return [String]
-      def build_composite_source(model, inlined_source, foreign_keys: table_foreign_keys(model))
-        [build_schema_comment(model, foreign_keys: foreign_keys), inlined_source].compact.join("\n\n")
+      def build_composite_source(model, inlined_source, table_exists: nil, columns: nil,
+                                 indexes: :unfetched, foreign_keys: :unfetched)
+        schema_comment = build_schema_comment(
+          model, table_exists: table_exists, columns: columns, indexes: indexes, foreign_keys: foreign_keys
+        )
+        [schema_comment, inlined_source].compact.join("\n\n")
       end
 
       # Generate schema comment block with columns, indexes, and foreign keys
-      def build_schema_comment(model, foreign_keys: table_foreign_keys(model))
-        return nil unless model.table_exists?
+      def build_schema_comment(model, table_exists: nil, columns: nil, indexes: :unfetched, foreign_keys: :unfetched)
+        exists = table_exists.nil? ? model.table_exists? : table_exists
+        return nil unless exists
 
         parts = []
         parts << '# == Schema Information'
@@ -195,20 +222,21 @@ module Woods
         parts << "# Table: #{model.table_name}"
         parts << '#'
         parts << '# Columns:'
-        parts.concat(format_columns_comment(model))
+        parts.concat(format_columns_comment(model, columns: columns))
         parts << '#'
 
-        indexes = format_indexes_comment(model)
-        if indexes.nil?
+        index_lines = format_indexes_comment(model, indexes: indexes)
+        if index_lines.nil?
           parts << "# Indexes: #{UNKNOWN_SCHEMA_SECTION}"
           parts << '#'
-        elsif indexes.any?
+        elsif index_lines.any?
           parts << '# Indexes:'
-          parts.concat(indexes)
+          parts.concat(index_lines)
           parts << '#'
         end
 
-        foreign_key_lines = format_foreign_keys_comment(foreign_keys)
+        resolved_fks = foreign_keys == :unfetched ? table_foreign_keys(model) : foreign_keys
+        foreign_key_lines = format_foreign_keys_comment(resolved_fks)
         if foreign_key_lines.nil?
           parts << "# Foreign Keys: #{UNKNOWN_SCHEMA_SECTION}"
         elsif foreign_key_lines.any?
@@ -219,8 +247,8 @@ module Woods
         parts.join("\n")
       end
 
-      def format_columns_comment(model)
-        model.columns.map do |col|
+      def format_columns_comment(model, columns: nil)
+        (columns || model.columns).map do |col|
           type_info = col.type.to_s
           type_info += "(#{col.limit})" if col.limit
           constraints = []
@@ -232,8 +260,11 @@ module Woods
       end
 
       # @return [Array<String>, nil] nil when the indexes could not be read
-      def format_indexes_comment(model)
-        read_table_schema(model, :indexes).map do |idx|
+      def format_indexes_comment(model, indexes: :unfetched)
+        raw_indexes = indexes == :unfetched ? read_table_schema(model, :indexes) : indexes
+        return nil if raw_indexes.nil?
+
+        raw_indexes.map do |idx|
           unique = idx.unique ? ' (unique)' : ''
           "#   #{idx.name}: [#{idx.columns.join(', ')}]#{unique}"
         end
@@ -279,6 +310,34 @@ module Woods
         model.connection_pool.with_connection { |connection| connection.public_send(kind, model.table_name) }
       end
 
+      # Read both indexes and foreign keys in one connection-pool checkout and
+      # cache per +[connection_pool, table_name]+ for this extractor instance.
+      # Independent rescues keep one failing section from hiding the other, and
+      # failed reads are not cached.
+      def table_schema(model)
+        pool = model.connection_pool
+        table_name = model.table_name
+        pool_cache = (@table_schema_cache[pool] ||= {})
+        return pool_cache[table_name] if pool_cache.key?(table_name)
+
+        result = pool.with_connection do |connection|
+          {
+            indexes: safe_schema_read(connection, :indexes, table_name),
+            foreign_keys: safe_schema_read(connection, :foreign_keys, table_name)
+          }
+        end
+        pool_cache[table_name] = result unless result[:indexes].nil? || result[:foreign_keys].nil?
+        result
+      rescue StandardError
+        { indexes: nil, foreign_keys: nil }
+      end
+
+      def safe_schema_read(connection, kind, table_name)
+        connection.public_send(kind, table_name)
+      rescue StandardError
+        nil
+      end
+
       # Read model source and inline all included concerns.
       #
       # Concern code is inserted as '# '-prefixed comment lines right after
@@ -296,7 +355,7 @@ module Woods
       #   Returning the pair keeps metadata[:inlined_concerns] truthful —
       #   it is derived from the insertion result, never recomputed
       #   independently of what the composite source carries.
-      def build_model_source_with_concerns(model, source = nil)
+      def build_model_source_with_concerns(model, source = nil, concern_sources: nil)
         if source.nil?
           source_path = source_file_for(model)
           return ['', []] unless source_path && File.exist?(source_path)
@@ -304,7 +363,7 @@ module Woods
           source = SourceFile.read(source_path)
         end
 
-        concern_sources = resolved_concern_sources(model)
+        concern_sources ||= resolved_concern_sources(model)
         return [source, []] if concern_sources.empty?
 
         [insert_concern_block(model, source, build_concern_block(concern_sources)),
@@ -372,19 +431,15 @@ module Woods
       # Get modules included specifically in this model (not inherited)
       def extract_included_modules(model)
         app_root = Rails.root.to_s
+        parent_prefix = "#{model.module_parent}::"
         model.included_modules.select do |mod|
           next false unless mod.name
-
-          # Skip obvious non-app modules (from gems/stdlib)
-          if Object.respond_to?(:const_source_location)
-            loc = Object.const_source_location(mod.name)
-            next false if loc && !app_source?(loc.first, app_root)
-          end
+          next false if non_app_const_location?(mod, app_root)
 
           # Include if it's in app/models/concerns or app/controllers/concerns
           mod.name.include?('Concerns') ||
             # Or if it's namespaced under the model's parent
-            mod.name.start_with?("#{model.module_parent}::") ||
+            mod.name.start_with?(parent_prefix) ||
             # Or if it's defined within the application
             defined_in_app?(mod)
         end
@@ -400,25 +455,32 @@ module Woods
       # @return [Array<Module>] App-defined modules extended by this model
       def extract_extended_modules(model)
         app_root = Rails.root.to_s
-        builtin_modules = Object.singleton_class.included_modules.map(&:name).compact.to_set
+        parent_prefix = "#{model.module_parent}::"
+        builtin_modules = (@builtin_singleton_modules ||=
+                             Object.singleton_class.included_modules.filter_map(&:name).to_set)
 
         model.singleton_class.included_modules.select do |mod|
           next false unless mod.name
           next false if builtin_modules.include?(mod.name)
-
-          # Skip obvious non-app modules (from gems/stdlib)
-          if Object.respond_to?(:const_source_location)
-            loc = Object.const_source_location(mod.name)
-            next false if loc && !app_source?(loc.first, app_root)
-          end
+          next false if non_app_const_location?(mod, app_root)
 
           # Include if it's in app/models/concerns or app/controllers/concerns
           mod.name.include?('Concerns') ||
             # Or if it's namespaced under the model's parent
-            mod.name.start_with?("#{model.module_parent}::") ||
+            mod.name.start_with?(parent_prefix) ||
             # Or if it's defined within the application
             defined_in_app?(mod)
         end
+      end
+
+      def non_app_const_location?(mod, app_root)
+        return false unless Object.respond_to?(:const_source_location)
+
+        cache = (@non_app_const_cache[app_root] ||= {}.compare_by_identity)
+        return cache[mod] if cache.key?(mod)
+
+        loc = Object.const_source_location(mod.name)
+        cache[mod] = !!(loc && !app_source?(loc.first, app_root))
       end
 
       # Check if a module is defined within the Rails application
@@ -427,7 +489,15 @@ module Woods
       # @return [Boolean] true if the module is defined within Rails.root
       def defined_in_app?(mod)
         app_root = Rails.root.to_s
+        cache = (@defined_in_app_cache[app_root] ||= {}.compare_by_identity)
+        return cache[mod] if cache.key?(mod)
 
+        cache[mod] = compute_defined_in_app?(mod, app_root)
+      rescue StandardError
+        false
+      end
+
+      def compute_defined_in_app?(mod, app_root)
         # Fast path: const_source_location is cheaper than iterating methods
         if mod.respond_to?(:const_source_location) || Object.respond_to?(:const_source_location)
           loc = Object.const_source_location(mod.name)
@@ -439,8 +509,6 @@ module Woods
           loc = mod.instance_method(method).source_location&.first
           app_source?(loc, app_root)
         end
-      rescue StandardError
-        false
       end
 
       # Get the source code for a concern, with caching
@@ -482,8 +550,16 @@ module Woods
       # @param foreign_keys [Array, nil] the table's foreign keys, as the
       #   schema header saw them (see {#table_foreign_keys})
       # @return [Hash]
-      def extract_metadata(model, source = nil, inlined_concerns: nil, foreign_keys: table_foreign_keys(model))
+      def extract_metadata(model, source = nil, inlined_concerns: nil,
+                           table_exists: nil, columns: nil, foreign_keys: :unfetched)
         callbacks = extract_callbacks(model)
+        exists = table_exists.nil? ? model.table_exists? : table_exists
+        resolved_columns = if exists
+                             columns || model.columns
+                           else
+                             []
+                           end
+        resolved_fks = foreign_keys == :unfetched ? table_foreign_keys(model) : foreign_keys
         {
           # Core identifiers
           table_name: model.table_name,
@@ -505,7 +581,7 @@ module Woods
 
           # Inheritance
           sti_column: model.inheritance_column,
-          is_sti_base: sti_base?(model),
+          is_sti_base: sti_base?(model, table_exists: exists),
           is_sti_child: sti_child?(model),
           parent_class: model.superclass.name,
 
@@ -516,28 +592,24 @@ module Woods
           validation_count: model._validators.values.flatten.size,
 
           # Schema info
-          table_exists: model.table_exists?,
-          column_count: model.table_exists? ? model.columns.size : 0,
-          column_names: model.table_exists? ? model.column_names : [],
-          columns: if model.table_exists?
-                     model.columns.map do |col|
-                       { 'name' => col.name, 'type' => col.sql_type, 'null' => col.null, 'default' => col.default }
-                     end
-                   else
-                     []
-                   end,
+          table_exists: exists,
+          column_count: resolved_columns.size,
+          column_names: exists ? model.column_names : [],
+          columns: resolved_columns.map do |col|
+            { 'name' => col.name, 'type' => col.sql_type, 'null' => col.null, 'default' => col.default }
+          end,
 
           # Schema loading can define methods (including Rails' optimized
           # constructor). Reflect only after the schema reads above so a cold
           # full extraction and a warmed incremental run see the same API.
           class_methods: model.methods(false).sort,
           instance_methods: filter_instance_methods(model.instance_methods(false)).sort,
-          attribute_writers: extract_attribute_writers(model),
+          attribute_writers: extract_attribute_writers(model, table_exists: exists),
 
           # Foreign keys as the connection reports them. The target table's
           # database is a graph-level concern, resolved by the
           # cross_database_edges report, not stored per model here (#280).
-          foreign_keys: extract_foreign_keys(model, foreign_keys),
+          foreign_keys: extract_foreign_keys(model, resolved_fks),
 
           # ActiveStorage / ActionText
           active_storage_attachments: extract_active_storage_attachments(source),
@@ -766,14 +838,17 @@ module Woods
 
           source = SourceFile.read(source_path)
         end
-
-        lines = source.lines
+        return [] unless source.match?(/\bscope\b/)
 
         begin
           parsed = Woods::ParseCache.parse(source)
-          parsed.success? ? extract_scopes_from_ast(parsed.value, source, lines, model) : extract_scopes_by_regex(lines)
+          if parsed.success?
+            extract_scopes_from_ast(parsed.value, source, model)
+          else
+            extract_scopes_by_regex(source.lines)
+          end
         rescue StandardError
-          extract_scopes_by_regex(lines)
+          extract_scopes_by_regex(source.lines)
         end
       end
 
@@ -783,15 +858,18 @@ module Woods
       #
       # @param root [Prism::Node] Parsed program
       # @param source [String] the source +root+ was parsed from
-      # @param lines [Array<String>] Source lines
       # @param model [Class, nil]
       # @return [Array<Hash>]
-      def extract_scopes_from_ast(root, source, lines, model)
+      def extract_scopes_from_ast(root, source, model)
+        calls = scope_calls(root)
+        return [] if calls.empty?
+
+        lines = source.lines
         owners = SourceNesting.lexical_scopes(source) || []
         # A declaration spelled differently from Ruby's name (`class Shop::Order`
         # inside `module Shop`) cannot be told apart from another class.
         declared = model && owners.any? { |_, _, owner| owner == model.name }
-        scope_calls(root).filter_map do |call|
+        calls.filter_map do |call|
           name = call.arguments&.arguments&.first&.slice&.delete_prefix(':')&.strip
           next if name.nil? || name.empty?
 
@@ -935,7 +1013,7 @@ module Woods
       # is emitted only when the application defines a constant of that name, and carries
       # +via: :polymorphic_interface+ instead of the macro so it stays
       # distinguishable from a resolvable model reference.
-      def extract_dependencies(model, source = nil)
+      def extract_dependencies(model, source = nil, included_modules: nil)
         # Associations point to other models. `through`, `through_db`, and
         # `disable_joins` ride on the edge so the graph can report a
         # has_many :through that crosses databases without disable_joins,
@@ -965,7 +1043,7 @@ module Woods
         deps << { type: :database_table, target: table.identifier, via: :table } if table
 
         # Included concerns add instance-level behavior
-        extract_included_modules(model).each do |mod|
+        (included_modules || extract_included_modules(model)).each do |mod|
           deps << { type: :concern, target: mod.name, via: :include }
         end
 
@@ -1195,10 +1273,11 @@ module Woods
       #   so an operation line can be reported in its own file and a method's
       #   source location placed in the composite; `[nil, nil]` when there is
       #   no model source
-      def build_analysis_source(model, source, source_path = nil)
+      def build_analysis_source(model, source, source_path = nil, concern_sources: nil)
         return [source, nil] unless source
 
-        parts = [[source, source_path]] + resolved_concern_sources(model).map { |_name, code, path| [code, path] }
+        concerns = concern_sources || resolved_concern_sources(model)
+        parts = [[source, source_path]] + concerns.map { |_name, code, path| [code, path] }
         start = 1
         segments = parts.map do |code, path|
           length = code.count("\n") + (code.end_with?("\n") ? 0 : 1)
@@ -1565,12 +1644,13 @@ module Woods
       #
       # @param model [Class] The ActiveRecord model class
       # @return [Array<String>] Sorted writer names, without the trailing +=+
-      def extract_attribute_writers(model)
+      def extract_attribute_writers(model, table_exists: nil)
         framework = defined?(ActiveRecord::Base) ? ActiveRecord::Base.public_instance_methods : []
         names = (model.public_instance_methods - framework).filter_map do |method_name|
           method_name.to_s.delete_suffix('=') if ATTRIBUTE_WRITER_PATTERN.match?(method_name.to_s)
         end
-        if model.table_exists?
+        exists = table_exists.nil? ? model.table_exists? : table_exists
+        if exists
           names.concat(model.attribute_names.map(&:to_s))
           names.concat(model.attribute_aliases.keys.map(&:to_s)) if model.respond_to?(:attribute_aliases)
         end
@@ -1615,9 +1695,11 @@ module Woods
       #
       # @param model [Class]
       # @return [Boolean]
-      def sti_base?(model)
+      def sti_base?(model, table_exists: nil)
         return false unless descends_from_active_record?(model)
-        return false unless model.table_exists?
+
+        exists = table_exists.nil? ? model.table_exists? : table_exists
+        return false unless exists
 
         model.column_names.include?(model.inheritance_column)
       end
