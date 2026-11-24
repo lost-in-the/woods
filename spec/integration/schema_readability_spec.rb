@@ -132,10 +132,14 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
     expect(validation(index).incremental).not_to be_ready
   end
 
+  # Every read is refused: before Rails 7.2 a model reads through its thread's
+  # connection, not with_connection, so the checkout is refused too.
   it 'records a database that refuses the connection as unreachable' do
     connect(fresh_database('refused'))
-    allow(ActiveRecord::Base.connection_pool).to receive(:with_connection)
-      .and_raise(ActiveRecord::ConnectionNotEstablished, 'connection refused')
+    pool = ActiveRecord::Base.connection_pool
+    pool.release_connection
+    allow(pool).to receive(:checkout).and_raise(ActiveRecord::ConnectionNotEstablished, 'connection refused')
+    allow(pool).to receive(:with_connection).and_raise(ActiveRecord::ConnectionNotEstablished, 'connection refused')
 
     expect(schema_states(extract)).to eq(['unreadable', ['unreachable']])
   end

@@ -105,7 +105,7 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] sorted by identifier
       def extract_all
-        catalog = @table_catalog || TableCatalog.from_runtime
+        catalog = @table_catalog || TableCatalog.from_runtime(consumer: self)
         catalog.tables.filter_map { |table| extract_table(table, catalog) }
       end
 
@@ -125,7 +125,8 @@ module Woods
         unit.dependencies = foreign_key_dependencies(table, schema[:foreign_keys], catalog)
         unit
       rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "Failed to extract database table #{table.name}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract database table #{table.name}: #{e.message}",
+                                         pool: table.pool)
         nil
       end
 

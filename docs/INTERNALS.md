@@ -124,6 +124,14 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 - Each thread gets its own extractor instance (no shared mutable state)
 - Results are collected via `Mutex`-protected hash
 - Dependency graph registration happens sequentially after all threads join
+- The worker count is capped by the free connections in the scarcest writable pool, not only the default one
+- With no free connection in some pool, the extractors run on the calling thread
+
+A full run in either mode fails when a schema read fails on a database the same run read from.
+That is a checkout timeout or a failed connection on a pool that answered another query, or a refused statement.
+`Extraction::ServedPools` counts only the run's queries: the calling thread's and its extraction workers'.
+It raises `Woods::ExtractionError`, nothing is published, and the previous generation stays active.
+A database no read in the run reaches (no connection, no database) is published and warned about instead.
 
 ### Incremental extraction
 
