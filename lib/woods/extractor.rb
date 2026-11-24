@@ -811,35 +811,22 @@ module Woods
 
       profile_phase('reconciliation') do
         @hybrid_discovery_keys.each { |key| touched.merge(replace_type_wholesale(key, affected_types)) }
-        touched.merge(reconcile_class_based_types(affected_types))
-        touched.merge(reconcile_model_mixins(affected_types))
-        touched.merge(rerun_whole_app_extractors(change_set, affected_types))
+        first_reconciled = reconcile_class_based_types(affected_types)
+        touched.merge(first_reconciled)
+        mixin_touched = reconcile_model_mixins(affected_types)
+        touched.merge(mixin_touched)
+        whole_app_touched = rerun_whole_app_extractors(change_set, affected_types)
+        touched.merge(whole_app_touched)
         touched.merge(reannotate_packages(change_set, affected_types))
         pruned = prune_vanished_units(change_set, affected_types)
         touched.merge(pruned)
 
         # Reconcile once more, because pruning can un-know a class the first pass
-        # skipped. A class-based file moved between autoload directories with its
-        # constant unchanged is still registered under the old path when
-        # reconciliation runs, so it looks known and is not re-extracted; the
-        # prune that follows then removes it for its vanished path. This pass
-        # re-adds it in the same run (M1) instead of leaving the unit missing
-        # until some later run happens to notice. Idempotent when nothing was
-        # pruned: the discovery set is compared against the graph, so an
-        # already-registered class is skipped.
-        #
-        # But not everything pruning removed may come back. `except:` keeps the
-        # *deletion* shape pruned: without a reload, a constant outlives the file
-        # that defined it — so deleting `app/models/user.rb` prunes `User`, and
-        # this pass finds `User` still in `ActiveRecord::Base.descendants`.
-        # Re-registering it would pin the unit to a path that no longer exists,
-        # and nothing could ever remove it: the sweep excludes class-based units
-        # and no future change set names that path again. A resident daemon
-        # processing a batch before its reload hits this every time. What
-        # separates the two shapes is the filesystem — only pruned identifiers
-        # that a still-existing file in the change set actually declares are
-        # re-addable. See {#readdable_pruned_classes}.
-        unless pruned.empty?
+        # skipped (M1) and extracting newly discovered/reconciled classes can
+        # autoload additional descendants (e.g. association targets via
+        # `reflection.klass`). When nothing was added, extracted, or pruned
+        # between the first pass and here, the discovery inventory is unchanged.
+        unless pruned.empty? && first_reconciled.empty? && mixin_touched.empty? && whole_app_touched.empty?
           touched.merge(reconcile_class_based_types(
                           affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
                         ))

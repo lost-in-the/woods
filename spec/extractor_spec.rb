@@ -1407,7 +1407,7 @@ RSpec.describe Woods::Extractor do
       expect(published_graph_nodes - published_index_identifiers).to be_empty
     end
 
-    it 'skips the second reconcile_class_based_types pass when nothing was pruned' do
+    it 'skips the second reconcile_class_based_types pass when reconciliation produced no changes or prunes' do
       seed_published_generation
       allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new)
       allow(extractor).to receive(:reconcile_class_based_types).and_return(Set.new)
@@ -1425,6 +1425,32 @@ RSpec.describe Woods::Extractor do
 
       extractor.extract_changed([])
       expect(extractor).to have_received(:reconcile_class_based_types).once
+    end
+
+    it 'runs the second reconcile_class_based_types pass when the first pass discovers a new class' do
+      seed_published_generation
+      allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_model_mixins).and_return(Set.new)
+      allow(extractor).to receive(:rerun_whole_app_extractors).and_return(Set.new)
+      allow(extractor).to receive(:reannotate_packages).and_return(Set.new)
+      allow(extractor).to receive(:prune_vanished_units).and_return(Set.new)
+      allow(extractor).to receive(:reconcile_owner_fallbacks).and_return(Set.new)
+      allow(extractor).to receive(:prune_family_owned_poros).and_return(Set.new)
+      allow(extractor).to receive(:extract_unitless_poro_files).and_return(Set.new)
+      allow(extractor).to receive(:enrich_source_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:enrich_doc_references_incremental).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_unit_json).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_run)
+
+      calls = 0
+      allow(extractor).to receive(:reconcile_class_based_types) do
+        calls += 1
+        calls == 1 ? Set.new(['NewlyDiscoveredModel']) : Set.new(['LateLoadedTargetModel'])
+      end
+
+      touched = extractor.extract_changed([])
+      expect(extractor).to have_received(:reconcile_class_based_types).twice
+      expect(touched).to include('NewlyDiscoveredModel', 'LateLoadedTargetModel')
     end
 
     # DependencyGraph#register inserts the node before it iterates the unit's
