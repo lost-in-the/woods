@@ -12,7 +12,10 @@
 
 Woods boots your Rails application, extracts its resolved structure, and publishes an index that coding agents can query through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). It brings together database schema, associations, callbacks, concerns, routes, and source code so an agent can inspect how Rails assembles your application.
 
-Supports **Ruby 3.0+ and Rails 6.0–8.x**, using a Ruby version supported by your Rails release. The application must boot and connect to its database. Structural queries need no embedding provider or vector database.
+Supports **Ruby 3.0+ and Rails 6.0–8.x**, using a Ruby version supported by your Rails release.
+Git metadata needs Git 2.31 or newer.
+The application must boot and connect to its database.
+Structural queries need no embedding provider or vector database.
 
 [Get started](#five-minute-setup) · [Documentation](docs/README.md) · [Agent setup](docs/AGENT_SETUP.md) · [Upgrade from 1.x](docs/UPGRADING_TO_2.md)
 

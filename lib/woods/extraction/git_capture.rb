@@ -240,12 +240,23 @@ module Woods
           return { available: false, reason: requested? ? 'head_unresolvable' : 'no_repository' }
         end
 
+        return { available: false, reason: GitVersion::REASON } if git_too_old?
+
         complete_history? ? { available: true, reason: nil } : { available: false, reason: @history_reason }
       rescue Errno::ENOENT
         warn_missing_executable
         { available: false, reason: 'git_executable_missing' }
       rescue StandardError
         { available: false, reason: 'git_error' }
+      end
+
+      # Below {GitVersion::MINIMUM} every history walk fails, so none is
+      # started; the run says so once ({GitVersion.announce}).
+      #
+      # @return [Boolean]
+      def git_too_old?
+        version = GitProvenance.new(root: @root).git_version
+        GitVersion.too_old?(version).tap { |old| GitVersion.announce(version, logger: @logger) if old }
       end
 
       # @return [Hash] no facts, after recording that history was unreadable

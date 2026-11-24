@@ -216,4 +216,28 @@ RSpec.describe Woods::GitProvenance do
       end
     end
   end
+
+  describe '#git_version' do
+    it 'reads the version from the one git --version call that also answers availability' do
+      Dir.mktmpdir do |dir|
+        init_repo(dir)
+        allow(Open3).to receive(:capture3).and_call_original
+        provenance = described_class.new(root: dir, env: {})
+
+        expect(provenance.git_version).to be_a(Gem::Version)
+        expect(provenance.source_filter_available?).to be(true)
+        expect(provenance.git_version).to be >= Gem::Version.new('2.0')
+        expect(Open3).to have_received(:capture3).with('git', '--version').once
+      end
+    end
+
+    it 'is nil when git is missing, and nil when its answer is not a version' do
+      allow(Open3).to receive(:capture3).with('git', '--version').and_raise(Errno::ENOENT)
+      expect(described_class.new(root: Dir.pwd, env: {}).git_version).to be_nil
+
+      answered = instance_double(Process::Status, success?: true)
+      allow(Open3).to receive(:capture3).with('git', '--version').and_return(["Apple Git\n", '', answered])
+      expect(described_class.new(root: Dir.pwd, env: {}).git_version).to be_nil
+    end
+  end
 end

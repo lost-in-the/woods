@@ -85,6 +85,11 @@ docker compose exec app bundle exec rake woods:watch
 docker compose exec app bundle exec rake woods:extract_framework
 ```
 
+Git metadata needs Git 2.31 or newer in the container.
+Debian 11 (bullseye) images, such as `ruby:3.0`, ship Git 2.30.
+Install git from bullseye-backports (now on `archive.debian.org`), or use a bookworm-based image.
+On Git 2.30, extraction says so once and continues without git metadata.
+
 Run the watcher under one owner, not as a one-off terminal command.
 If the container runs `bin/rails server`,
 the Puma mode of the [watcher generator](WATCH_DAEMON.md#managed-development-startup) works inside it.
