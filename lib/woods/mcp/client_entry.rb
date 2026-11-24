@@ -11,7 +11,7 @@ module Woods
     # serves every checkout and worktree on every machine. The install
     # generator prints it and `woods-agent-config` writes it, from here only.
     #
-    # The launch runs through `sh` for three reasons:
+    # The launch runs through `sh` for four reasons:
     #
     # - Claude Code sets `CLAUDE_PROJECT_DIR` (the project root) only in the
     #   spawned server's environment and leaves the server's working directory
@@ -21,6 +21,11 @@ module Woods
     #   its Gemfile is: Bundler looks up from the working directory, never
     #   down. The entry changes into it from the checkout root
     #   (`git rev-parse --show-toplevel`), wherever in the checkout it starts.
+    # - A container that cannot see the client root (no mount map) cannot
+    #   tell a session in a linked worktree from one in the checkout it
+    #   mounts. The container entry hands over what the client's checkout is,
+    #   with no path in it (`--client-identity`), and the server refuses a
+    #   checkout that differs from the one it serves.
     # - Claude Code rewrites `${NAME}` and `${NAME:-default}` in `args` from
     #   its own environment before the server runs, so the shell reads every
     #   variable it needs as `$NAME`. The entry never contains `${`.
@@ -31,6 +36,13 @@ module Woods
       LAUNCH = 'bundle exec woods-mcp-start --checkout --await-index'
 
       PROJECT_DIRECTORY = 'if [ -n "$CLAUDE_PROJECT_DIR" ]; then cd "$CLAUDE_PROJECT_DIR" || exit 1; fi; '
+
+      # What the client's checkout is, with no path in it, for a container
+      # that cannot see the client root: `main|linked:HEAD:branch`. A linked
+      # worktree's `.git` is a file; the main checkout's is a directory.
+      CLIENT_IDENTITY = 'id="$(test -f "$(git rev-parse --show-toplevel 2>/dev/null)/.git" ' \
+                        '&& echo linked || echo main):$(git rev-parse --verify -q HEAD 2>/dev/null)' \
+                        ':$(git branch --show-current 2>/dev/null)"; '
 
       # Where an application sits in its checkout.
       Location = Struct.new(:application, :output, keyword_init: true)
@@ -65,8 +77,8 @@ module Woods
         map = ServedIdentity::CLIENT_ROOT_MAP_ENV
         settings = "-e #{map}=\"$#{map}\"#{" -e WOODS_OUTPUT=#{Shellwords.escape(output)}" if output}"
         { 'type' => 'stdio', 'command' => 'sh',
-          'args' => ['-c', "#{start}exec docker compose exec -T #{settings} #{service} " \
-                           "#{LAUNCH} --client-root \"$PWD\""] }
+          'args' => ['-c', "#{start}#{CLIENT_IDENTITY}exec docker compose exec -T #{settings} #{service} " \
+                           "#{LAUNCH} --client-root \"$PWD\" --client-identity \"$id\""] }
       end
 
       # Where `--checkout` must look for the index of an application at

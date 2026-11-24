@@ -134,8 +134,10 @@ and every checkout and worktree uses it unchanged:
 }
 ```
 
-The `sh` line changes into `CLAUDE_PROJECT_DIR`, which Claude Code sets in the server's environment to the
-project root. `--checkout` then serves that checkout's `tmp/woods`, and `--await-index` starts the server before
+The `sh` line changes into `CLAUDE_PROJECT_DIR`, which Claude Code sets in the server's environment
+(checked with Claude Code 2.1.325: the checkout root, a linked worktree's own root, or the subdirectory a session was
+opened in; `$NAME` reaches `sh` untouched, while braced `${NAME}` is expanded by the client).
+`--checkout` then serves that checkout's `tmp/woods`, and `--await-index` starts the server before
 the first index exists. See [entry forms](#entry-forms).
 
 Before Woods `2.2.0`, for another client, or for a per-machine setup, name the application root explicitly.
@@ -226,7 +228,9 @@ From Woods `2.2.0`, `--entry-form relative|absolute` chooses what the MCP entry 
   never down. A `CLAUDE_PROJECT_DIR` at the checkout root or at the application both work.
 - The relative entry needs `sh` on the machine that runs the client. Without one, use `--entry-form absolute`.
 - For Compose, the service's `working_dir` must be the application root inside the container. The plan's `notes`
-  say so, with the pinned Compose project name a linked worktree needs.
+  say so, with the pinned Compose project name a linked worktree needs. Without a mount map, the entry hands over
+  what the session's checkout is (`--client-identity`), so a linked worktree is refused instead of being served
+  the mounted checkout's index; see [the Docker process and path rule](MCP_SERVERS.md#docker-process-and-path-rule).
   The preflight runs the same `docker compose exec` as the entry, with no `-w`.
   Setup refuses a service whose working directory does not resolve the `--container-root` application, and names
   the service's working directory and the container root.

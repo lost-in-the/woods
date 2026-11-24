@@ -175,7 +175,80 @@ RSpec.describe 'The generated MCP entry' do
 
     expect(File.read(log).lines(chomp: true))
       .to eq(['compose', 'exec', '-T', '-e', 'WOODS_MCP_CLIENT_ROOT_MAP=', 'web', 'bundle', 'exec',
-              'woods-mcp-start', '--checkout', '--await-index', '--client-root', subdirectory])
+              'woods-mcp-start', '--checkout', '--await-index', '--client-root', subdirectory,
+              '--client-identity', "main:#{git(@app, 'rev-parse', 'HEAD').strip}:main"])
+  end
+
+  describe 'the container entry, when the container mounts the main checkout' do
+    # A stand-in for `docker compose exec` into a service that mounts the main
+    # checkout: it runs the command after the service name in that checkout,
+    # with the `-e` settings, and a client root the container cannot see
+    # (the host path does not exist there).
+    def stand_in_docker(mounted)
+      stub_dir = File.join(@base, 'bin')
+      FileUtils.mkdir_p(stub_dir)
+      File.write(File.join(stub_dir, 'docker'), <<~SH)
+        #!/bin/sh
+        while [ "$1" != "bundle" ]; do
+          if [ "$1" = "-e" ]; then shift; export "$1"; fi
+          shift
+        done
+        cd #{Shellwords.escape(mounted)} || exit 1
+        command=""
+        for arg in "$@"; do
+          if [ "$previous" = "--client-root" ]; then arg="/host-only$arg"; fi
+          set -- "$@" "$arg"
+          previous="$arg"
+          shift
+        done
+        exec "$@"
+      SH
+      File.chmod(0o755, File.join(stub_dir, 'docker'))
+      { 'PATH' => "#{stub_dir}:#{ENV.fetch('PATH')}" }
+    end
+
+    def refusal(entry, project, env)
+      _out, errors, status = Open3.capture3(client_env(env.merge('CLAUDE_PROJECT_DIR' => project)),
+                                            entry['command'], *entry['args'], stdin_data: '', chdir: @base,
+                                                                              unsetenv_others: true)
+      [status.exitstatus, errors]
+    end
+
+    before do
+      @entry = application('--mcp-service', 'web')
+      publish(@app)
+      @worktree = File.join(@base, 'shop-topic')
+      git(@app, 'worktree', 'add', '-q', '-b', 'topic', @worktree)
+    end
+
+    it 'serves a session in the main checkout with no map, with uncommitted changes and a detached HEAD' do
+      File.write(File.join(@app, 'Gemfile'), "#{File.read(File.join(@app, 'Gemfile'))}# edited\n")
+      [-> {}, -> { git(@app, 'checkout', '-q', '--detach') }].each do |prepare|
+        prepare.call
+        start(@entry, @base, stand_in_docker(@app).merge('CLAUDE_PROJECT_DIR' => @app))
+        begin
+          expect_found(lookup)
+        ensure
+          stop
+        end
+      end
+    end
+
+    it 'refuses a session in a linked worktree with no map, naming the map and the override' do
+      code, errors = refusal(@entry, @worktree, stand_in_docker(@app))
+
+      expect(code).to eq(1), errors
+      expect(errors).to include('linked checkout on topic', 'WOODS_MCP_CLIENT_ROOT_MAP', '--allow-mismatch')
+    end
+
+    it 'refuses a session in a linked worktree with a map, as another checkout' do
+      env = stand_in_docker(@app).merge('WOODS_MCP_CLIENT_ROOT_MAP' => "/host-only#{@base}=#{@base}")
+
+      code, errors = refusal(@entry, @worktree, env)
+
+      expect(code).to eq(1), errors
+      expect(errors).to include("written for the checkout at #{@app}", "launched in #{@worktree}")
+    end
   end
 
   it 'starts in CLAUDE_PROJECT_DIR whatever directory the client starts it in' do

@@ -38,6 +38,16 @@ module Woods
       # that contains it; under none, its checkout is not mounted here.
       CLIENT_ROOT_MAP_ENV = 'WOODS_MCP_CLIENT_ROOT_MAP'
 
+      # What the client's checkout is, without its path, equivalent to
+      # `--client-identity`: `main|linked:HEAD-sha:branch` (sha and branch may
+      # be empty). A container launch with no map cannot read the client root,
+      # so it compares this with the checkout it serves instead.
+      CLIENT_IDENTITY_ENV = 'WOODS_MCP_CLIENT_IDENTITY'
+
+      # A well-formed {CLIENT_IDENTITY_ENV} value. Git refuses `:` in branch
+      # names, so the branch is everything after the second one.
+      CLIENT_IDENTITY = /\A(main|linked):([0-9a-f]{0,64}):([^:\n]*)\z/
+
       # Separates entries of {CLIENT_ROOT_MAP_ENV}.
       MAP_SEPARATOR = ':'
 
@@ -77,9 +87,59 @@ module Woods
           return { cwd: pwd } if declared.empty?
 
           map = parse_client_root_map(env[CLIENT_ROOT_MAP_ENV])
-          { cwd: declared, declared_client_root: declared, client_root_map: map }
+          { cwd: declared, declared_client_root: declared, client_root_map: map,
+            client_identity: parse_client_identity(env[CLIENT_IDENTITY_ENV]) }
         rescue InvalidClientRootMap => e
           { cwd: nil, declared_client_root: declared, client_root_map_error: e.message }
+        end
+
+        # A value with neither HEAD nor branch identifies nothing: it is what
+        # the wrapper sends from outside any git checkout.
+        #
+        # @param value [String, nil] a {CLIENT_IDENTITY_ENV} value
+        # @return [Hash, nil] `worktree:`, `head:` and `branch:` (nil when
+        #   empty), or nil for a missing or malformed value, or one with
+        #   neither HEAD nor branch
+        def parse_client_identity(value)
+          match = CLIENT_IDENTITY.match(value.to_s.strip)
+          return if match.nil? || (match[2].empty? && match[3].empty?)
+
+          { worktree: match[1], head: (match[2] unless match[2].empty?), branch: (match[3] unless match[3].empty?) }
+        end
+
+        # What +checkout+ is, read from its git files without running git.
+        #
+        # @param checkout [String, nil]
+        # @return [Hash, nil] `worktree:` (`main` or `linked`), `head:` and
+        #   `branch:` (nil when unreadable or detached)
+        def checkout_identity(checkout)
+          return unless checkout
+
+          { worktree: File.directory?(File.join(checkout, '.git')) ? 'main' : 'linked',
+            head: checkout_head(checkout), branch: checkout_branch(checkout) }
+        end
+
+        # @param checkout [String]
+        # @return [String, nil] the HEAD commit: a detached sha, or the ref it
+        #   names, loose or packed, in the checkout's own or common git dir
+        def checkout_head(checkout)
+          dir = git_dir(checkout)
+          head = text(File.binread(File.join(dir, 'HEAD'), 4096))
+          return head if head.match?(/\A[0-9a-f]{40,64}\z/)
+          return unless head.start_with?('ref: ')
+
+          ref = head.delete_prefix('ref: ')
+          [dir, common_dir(dir)].uniq.each do |base|
+            loose = File.join(base, ref)
+            return text(File.binread(loose, 128)) if File.file?(loose)
+
+            packed = File.join(base, 'packed-refs')
+            sha = packed_ref(packed, ref) if File.file?(packed)
+            return sha if sha
+          end
+          nil
+        rescue SystemCallError, IOError
+          nil
         end
 
         # @param value [String, nil] {CLIENT_ROOT_MAP_ENV} entries
@@ -229,6 +289,24 @@ module Woods
           bytes.to_s.dup.force_encoding(Encoding::UTF_8).scrub('').strip
         end
 
+        # The sha packed-refs records for +ref+, streamed as bytes like the
+        # other git files here.
+        def packed_ref(packed, ref)
+          wanted = ref.b
+          File.open(packed, 'rb') do |file|
+            file.each_line do |entry|
+              sha, name = entry.split(' ', 2)
+              return text(sha) if name&.strip == wanted
+            end
+          end
+          nil
+        end
+
+        def common_dir(dir)
+          pointer = File.join(dir, 'commondir')
+          File.file?(pointer) ? File.expand_path(text(File.binread(pointer, 4096)), dir) : dir
+        end
+
         def git_dir(checkout)
           dot_git = File.join(checkout, '.git')
           return dot_git if File.directory?(dot_git)
@@ -268,14 +346,17 @@ module Woods
       #   between the client's file system and this one; empty when the client
       #   root is read here as given
       # @param client_root_map_error [String, nil] why the map was refused
+      # @param client_identity [Hash, nil] what the client's checkout is, as a
+      #   launch that cannot read it declared ({.parse_client_identity})
       def initialize(index_dir:, marker:, manifest:, cwd:, build:, declared_client_root: nil, client_root_map: [],
-                     client_root_map_error: nil)
+                     client_root_map_error: nil, client_identity: nil)
         @index_dir = index_dir.to_s
         @marker = marker || Woods::Generation::UNPUBLISHED
         @manifest = manifest.is_a?(Hash) ? manifest : {}
         @build = build
         @declared_client_root = declared_client_root
         @client_root_map_error = client_root_map_error
+        @client_identity = client_identity
         mapped = !declared_client_root.nil? && !client_root_map.empty?
         @mapped_client_root, @client_root_map_entry =
           (self.class.map_client_root(declared_client_root, client_root_map) if mapped)
@@ -351,11 +432,12 @@ module Woods
         @client_root = self.class.checkout_root(@cwd)
       end
 
-      # @return [String, nil]
+      # @return [String, nil] the client checkout's branch, read from it, or
+      #   as declared when it cannot be read here
       def client_branch
         return @client_branch if defined?(@client_branch)
 
-        @client_branch = self.class.checkout_branch(client_root)
+        @client_branch = client_root ? self.class.checkout_branch(client_root) : @client_identity&.dig(:branch)
       end
 
       # Whether the index's recorded checkout is the launcher's checkout.
@@ -368,16 +450,30 @@ module Woods
       def client_matches
         case match_reason
         when 'same_checkout' then true
-        when 'different_checkout', 'client_root_unmapped', 'client_root_mapped_missing' then false
+        when 'different_checkout', 'client_root_unmapped', 'client_root_mapped_missing', 'client_identity_differs'
+          false
         end
       end
 
       # @return [String] same_checkout, different_checkout, client_root_unmapped,
-      #   client_root_mapped_missing, root_not_recorded,
+      #   client_root_mapped_missing, client_identity_differs, root_not_recorded,
       #   recorded_root_unreachable, client_outside_checkout or
       #   client_root_unresolved
       def match_reason
         @match_reason ||= compute_match_reason
+      end
+
+      # Whether the declared client identity agrees with the served checkout's,
+      # for a client root that does not resolve here: the same worktree kind,
+      # and every HEAD and branch both sides know equal, at least one of them.
+      #
+      # @return [Boolean, nil] false for `client_identity_differs`; nil when
+      #   no identity was declared, nothing was compared, or the root resolves
+      def client_identity_agrees
+        case match_reason
+        when 'client_identity_differs' then false
+        when 'client_root_unresolved' then identity_compared? || nil
+        end
       end
 
       # @return [Boolean, nil] nil when either side has no branch (detached HEAD)
@@ -398,6 +494,7 @@ module Woods
           client_matches: client_matches, client_match_reason: match_reason,
           client_root: client_root, client_root_declared: @declared_client_root,
           client_root_map_entry: @client_root_map_entry&.join('='), client_root_mapped_to: @mapped_client_root,
+          client_identity: @client_identity, client_identity_agrees: client_identity_agrees,
           client_branch: client_branch, branch_matches: branch_matches,
           mismatch_allowed: client_matches == false ? self.class.allow_mismatch? : nil,
           warnings: warnings, build: compatibility.to_h
@@ -430,6 +527,12 @@ module Woods
 
       # @return [String] why `woods-mcp-start` refuses
       def refusal_message
+        if match_reason == 'client_identity_differs'
+          return "The client root #{@declared_client_root} is not visible here, and the client's checkout is " \
+                 "#{describe_identity(@client_identity)}, not the checkout this server serves, #{recorded_checkout} " \
+                 "(#{describe_identity(served_identity)}). Map the mount that holds it (#{CLIENT_ROOT_MAP_ENV}), " \
+                 "or pass --allow-mismatch (#{ALLOW_ENV}=1) to serve this index anyway."
+        end
         if @client_root_mapped_missing
           return "The client root #{@declared_client_root} maps to #{@mapped_client_root} through " \
                  "#{@client_root_map_entry.join('=')}, but that path does not exist here: the mount does not hold " \
@@ -461,6 +564,10 @@ module Woods
       end
 
       def root_warning
+        if match_reason == 'client_identity_differs'
+          return "The client's checkout is #{describe_identity(@client_identity)}, not #{recorded_checkout}; " \
+                 "answers are for #{recorded_checkout}, not the session's checkout."
+        end
         if @client_root_unmapped || @client_root_mapped_missing
           why = if @client_root_unmapped
                   'is under no --client-root-map prefix'
@@ -510,6 +617,12 @@ module Woods
         if @mapped_client_root
           return "the client's checkout is unknown: the client root #{@declared_client_root}, mapped to " \
                  "#{@mapped_client_root} through #{@client_root_map_entry.join('=')}, is not inside a git checkout here"
+        end
+
+        if client_identity_agrees
+          return "the client root #{@declared_client_root} is not visible here, but the client's checkout agrees " \
+                 "with the one served (#{describe_identity(@client_identity)}), by kind, branch and HEAD only " \
+                 '(pass --client-root-map with the mount that makes it visible)'
         end
 
         "the client's checkout is unknown: the client root #{@declared_client_root} does not resolve to a git " \
@@ -565,11 +678,49 @@ module Woods
         unless recorded_checkout
           return recorded_root ? 'recorded_root_unreachable' : 'root_not_recorded'
         end
-        return @declared_client_root ? 'client_root_unresolved' : 'client_outside_checkout' unless client_root
+
+        unless client_root
+          return 'client_outside_checkout' unless @declared_client_root
+
+          return identity_differs? ? 'client_identity_differs' : 'client_root_unresolved'
+        end
 
         # Compare checkouts, not paths: a worktree nested inside another
         # checkout is still its own checkout.
         recorded_checkout == client_root ? 'same_checkout' : 'different_checkout'
+      end
+
+      # The declared client identity against the served checkout's: a known
+      # field that differs on both sides. Agreement is reported
+      # ({#client_identity_agrees}), never a match: two checkouts can agree.
+      def identity_differs?
+        served = served_identity
+        return false unless @client_identity && served
+        return true unless @client_identity[:worktree] == served[:worktree]
+
+        %i[head branch].any? do |field|
+          @client_identity[field] && served[field] && @client_identity[field] != served[field]
+        end
+      end
+
+      # At least one HEAD or branch known on both sides, with the same kind;
+      # only consulted where {#identity_differs?} found no difference.
+      def identity_compared?
+        served = served_identity
+        return false unless @client_identity && served && @client_identity[:worktree] == served[:worktree]
+
+        %i[head branch].any? { |field| @client_identity[field] && served[field] }
+      end
+
+      def served_identity
+        return @served_identity if defined?(@served_identity)
+
+        @served_identity = self.class.checkout_identity(recorded_checkout)
+      end
+
+      def describe_identity(identity)
+        "a #{identity[:worktree]} checkout#{" on #{identity[:branch]}" if identity[:branch]}" \
+          "#{" at #{BuildIdentity.short(identity[:head])}" if identity[:head]}"
       end
 
       def string(value)
